@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-start-feishu.schema.json",
+  "title": "FeishuStartReviewV3",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "businessId": { "type": "string", "minLength": 1 },
+    "appType": { "enum": ["CLM", "CR", "THIRD_PARTY"] },
+    "fileId": { "type": "integer", "minimum": 1 },
+    "fileHash": { "type": "string", "minLength": 1 },
+    "config": { "type": "object" },
+    "aiItemId": { "type": "string" },
+    "remark": { "type": "string" },
+    "biz1": { "type": "string" },
+    "biz2": { "type": "string" },
+    "biz3": { "type": "string" },
+    "biz4": { "type": "string" },
+    "biz5": { "type": "string" },
+    "allowInvalidSelectedChecklists": { "type": "boolean" },
+    "triggerScene": { "enum": ["manual", "auto"] },
+    "usageReportContext": { "type": "object" },
+    "hasQuota": { "const": true },
+    "baseSignature": { "type": "string", "minLength": 1 },
+    "packID": { "type": "string", "minLength": 1 }
+  },
+  "required": ["businessId", "appType", "fileId", "fileHash", "config", "hasQuota", "baseSignature", "packID"]
+}

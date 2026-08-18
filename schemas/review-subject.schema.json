@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-subject.schema.json",
+  "title": "smartAuditContractSubjects",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["businessId", "appType", "fileId", "fileHash"],
+  "properties": {
+    "businessId": {"type": "string", "minLength": 1},
+    "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"]},
+    "fileId": {"type": "integer", "minimum": 1},
+    "fileHash": {"type": "string", "minLength": 1}
+  }
+}
+

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-task-query.schema.json",
+  "title": "smartAuditTaskQuery",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId", "businessId"],
+  "properties": {
+    "taskId": {"type": "integer", "minimum": 1},
+    "businessId": {"type": "string", "minLength": 1},
+    "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"]}
+  }
+}

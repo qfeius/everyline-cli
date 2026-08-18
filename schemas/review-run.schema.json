@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-run.schema.json",
+  "title": "reviewRun",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "config"],
+  "properties": {
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path", "name"],
+          "properties": {
+            "type": {"const": "file"},
+            "path": {"type": "string", "minLength": 1},
+            "name": {"type": "string", "pattern": "(?i)\\.(doc|docx|pdf)$"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "fileUrl", "name"],
+          "properties": {
+            "type": {"const": "url"},
+            "fileUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
+            "name": {"type": "string", "pattern": "(?i)\\.(doc|docx|pdf)$"}
+          }
+        }
+      ]
+    },
+    "businessId": {"type": "string"},
+    "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"], "default": "THIRD_PARTY"},
+    "config": {"type": "object"},
+    "extractSubjects": {"type": "boolean", "default": false},
+    "wait": {"type": "boolean"}
+  }
+}

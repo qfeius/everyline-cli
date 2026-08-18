@@ -1,0 +1,29 @@
+version: 2
+
+builds:
+  - id: everyline-cli
+    main: ./cmd/everyline-cli
+    binary: everyline-cli
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - >-
+        -s -w
+        -X git.qtech.cn/ai/everyline-cli/internal/build.Version={{.Version}}
+        -X git.qtech.cn/ai/everyline-cli/internal/build.Commit={{.Commit}}
+        -X git.qtech.cn/ai/everyline-cli/internal/build.Date={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+

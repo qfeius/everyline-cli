@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/rule-batch-create.schema.json",
+  "title": "ReviewRuleBatchCreate",
+  "type": "array",
+  "minItems": 1,
+  "items": { "$ref": "rule.schema.json" }
+}
