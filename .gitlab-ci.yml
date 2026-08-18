@@ -3,6 +3,20 @@ stages: [test, build, package]
 default:
   image: golang:1.24
 
+variables:
+  # 当前 Runner 访问 proxy.golang.org 会超时；项目/组级 GOPROXY 变量可覆盖此默认值。
+  GOPROXY: "https://goproxy.cn,direct"
+  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go-mod"
+  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
+
+cache:
+  key:
+    files:
+      - go.sum
+  paths:
+    - .cache/go-mod/
+    - .cache/go-build/
+
 test:
   stage: test
   script:
