@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"git.qtech.cn/ai/everyline-cli/internal/config"
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 )
 
 var (
@@ -87,6 +88,9 @@ func (provider *Provider) Token(ctx context.Context, profile config.Profile) (To
 func (provider *Provider) Login(ctx context.Context, profile config.Profile, appSecret string) (Token, error) {
 	if strings.TrimSpace(appSecret) == "" {
 		return Token{}, ErrCredentialsMissing
+	}
+	if err := contracts.ValidateRequest(OperationTenantAccessTokenInternal, http.MethodPost, "profile.token_url"); err != nil {
+		return Token{}, err
 	}
 	payload, err := json.Marshal(map[string]string{"appId": profile.AppID, "appSecret": appSecret})
 	if err != nil {

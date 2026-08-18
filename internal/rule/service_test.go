@@ -3,10 +3,12 @@ package rule
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
 
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 )
 
@@ -17,9 +19,12 @@ type recordingClient struct {
 
 // Do 保存请求并返回固定的 JSON data。
 // 入参：context.Context 仅满足接口；request openplatform.Request 为待记录契约。
-// 返回值：openplatform.Response 为固定对象；error 始终为 nil。
+// 返回值：openplatform.Response 为固定对象；error 在请求偏离契约目录时非 nil。
 func (client *recordingClient) Do(_ context.Context, request openplatform.Request) (openplatform.Response, error) {
 	client.request = request
+	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path); err != nil {
+		return openplatform.Response{}, err
+	}
 	return openplatform.Response{Data: json.RawMessage(`{"ok":true}`)}, nil
 }
 
@@ -56,7 +61,8 @@ func TestGroupOperationMappings(t *testing.T) {
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestRuleOperationMappings(t *testing.T) {
-	payload := Rule{Name: "付款期限", RiskLevel: 2, Content: "付款期限不得超过 60 天"}
+	riskLevel := int32(2)
+	payload := Rule{Name: "付款期限", RiskLevel: &riskLevel, Content: "付款期限不得超过 60 天"}
 	updatePayload := payload
 	updatePayload.ID = "rule-1"
 	collection := pathGroups + "/group-1/rules"
@@ -71,20 +77,12 @@ func TestRuleOperationMappings(t *testing.T) {
 			_, err := service.CreateRule(context.Background(), "group-1", payload)
 			return err
 		}},
-		{"batch-create", OperationBatchCreateRule, http.MethodPost, collection + "/batch", func(service *Service) error {
-			_, err := service.BatchCreateRules(context.Background(), "group-1", []Rule{payload})
-			return err
-		}},
 		{"list", OperationListRules, http.MethodGet, collection, func(service *Service) error {
 			_, err := service.ListRules(context.Background(), "group-1", Query{PageSize: 20})
 			return err
 		}},
 		{"update", OperationUpdateRule, http.MethodPut, collection + "/rule-1", func(service *Service) error {
 			_, err := service.UpdateRule(context.Background(), "group-1", "rule-1", payload)
-			return err
-		}},
-		{"batch-update", OperationBatchUpdateRule, http.MethodPut, collection + "/batch", func(service *Service) error {
-			_, err := service.BatchUpdateRules(context.Background(), "group-1", []Rule{updatePayload})
 			return err
 		}},
 		{"delete", OperationDeleteRule, http.MethodDelete, collection + "/rule-1", func(service *Service) error {
@@ -97,6 +95,35 @@ func TestRuleOperationMappings(t *testing.T) {
 		}},
 	}
 	assertMappings(t, tests)
+}
+
+// TestUnverifiedRuleBatchWritesFailClosed 验证未发布字段级详情的规则批量写不会到达 HTTP client。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestUnverifiedRuleBatchWritesFailClosed(t *testing.T) {
+	riskLevel := int32(1)
+	payload := Rule{Name: "规则", RiskLevel: &riskLevel, Content: "内容"}
+	updatePayload := payload
+	updatePayload.ID = "rule-1"
+	client := &recordingClient{}
+	service := NewService(client, time.Second)
+	for _, invoke := range []func() error{
+		func() error {
+			_, err := service.BatchCreateRules(context.Background(), "group-1", []Rule{payload})
+			return err
+		},
+		func() error {
+			_, err := service.BatchUpdateRules(context.Background(), "group-1", []Rule{updatePayload})
+			return err
+		},
+	} {
+		if err := invoke(); !errors.Is(err, contracts.ErrContractUnverified) {
+			t.Fatalf("err=%v，期望 ErrContractUnverified", err)
+		}
+		if client.request.OperationID != "" {
+			t.Fatalf("未核验接口不应调用 HTTP client: %#v", client.request)
+		}
+	}
 }
 
 // assertMappings 执行映射测试表并校验请求三元组。

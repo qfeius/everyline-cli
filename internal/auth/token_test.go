@@ -3,9 +3,11 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,5 +46,40 @@ func TestProviderLoginContract(t *testing.T) {
 	cached, err := store.Load("test")
 	if err != nil || cached.AccessToken != "token-value" {
 		t.Fatalf("cached=%#v err=%v", cached, err)
+	}
+}
+
+// TestFileTokenStoreConcurrentInstances 验证多个独立 token 仓库实例并发保存时不会互相覆盖。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestFileTokenStoreConcurrentInstances(t *testing.T) {
+	const tokenCount = 40
+	path := filepath.Join(t.TempDir(), "tokens.json")
+	start := make(chan struct{})
+	errors := make(chan error, tokenCount)
+	var waitGroup sync.WaitGroup
+	for index := 0; index < tokenCount; index++ {
+		waitGroup.Add(1)
+		go func(index int) {
+			defer waitGroup.Done()
+			<-start
+			profileName := fmt.Sprintf("profile-%02d", index)
+			errors <- NewFileTokenStore(path).Save(profileName, Token{AccessToken: profileName})
+		}(index)
+	}
+	close(start)
+	waitGroup.Wait()
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := 0; index < tokenCount; index++ {
+		profileName := fmt.Sprintf("profile-%02d", index)
+		token, err := NewFileTokenStore(path).Load(profileName)
+		if err != nil || token.AccessToken != profileName {
+			t.Fatalf("profile=%s token=%#v err=%v", profileName, token, err)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/checklist"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 
 	"github.com/spf13/cobra"
@@ -83,6 +84,9 @@ func newChecklistBatchCreateCommand(runtime *Runtime, root *rootOptions) *cobra.
 			if dryRun || printInput {
 				return render(runtime, root, "json", payload)
 			}
+			if err := contracts.RequireVerified(checklist.OperationBatchCreate); err != nil {
+				return err
+			}
 			service, profile, err := buildChecklistService(runtime, root)
 			if err != nil {
 				return err
@@ -145,6 +149,10 @@ func newChecklistUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use: "update", Short: "更新审查清单", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
+			resolvedID, err := normalizeRequiredID(id, "id")
+			if err != nil {
+				return err
+			}
 			var payload checklist.Checklist
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
 				return err
@@ -153,13 +161,13 @@ func newChecklistUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 				return err
 			}
 			if dryRun || printInput {
-				return render(runtime, root, "json", map[string]any{"id": id, "data": payload})
+				return render(runtime, root, "json", map[string]any{"id": resolvedID, "data": payload})
 			}
 			service, profile, err := buildChecklistService(runtime, root)
 			if err != nil {
 				return err
 			}
-			result, err := service.Update(command.Context(), id, payload)
+			result, err := service.Update(command.Context(), resolvedID, payload)
 			if err != nil {
 				return err
 			}
@@ -192,6 +200,9 @@ func newChecklistBatchUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.
 			if dryRun || printInput {
 				return render(runtime, root, "json", payload)
 			}
+			if err := contracts.RequireVerified(checklist.OperationBatchUpdate); err != nil {
+				return err
+			}
 			service, profile, err := buildChecklistService(runtime, root)
 			if err != nil {
 				return err
@@ -217,7 +228,11 @@ func newChecklistDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use: "delete", Short: "删除审查清单", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			input := map[string]any{"id": id}
+			resolvedID, err := normalizeRequiredID(id, "id")
+			if err != nil {
+				return err
+			}
+			input := map[string]any{"id": resolvedID}
 			if dryRun || printInput {
 				return render(runtime, root, "json", input)
 			}
@@ -228,7 +243,7 @@ func newChecklistDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			result, err := service.Delete(command.Context(), id)
+			result, err := service.Delete(command.Context(), resolvedID)
 			if err != nil {
 				return err
 			}

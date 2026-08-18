@@ -62,10 +62,13 @@ rule batch-update --group-id ID (--input file.json | --data '[...]') [--dry-run|
 rule delete --group-id ID --rule-id ID --yes [--dry-run|--print-input]
 rule batch-delete --group-id ID (--id ID... | --input ids.json | --data '[...]') --yes [--dry-run|--print-input]
 
+completion bash|fish|powershell|zsh
 version
 ```
 
 所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端。`review task wait` 是 CLI 本地编排，不对应新的远端接口。
+
+`checklist batch-create`、`checklist batch-update`、`rule batch-create`、`rule batch-update` 的字段级详情页尚未发布，因此只允许 `--dry-run`/`--print-input`；真实调用会在发送 HTTP 请求前失败关闭。`update` 自更新命令属于技术方案 M5，需待制品下载地址和签名校验机制冻结后实现。
 
 ## 退出码
 

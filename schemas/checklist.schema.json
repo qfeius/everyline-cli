@@ -10,7 +10,7 @@
     "contractCategory": { "type": "array", "minItems": 1, "items": { "type": "string" } },
     "reviewStage": { "type": "array", "minItems": 1, "items": { "type": "integer" } },
     "enabled": { "type": "boolean" },
-    "reviewRuleIds": { "type": "array", "items": { "type": "string" } }
+    "reviewRuleIds": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
   },
-  "required": ["name", "contractCategory", "reviewStage"]
+  "required": ["name", "reviewRuleIds"]
 }

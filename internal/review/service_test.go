@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 )
 
@@ -23,9 +24,12 @@ type recordingClient struct {
 
 // Do 保存请求并返回测试指定的 envelope.data。
 // 入参：context.Context 控制取消；request openplatform.Request 为待记录契约。
-// 返回值：openplatform.Response 为固定 data；error 始终为 nil。
+// 返回值：openplatform.Response 为固定 data；error 在请求偏离契约目录时非 nil。
 func (client *recordingClient) Do(_ context.Context, request openplatform.Request) (openplatform.Response, error) {
 	client.request = request
+	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path); err != nil {
+		return openplatform.Response{}, err
+	}
 	return openplatform.Response{Data: json.RawMessage(client.data)}, nil
 }
 

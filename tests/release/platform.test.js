@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { resolvePlatformTarget } = require("../../scripts/platform");
+const { normalizePackageVersion } = require("../../scripts/package-version");
 
 /**
  * platformCases 返回 npm 支持矩阵及对应 Go 产物目录。
@@ -28,4 +29,11 @@ for (const item of platformCases()) {
 
 test("unsupported architecture fails closed", () => {
   assert.throws(() => resolvePlatformTarget("linux", "ia32"), /不支持的平台或架构/);
+});
+
+test("release version follows tag or commit without development placeholder", () => {
+  assert.equal(normalizePackageVersion("v1.2.3"), "1.2.3");
+  assert.equal(normalizePackageVersion("0.0.0-a1b2c3d4"), "0.0.0-a1b2c3d4");
+  assert.equal(normalizePackageVersion("29e1d3f-dirty"), "0.0.0-build-29e1d3f-dirty");
+  assert.equal(normalizePackageVersion(""), "0.0.0-build-development");
 });

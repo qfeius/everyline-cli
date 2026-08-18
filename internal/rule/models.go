@@ -22,6 +22,9 @@ func (group Group) Validate(requireID bool) error {
 	if strings.TrimSpace(group.Name) == "" {
 		return fmt.Errorf("name 不能为空")
 	}
+	if group.SourceType != nil && *group.SourceType < 0 {
+		return fmt.Errorf("sourceType 不能小于 0")
+	}
 	return nil
 }
 
@@ -29,7 +32,7 @@ func (group Group) Validate(requireID bool) error {
 type Rule struct {
 	ID         string `json:"id,omitempty" yaml:"id,omitempty"`
 	Name       string `json:"name" yaml:"name"`
-	RiskLevel  int32  `json:"riskLevel" yaml:"riskLevel"`
+	RiskLevel  *int32 `json:"riskLevel" yaml:"riskLevel"`
 	RiskTips   string `json:"riskTips,omitempty" yaml:"riskTips,omitempty"`
 	Content    string `json:"content" yaml:"content"`
 	SourceType *int   `json:"sourceType,omitempty" yaml:"sourceType,omitempty"`
@@ -48,8 +51,14 @@ func (rule Rule) Validate(requireID bool) error {
 	if strings.TrimSpace(rule.Content) == "" {
 		return fmt.Errorf("content 不能为空")
 	}
-	if rule.RiskLevel < 0 {
+	if rule.RiskLevel == nil {
+		return fmt.Errorf("riskLevel 不能为空")
+	}
+	if *rule.RiskLevel < 0 {
 		return fmt.Errorf("riskLevel 不能小于 0")
+	}
+	if rule.SourceType != nil && *rule.SourceType < 0 {
+		return fmt.Errorf("sourceType 不能小于 0")
 	}
 	return nil
 }

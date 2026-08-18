@@ -41,7 +41,6 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	command.PersistentFlags().DurationVar(&options.Timeout, "timeout", 30*time.Second, "普通远端请求超时")
 	command.PersistentFlags().BoolVar(&options.Verbose, "verbose", false, "将工作流进度写入 stderr")
 	command.PersistentFlags().BoolVar(&options.NoColor, "no-color", false, "禁用彩色输出")
-	command.CompletionOptions.DisableDefaultCmd = true
 	command.AddCommand(
 		newConfigCommand(runtime, options),
 		newAuthCommand(runtime, options),
@@ -50,6 +49,7 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 		newRuleCommand(runtime, options),
 		newVersionCommand(runtime, options),
 	)
+	command.InitDefaultCompletionCmd()
 	return command
 }
 

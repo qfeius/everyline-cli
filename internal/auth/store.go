@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"git.qtech.cn/ai/everyline-cli/internal/filelock"
 )
 
 // FileTokenStore 在 Keychain 不可用时，以 0600 文件缓存短期 token。
@@ -45,12 +47,14 @@ func (store *FileTokenStore) Load(profileName string) (Token, error) {
 func (store *FileTokenStore) Save(profileName string, token Token) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	tokens, err := store.loadUnlocked()
-	if err != nil {
-		return err
-	}
-	tokens[profileName] = token
-	return store.saveUnlocked(tokens)
+	return filelock.With(store.path+".lock", func() error {
+		tokens, err := store.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		tokens[profileName] = token
+		return store.saveUnlocked(tokens)
+	})
 }
 
 // Delete 删除指定 Profile 的 token；缓存文件不存在时保持幂等成功。
@@ -59,12 +63,14 @@ func (store *FileTokenStore) Save(profileName string, token Token) error {
 func (store *FileTokenStore) Delete(profileName string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	tokens, err := store.loadUnlocked()
-	if err != nil {
-		return err
-	}
-	delete(tokens, profileName)
-	return store.saveUnlocked(tokens)
+	return filelock.With(store.path+".lock", func() error {
+		tokens, err := store.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		delete(tokens, profileName)
+		return store.saveUnlocked(tokens)
+	})
 }
 
 // loadUnlocked 读取整个 token 映射；不存在时返回空映射。

@@ -9,6 +9,17 @@ import (
 	"strings"
 )
 
+// normalizeRequiredID 去除路径 ID 两端空白，并拒绝 Cobra 仅检查“已传入”但实际为空白的值。
+// 入参：value string 为原始 flag 值；flagName string 为错误消息中的参数名。
+// 返回值：string 为规范化 ID；error 在 ID 为空时非 nil。
+func normalizeRequiredID(value string, flagName string) (string, error) {
+	resolved := strings.TrimSpace(value)
+	if resolved == "" {
+		return "", fmt.Errorf("%s 不能为空", flagName)
+	}
+	return resolved, nil
+}
+
 const maxInputBytes = 2 << 20
 
 // readJSONInput 从 --input 或 --data 二选一读取严格 JSON，并拒绝多余顶层内容。

@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 )
 
 // staticTokenProvider 为 HTTP 契约测试提供固定 token。
@@ -85,7 +87,7 @@ func TestClientAPIError(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewClient(config.Profile{BaseURL: server.URL}, staticTokenProvider{}, server.Client())
-	_, err := client.Do(context.Background(), Request{OperationID: "write", Method: http.MethodPost, Path: "/open-apis/test", SuccessCode: 200})
+	_, err := client.Do(context.Background(), Request{OperationID: "createReviewChecklist", Method: http.MethodPost, Path: "/open-apis/review-rules/review-checklists", SuccessCode: 200})
 	var apiError *APIError
 	if !errors.As(err, &apiError) {
 		t.Fatalf("err=%T %v", err, err)
@@ -112,11 +114,52 @@ func TestClientRejectsAbsolutePath(t *testing.T) {
 func TestClientTimesOutTokenRefresh(t *testing.T) {
 	client := NewClient(config.Profile{BaseURL: "https://example.com"}, blockingTokenProvider{}, nil)
 	started := time.Now()
-	_, err := client.Do(context.Background(), Request{Method: http.MethodGet, Path: "/open-apis/test", Timeout: 20 * time.Millisecond})
+	_, err := client.Do(context.Background(), Request{OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", Timeout: 20 * time.Millisecond})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v，期望 context deadline exceeded", err)
 	}
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("token 超时未及时生效: %s", elapsed)
+	}
+}
+
+// TestClientTimeoutCoversRetries 验证 Retry-After 和多次 GET 重试不能突破整次操作超时。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestClientTimeoutCoversRetries(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		attempts.Add(1)
+		writer.Header().Set("Retry-After", "5")
+		writer.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = writer.Write([]byte(`{"code":503001,"msg":"busy","data":null}`))
+	}))
+	defer server.Close()
+	client := NewClient(config.Profile{BaseURL: server.URL}, staticTokenProvider{}, server.Client())
+	started := time.Now()
+	_, err := client.Do(context.Background(), Request{
+		OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", Timeout: 40 * time.Millisecond,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v，期望 context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("重试突破全局超时: %s", elapsed)
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("attempts=%d，Retry-After 等待期间不应发起第二次请求", attempts.Load())
+	}
+}
+
+// TestClientRejectsCatalogDrift 验证 HTTP Adapter 在发送 token 前拒绝 method/path 与契约目录不一致的请求。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestClientRejectsCatalogDrift(t *testing.T) {
+	client := NewClient(config.Profile{BaseURL: "https://example.com"}, staticTokenProvider{}, nil)
+	_, err := client.Do(context.Background(), Request{
+		OperationID: "listReviewChecklists", Method: http.MethodPost, Path: "/open-apis/review-rules/review-checklists",
+	})
+	if !errors.Is(err, contracts.ErrContractMismatch) {
+		t.Fatalf("err=%v，期望 ErrContractMismatch", err)
 	}
 }

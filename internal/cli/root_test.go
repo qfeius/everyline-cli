@@ -16,6 +16,7 @@ import (
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 )
 
 // testRuntime 创建隔离文件仓库和内存 I/O 的 CLI 运行时。
@@ -201,6 +202,59 @@ func TestRuleBatchUpdateDryRun(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"groupId": "group-1"`) || !strings.Contains(stdout.String(), `"id": "rule-1"`) {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestDryRunRejectsBlankPathIDs 验证 dry-run 不会让只含空白的必填路径 ID 绕过校验。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestDryRunRejectsBlankPathIDs(t *testing.T) {
+	tests := [][]string{
+		{"checklist", "update", "--id", "  ", "--data", `{"name":"清单","reviewRuleIds":["rule-1"]}`, "--dry-run"},
+		{"rule", "create", "--group-id", "\t", "--data", `{"name":"规则","riskLevel":1,"content":"内容"}`, "--dry-run"},
+	}
+	for _, args := range tests {
+		runtime, _, _ := testRuntime(t)
+		if err := Execute(context.Background(), runtime, args); err == nil || !strings.Contains(err.Error(), "不能为空") {
+			t.Fatalf("args=%v err=%v", args, err)
+		}
+	}
+}
+
+// TestRuleDryRunRequiresRiskLevel 验证缺失 riskLevel 的规则请求不会被零值掩盖。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestRuleDryRunRequiresRiskLevel(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	err := Execute(context.Background(), runtime, []string{
+		"rule", "create", "--group-id", "group-1", "--data", `{"name":"规则","content":"内容"}`, "--dry-run",
+	})
+	if err == nil || !strings.Contains(err.Error(), "riskLevel 不能为空") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestUnverifiedBatchWriteFailsBeforeProfile 验证真实批量写在装配鉴权前就返回可识别的契约错误。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestUnverifiedBatchWriteFailsBeforeProfile(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	err := Execute(context.Background(), runtime, []string{
+		"checklist", "batch-create", "--data", `[{"name":"清单","reviewRuleIds":["rule-1"]}]`,
+	})
+	if !errors.Is(err, contracts.ErrContractUnverified) {
+		t.Fatalf("err=%v，期望 ErrContractUnverified", err)
+	}
+}
+
+// TestCompletionCommandAvailable 验证 Cobra 标准 shell completion 命令未被隐藏。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestCompletionCommandAvailable(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	root := NewRootCommand(runtime)
+	if _, _, err := root.Find([]string{"completion", "zsh"}); err != nil {
+		t.Fatalf("completion 命令不可用: %v", err)
 	}
 }
 

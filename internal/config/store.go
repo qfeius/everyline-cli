@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"git.qtech.cn/ai/everyline-cli/internal/filelock"
 )
 
 var (
@@ -71,15 +73,17 @@ func (store *FileStore) Add(profile Profile) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	data, err := store.loadUnlocked()
-	if err != nil {
-		return err
-	}
-	data.Profiles[profile.Name] = profile
-	if data.Current == "" {
-		data.Current = profile.Name
-	}
-	return store.saveUnlocked(data)
+	return filelock.With(store.path+".lock", func() error {
+		data, err := store.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		data.Profiles[profile.Name] = profile
+		if data.Current == "" {
+			data.Current = profile.Name
+		}
+		return store.saveUnlocked(data)
+	})
 }
 
 // List 按名称排序返回全部 Profile，保证 JSON 和表格输出稳定。
@@ -108,15 +112,17 @@ func (store *FileStore) Use(name string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	data, err := store.loadUnlocked()
-	if err != nil {
-		return err
-	}
-	if _, exists := data.Profiles[name]; !exists {
-		return fmt.Errorf("%w: %s", ErrProfileNotFound, name)
-	}
-	data.Current = name
-	return store.saveUnlocked(data)
+	return filelock.With(store.path+".lock", func() error {
+		data, err := store.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		if _, exists := data.Profiles[name]; !exists {
+			return fmt.Errorf("%w: %s", ErrProfileNotFound, name)
+		}
+		data.Current = name
+		return store.saveUnlocked(data)
+	})
 }
 
 // Get 按名称读取 Profile。

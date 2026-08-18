@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 )
 
@@ -65,6 +66,9 @@ func (service *Service) BatchCreate(ctx context.Context, payload []Checklist) (a
 	if err := validateBatch(payload, false); err != nil {
 		return nil, err
 	}
+	if err := contracts.RequireVerified(OperationBatchCreate); err != nil {
+		return nil, err
+	}
 	return service.doPayload(ctx, OperationBatchCreate, http.MethodPost, pathBatch, nil, payload)
 }
 
@@ -98,6 +102,9 @@ func (service *Service) Update(ctx context.Context, id string, payload Checklist
 // 返回值：any 为业务 data；error 为校验、编码或远端错误。
 func (service *Service) BatchUpdate(ctx context.Context, payload []Checklist) (any, error) {
 	if err := validateBatch(payload, true); err != nil {
+		return nil, err
+	}
+	if err := contracts.RequireVerified(OperationBatchUpdate); err != nil {
 		return nil, err
 	}
 	return service.doPayload(ctx, OperationBatchUpdate, http.MethodPut, pathBatch, nil, payload)

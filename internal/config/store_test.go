@@ -2,8 +2,10 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -51,5 +53,42 @@ func TestFileStoreMissingProfile(t *testing.T) {
 	store := NewFileStore(filepath.Join(t.TempDir(), "config.json"))
 	if err := store.Use("missing"); !errors.Is(err, ErrProfileNotFound) {
 		t.Fatalf("err=%v，期望 ErrProfileNotFound", err)
+	}
+}
+
+// TestFileStoreConcurrentInstances 验证多个独立仓库实例并发读改写时不会丢失 Profile。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestFileStoreConcurrentInstances(t *testing.T) {
+	const profileCount = 40
+	path := filepath.Join(t.TempDir(), "config.json")
+	start := make(chan struct{})
+	errors := make(chan error, profileCount)
+	var waitGroup sync.WaitGroup
+	for index := 0; index < profileCount; index++ {
+		waitGroup.Add(1)
+		go func(index int) {
+			defer waitGroup.Done()
+			<-start
+			name := fmt.Sprintf("profile-%02d", index)
+			errors <- NewFileStore(path).Add(Profile{
+				Name: name, BaseURL: "https://example.com", TokenURL: "https://example.com/token", AppID: name,
+			})
+		}(index)
+	}
+	close(start)
+	waitGroup.Wait()
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	profiles, err := NewFileStore(path).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != profileCount {
+		t.Fatalf("并发写入后 profiles=%d，期望 %d", len(profiles), profileCount)
 	}
 }

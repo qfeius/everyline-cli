@@ -2,6 +2,8 @@
 
 基础 URL 来自 Profile。下表路径均为 CLI HTTP Adapter 中的相对路径。
 
+当前接口清单尚未给出四个批量写操作的字段级请求体：`batchCreateReviewChecklists`、`batchUpdateReviewChecklists`、`batchCreateReviewRules`、`batchUpdateReviewRules`。对应命令支持 `--dry-run` 做本地校验，但真实调用会显式拒绝；补齐详情页并完成契约测试后方可解除保护。
+
 | Operation ID | CLI 命令 | 方法与路径 |
 |---|---|---|
 | `tenantAccessTokenInternal` | `auth login` | `POST profile.token_url` |
@@ -37,3 +39,5 @@
 `review task wait` 复用 `smartAuditTaskStatus` 做 CLI 侧轮询，不单独计为远端 operation。
 
 `review run` 的数据流为：上传 -> 必要时读取快照 -> 可选主体提取 -> 发起 -> 可选轮询 -> 详情。后续接口使用上传响应中的 `businessId/fileId/fileHash`，不自行生成业务 ID 或文件指纹。
+
+清单创建与更新请求按公开接口说明要求 `name`、`reviewRuleIds`；`contractCategory`、`reviewStage` 为可选兼容字段。

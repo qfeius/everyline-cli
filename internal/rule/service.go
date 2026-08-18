@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 )
 
@@ -123,6 +124,9 @@ func (service *Service) BatchCreateRules(ctx context.Context, groupID string, pa
 	if err := validateBatch(payload, false); err != nil {
 		return nil, err
 	}
+	if err := contracts.RequireVerified(OperationBatchCreateRule); err != nil {
+		return nil, err
+	}
 	return service.doPayload(ctx, OperationBatchCreateRule, http.MethodPost, collection+"/batch", nil, payload)
 }
 
@@ -168,6 +172,9 @@ func (service *Service) BatchUpdateRules(ctx context.Context, groupID string, pa
 		return nil, err
 	}
 	if err := validateBatch(payload, true); err != nil {
+		return nil, err
+	}
+	if err := contracts.RequireVerified(OperationBatchUpdateRule); err != nil {
 		return nil, err
 	}
 	return service.doPayload(ctx, OperationBatchUpdateRule, http.MethodPut, collection+"/batch", nil, payload)

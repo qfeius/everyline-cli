@@ -5,6 +5,7 @@ import (
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 	"git.qtech.cn/ai/everyline-cli/internal/rule"
 
@@ -110,6 +111,10 @@ func newRuleGroupUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use: "update", Short: "更新规则分组", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
+			resolvedID, err := normalizeRequiredID(id, "id")
+			if err != nil {
+				return err
+			}
 			var payload rule.Group
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
 				return err
@@ -118,13 +123,13 @@ func newRuleGroupUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 				return err
 			}
 			if dryRun || printInput {
-				return render(runtime, root, "json", map[string]any{"id": id, "data": payload})
+				return render(runtime, root, "json", map[string]any{"id": resolvedID, "data": payload})
 			}
 			service, profile, err := buildRuleService(runtime, root)
 			if err != nil {
 				return err
 			}
-			result, err := service.UpdateGroup(command.Context(), id, payload)
+			result, err := service.UpdateGroup(command.Context(), resolvedID, payload)
 			if err != nil {
 				return err
 			}
@@ -147,7 +152,11 @@ func newRuleGroupDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use: "delete", Short: "级联删除规则分组及其规则", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			input := map[string]any{"id": id, "cascade": true}
+			resolvedID, err := normalizeRequiredID(id, "id")
+			if err != nil {
+				return err
+			}
+			input := map[string]any{"id": resolvedID, "cascade": true}
 			if dryRun || printInput {
 				return render(runtime, root, "json", input)
 			}
@@ -158,7 +167,7 @@ func newRuleGroupDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			result, err := service.DeleteGroup(command.Context(), id)
+			result, err := service.DeleteGroup(command.Context(), resolvedID)
 			if err != nil {
 				return err
 			}
@@ -227,6 +236,9 @@ func newRuleBatchCreateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 			if dryRun || printInput {
 				return render(runtime, root, "json", map[string]any{"groupId": groupID, "data": payload})
 			}
+			if err := contracts.RequireVerified(rule.OperationBatchCreateRule); err != nil {
+				return err
+			}
 			service, profile, err := buildRuleService(runtime, root)
 			if err != nil {
 				return err
@@ -278,6 +290,10 @@ func newRuleUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use: "update", Short: "更新审查规则", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
+			resolvedRuleID, err := normalizeRequiredID(ruleID, "rule-id")
+			if err != nil {
+				return err
+			}
 			var payload rule.Rule
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
 				return err
@@ -286,13 +302,13 @@ func newRuleUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				return err
 			}
 			if dryRun || printInput {
-				return render(runtime, root, "json", map[string]any{"groupId": groupID, "ruleId": ruleID, "data": payload})
+				return render(runtime, root, "json", map[string]any{"groupId": groupID, "ruleId": resolvedRuleID, "data": payload})
 			}
 			service, profile, err := buildRuleService(runtime, root)
 			if err != nil {
 				return err
 			}
-			result, err := service.UpdateRule(command.Context(), groupID, ruleID, payload)
+			result, err := service.UpdateRule(command.Context(), groupID, resolvedRuleID, payload)
 			if err != nil {
 				return err
 			}
@@ -326,6 +342,9 @@ func newRuleBatchUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 			if dryRun || printInput {
 				return render(runtime, root, "json", map[string]any{"groupId": groupID, "data": payload})
 			}
+			if err := contracts.RequireVerified(rule.OperationBatchUpdateRule); err != nil {
+				return err
+			}
 			service, profile, err := buildRuleService(runtime, root)
 			if err != nil {
 				return err
@@ -352,7 +371,11 @@ func newRuleDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use: "delete", Short: "删除审查规则", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			input := map[string]any{"groupId": groupID, "ruleId": ruleID}
+			resolvedRuleID, err := normalizeRequiredID(ruleID, "rule-id")
+			if err != nil {
+				return err
+			}
+			input := map[string]any{"groupId": groupID, "ruleId": resolvedRuleID}
 			if dryRun || printInput {
 				return render(runtime, root, "json", input)
 			}
@@ -363,7 +386,7 @@ func newRuleDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := service.DeleteRule(command.Context(), groupID, ruleID)
+			result, err := service.DeleteRule(command.Context(), groupID, resolvedRuleID)
 			if err != nil {
 				return err
 			}
@@ -437,6 +460,14 @@ func buildRuleService(runtime *Runtime, root *rootOptions) (*rule.Service, confi
 func addGroupIDFlag(command *cobra.Command, groupID *string) {
 	command.Flags().StringVar(groupID, "group-id", "", "规则分组 ID")
 	_ = command.MarkFlagRequired("group-id")
+	command.PreRunE = func(command *cobra.Command, args []string) error {
+		resolved, err := normalizeRequiredID(*groupID, "group-id")
+		if err != nil {
+			return err
+		}
+		*groupID = resolved
+		return nil
+	}
 }
 
 // addRuleListFlags 注册规则分组和规则共用的分页排序参数。

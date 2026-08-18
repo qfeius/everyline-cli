@@ -17,6 +17,7 @@ import (
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
+	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 )
 
 const maxResponseBytes = 32 << 20
@@ -75,10 +76,13 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 	if !strings.HasPrefix(operation.Path, "/open-apis/") || strings.Contains(operation.Path, "://") {
 		return Response{}, fmt.Errorf("拒绝非 /open-apis/ 相对路径: %s", operation.Path)
 	}
-	// token 缓存刷新也属于本次远端操作，必须受同一个用户超时约束。
-	tokenContext, cancelToken := context.WithTimeout(ctx, operation.Timeout)
-	token, err := client.tokens.Token(tokenContext, client.profile)
-	cancelToken()
+	if err := contracts.ValidateRequest(operation.OperationID, operation.Method, operation.Path); err != nil {
+		return Response{}, err
+	}
+	// token 获取、所有请求尝试与退避共享一个截止时间，--timeout 表示整次操作预算。
+	operationContext, cancelOperation := context.WithTimeout(ctx, operation.Timeout)
+	defer cancelOperation()
+	token, err := client.tokens.Token(operationContext, client.profile)
 	if err != nil {
 		return Response{}, err
 	}
@@ -88,12 +92,12 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 		maxAttempts = 3
 	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		response, retry, err := client.doOnce(ctx, operation, token.AccessToken)
+		response, retry, err := client.doOnce(operationContext, operation, token.AccessToken)
 		if err == nil || !retry || attempt == maxAttempts {
 			return response, err
 		}
 		delay := retryDelay(err, attempt)
-		if err := client.sleep(ctx, delay); err != nil {
+		if err := client.sleep(operationContext, delay); err != nil {
 			return Response{}, err
 		}
 	}
@@ -104,13 +108,11 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 // 入参：ctx context.Context 控制取消；operation Request 为远端操作；accessToken string 为 Bearer token。
 // 返回值：Response 为业务数据；bool 表示错误是否可重试；error 为本次失败原因。
 func (client *Client) doOnce(ctx context.Context, operation Request, accessToken string) (Response, bool, error) {
-	requestContext, cancel := context.WithTimeout(ctx, operation.Timeout)
-	defer cancel()
 	requestURL := strings.TrimRight(client.profile.BaseURL, "/") + operation.Path
 	if len(operation.Query) > 0 {
 		requestURL += "?" + operation.Query.Encode()
 	}
-	request, err := http.NewRequestWithContext(requestContext, operation.Method, requestURL, bytes.NewReader(operation.Body))
+	request, err := http.NewRequestWithContext(ctx, operation.Method, requestURL, bytes.NewReader(operation.Body))
 	if err != nil {
 		return Response{}, false, fmt.Errorf("创建请求 %s: %w", operation.OperationID, err)
 	}

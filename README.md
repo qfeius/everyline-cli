@@ -1,6 +1,6 @@
 # everyline-cli
 
-智审开放平台 V3 的 Go 命令行客户端。实现技术方案中的 27 个远端 operation：Profile/tenant token、完整合同审查工作流、飞书字段捷径发起、审查清单以及规则分组/规则管理。
+智审开放平台 V3 的 Go 命令行客户端。覆盖技术方案中的 27 个远端 operation 映射：Profile/tenant token、完整合同审查工作流、飞书字段捷径发起、审查清单以及规则分组/规则管理；其中 23 项已开放真实调用，4 项缺字段级详情的批量写操作失败关闭。
 
 ## 构建
 
@@ -47,6 +47,8 @@ everyline-cli review run --input review-run.json --output json
 
 完整命令和 27 项接口映射见 [命令参考](docs/command-reference.md) 与 [API 映射](docs/api-mapping.md)。清单、规则分组和规则的所有删除操作都要求显式 `--yes`；`--dry-run` 不调用远端。
 
+可通过 `everyline-cli completion bash|fish|powershell|zsh` 生成 shell 补全脚本。四个尚缺字段级详情页的批量创建/更新命令仅开放 `--dry-run`，真实请求会失败关闭，具体清单见 API 映射。
+
 ## npm/npx 包装
 
-Node 包只负责启动对应平台的 Go 二进制，CLI 本体没有 Node 运行时依赖。发布前运行 `scripts/build-release-assets.sh` 生成六个平台架构的 `bin/<platform>-<arch>/everyline-cli`，随后再打包 npm 产物。
+Node 包只负责启动对应平台的 Go 二进制，CLI 本体没有 Node 运行时依赖。发布前运行 `scripts/build-release-assets.sh` 生成六个平台架构的 `bin/<platform>-<arch>/everyline-cli`。CI 会把 tag 或提交版本规范化为 SemVer、同步到 npm manifest，并产出带正确版本号的 `.tgz` 制品。
