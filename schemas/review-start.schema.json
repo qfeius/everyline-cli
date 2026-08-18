@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-start.schema.json",
+  "title": "smartAuditTaskStartReview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["businessId", "appType", "fileId", "fileHash", "config"],
+  "properties": {
+    "businessId": {"type": "string", "minLength": 1},
+    "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"]},
+    "fileId": {"type": "integer", "minimum": 1},
+    "fileHash": {"type": "string", "minLength": 1},
+    "config": {
+      "type": "object",
+      "properties": {
+        "selectedCheckListIds": {"type": "array", "items": {"type": "string"}},
+        "useSmartGeneratedChecklist": {"type": "boolean"},
+        "matchContractTypeRulePackage": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "aiItemId": {"type": "string"},
+    "remark": {"type": "string"},
+    "biz1": {"type": "string"},
+    "biz2": {"type": "string"},
+    "biz3": {"type": "string"},
+    "biz4": {"type": "string"},
+    "biz5": {"type": "string"},
+    "allowInvalidSelectedChecklists": {"type": "boolean", "default": false},
+    "triggerScene": {"enum": ["manual", "auto"], "default": "manual"},
+    "usageReportContext": {"type": "object"}
+  }
+}

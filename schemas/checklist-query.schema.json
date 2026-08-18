@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/checklist-query.schema.json",
+  "title": "ReviewChecklistQuery",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string" },
+    "reviewStages": { "type": "array", "items": { "type": "string" } },
+    "contractCategories": { "type": "array", "items": { "type": "string" } },
+    "startTime": { "type": "integer", "minimum": 0 },
+    "endTime": { "type": "integer", "minimum": 0 },
+    "enabled": { "type": "boolean" },
+    "createEmployeeIds": { "type": "array", "items": { "type": "string" } },
+    "updateEmployeeIds": { "type": "array", "items": { "type": "string" } },
+    "sort": { "type": "array", "items": { "type": "string" } },
+    "pageIndex": { "type": "integer", "minimum": 1 },
+    "pageSize": { "type": "integer", "minimum": 1 }
+  }
+}

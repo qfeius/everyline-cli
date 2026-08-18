@@ -1,0 +1,243 @@
+package review
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+const (
+	AppTypeCLM        = "CLM"
+	AppTypeCR         = "CR"
+	AppTypeThirdParty = "THIRD_PARTY"
+)
+
+// Document 保存平台 data 对象并保留未来新增字段，避免 CLI 因响应扩展而丢数据。
+type Document map[string]any
+
+// StartRequest 对应 operation smartAuditTaskStartReview 的冻结请求契约。
+type StartRequest struct {
+	BusinessID                     string         `json:"businessId" yaml:"businessId"`
+	AppType                        string         `json:"appType" yaml:"appType"`
+	FileID                         int64          `json:"fileId" yaml:"fileId"`
+	FileHash                       string         `json:"fileHash" yaml:"fileHash"`
+	Config                         map[string]any `json:"config" yaml:"config"`
+	AIItemID                       string         `json:"aiItemId,omitempty" yaml:"aiItemId,omitempty"`
+	Remark                         string         `json:"remark,omitempty" yaml:"remark,omitempty"`
+	Biz1                           string         `json:"biz1,omitempty" yaml:"biz1,omitempty"`
+	Biz2                           string         `json:"biz2,omitempty" yaml:"biz2,omitempty"`
+	Biz3                           string         `json:"biz3,omitempty" yaml:"biz3,omitempty"`
+	Biz4                           string         `json:"biz4,omitempty" yaml:"biz4,omitempty"`
+	Biz5                           string         `json:"biz5,omitempty" yaml:"biz5,omitempty"`
+	AllowInvalidSelectedChecklists bool           `json:"allowInvalidSelectedChecklists,omitempty" yaml:"allowInvalidSelectedChecklists,omitempty"`
+	TriggerScene                   string         `json:"triggerScene,omitempty" yaml:"triggerScene,omitempty"`
+	UsageReportContext             map[string]any `json:"usageReportContext,omitempty" yaml:"usageReportContext,omitempty"`
+}
+
+// Validate 校验普通发起审查的必填字段、应用类型和触发场景。
+// 入参：无，接收者 StartRequest 为待校验请求。
+// 返回值：error，请求满足后端 V3 契约时为 nil。
+func (request StartRequest) Validate() error {
+	if err := ValidateReviewIdentity(request); err != nil {
+		return err
+	}
+	if request.Config == nil {
+		return fmt.Errorf("config 不能为空；无额外配置时请传空对象 {}")
+	}
+	if request.TriggerScene != "" && request.TriggerScene != "manual" && request.TriggerScene != "auto" {
+		return fmt.Errorf("triggerScene 必须是 manual 或 auto")
+	}
+	return nil
+}
+
+// FeishuStartRequest 对应字段捷径 V3 发起审查的签名与额度扩展契约。
+type FeishuStartRequest struct {
+	StartRequest
+	HasQuota      bool   `json:"hasQuota" yaml:"hasQuota"`
+	BaseSignature string `json:"baseSignature" yaml:"baseSignature"`
+	PackID        string `json:"packID" yaml:"packID"`
+}
+
+// Validate 校验普通 V3 请求字段以及飞书快捷入口的额度和签名材料。
+// 入参：无，接收者 FeishuStartRequest 为待校验请求。
+// 返回值：error，请求可提交给飞书快捷 V3 入口时为 nil。
+func (request FeishuStartRequest) Validate() error {
+	if err := request.StartRequest.Validate(); err != nil {
+		return err
+	}
+	if !request.HasQuota {
+		return fmt.Errorf("hasQuota 必须为 true")
+	}
+	if strings.TrimSpace(request.BaseSignature) == "" {
+		return fmt.Errorf("baseSignature 不能为空")
+	}
+	if strings.TrimSpace(request.PackID) == "" {
+		return fmt.Errorf("packID 不能为空")
+	}
+	return nil
+}
+
+// ValidateReviewIdentity 校验 V3 后续接口共用的 businessId/appType/fileId/fileHash 身份。
+// 入参：request StartRequest 提供文件与业务上下文，config 不参与本校验。
+// 返回值：error，身份字段完整有效时为 nil。
+func ValidateReviewIdentity(request StartRequest) error {
+	if strings.TrimSpace(request.BusinessID) == "" {
+		return fmt.Errorf("businessId 不能为空")
+	}
+	if err := ValidateAppType(request.AppType); err != nil {
+		return err
+	}
+	if request.FileID <= 0 {
+		return fmt.Errorf("fileId 必须大于 0")
+	}
+	if strings.TrimSpace(request.FileHash) == "" {
+		return fmt.Errorf("fileHash 不能为空")
+	}
+	return nil
+}
+
+// RunSource 描述一键工作流的本地文件或 URL 输入。
+type RunSource struct {
+	Type    string `json:"type" yaml:"type"`
+	Path    string `json:"path,omitempty" yaml:"path,omitempty"`
+	FileURL string `json:"fileUrl,omitempty" yaml:"fileUrl,omitempty"`
+	Name    string `json:"name" yaml:"name"`
+}
+
+// RunSpec 是 review run 的稳定输入协议。
+type RunSpec struct {
+	Source          RunSource      `json:"source" yaml:"source"`
+	BusinessID      string         `json:"businessId,omitempty" yaml:"businessId,omitempty"`
+	AppType         string         `json:"appType,omitempty" yaml:"appType,omitempty"`
+	Config          map[string]any `json:"config" yaml:"config"`
+	ExtractSubjects bool           `json:"extractSubjects,omitempty" yaml:"extractSubjects,omitempty"`
+	Wait            bool           `json:"wait" yaml:"wait"`
+}
+
+// Normalize 补齐一键工作流的安全默认值，且不改变调用方提供的业务字段。
+// 入参：无，接收者 RunSpec 为待归一化输入。
+// 返回值：RunSpec，默认 appType=THIRD_PARTY 且 config 至少为空对象。
+func (spec RunSpec) Normalize() RunSpec {
+	if spec.AppType == "" {
+		spec.AppType = AppTypeThirdParty
+	}
+	return spec
+}
+
+// Validate 校验一键工作流 source 的互斥字段和应用类型。
+// 入参：无，接收者 RunSpec 为待校验输入。
+// 返回值：error，输入可安全执行时为 nil。
+func (spec RunSpec) Validate() error {
+	if err := ValidateAppType(spec.AppType); err != nil {
+		return err
+	}
+	if spec.Config == nil {
+		return fmt.Errorf("config 不能为空；无额外配置时请传空对象 {}")
+	}
+	if strings.TrimSpace(spec.Source.Name) == "" {
+		return fmt.Errorf("source.name 不能为空")
+	}
+	switch spec.Source.Type {
+	case "file":
+		if strings.TrimSpace(spec.Source.Path) == "" || spec.Source.FileURL != "" {
+			return fmt.Errorf("file source 必须只提供 path")
+		}
+	case "url":
+		if strings.TrimSpace(spec.Source.FileURL) == "" || spec.Source.Path != "" {
+			return fmt.Errorf("url source 必须只提供 fileUrl")
+		}
+	default:
+		return fmt.Errorf("source.type 必须是 file 或 url")
+	}
+	return nil
+}
+
+// RunResult 汇总一键工作流各阶段结果，便于 Agent 追踪 fileId、taskId 和终态详情。
+type RunResult struct {
+	Upload   Document `json:"upload" yaml:"upload"`
+	Subjects Document `json:"subjects,omitempty" yaml:"subjects,omitempty"`
+	Start    Document `json:"start" yaml:"start"`
+	Final    Document `json:"final,omitempty" yaml:"final,omitempty"`
+}
+
+// TaskQuery 是 status、info 和 wait 的公共查询上下文。
+type TaskQuery struct {
+	TaskID     int64
+	BusinessID string
+	AppType    string
+}
+
+// ValidateAppType 校验后端冻结的三种接入应用类型。
+// 入参：appType string 为待校验值。
+// 返回值：error，值为 CLM、CR 或 THIRD_PARTY 时为 nil。
+func ValidateAppType(appType string) error {
+	switch appType {
+	case AppTypeCLM, AppTypeCR, AppTypeThirdParty:
+		return nil
+	default:
+		return fmt.Errorf("appType 必须是 CLM、CR 或 THIRD_PARTY")
+	}
+}
+
+// DecodeDocument 用 UseNumber 解码平台 data，避免 int64 标识被 float64 破坏精度。
+// 入参：content []byte 为 envelope.data 的 JSON。
+// 返回值：Document 为业务对象；error 在 data 不是对象时非 nil。
+func DecodeDocument(content []byte) (Document, error) {
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.UseNumber()
+	var document Document
+	if err := decoder.Decode(&document); err != nil {
+		return nil, fmt.Errorf("解析业务响应: %w", err)
+	}
+	if document == nil {
+		return nil, fmt.Errorf("业务响应 data 不能为空")
+	}
+	return document, nil
+}
+
+// StringValue 从 Document 中读取字符串，并兼容 JSON number。
+// 入参：document Document 为业务对象；key string 为字段名。
+// 返回值：string 为字段文本；bool 表示字段是否存在且非空。
+func StringValue(document Document, key string) (string, bool) {
+	value, exists := document[key]
+	if !exists || value == nil {
+		return "", false
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed, typed != ""
+	case json.Number:
+		return typed.String(), typed.String() != ""
+	default:
+		text := fmt.Sprint(typed)
+		return text, text != ""
+	}
+}
+
+// Int64Value 从 Document 中读取可能由字符串或 JSON number 表示的 int64 标识。
+// 入参：document Document 为业务对象；key string 为字段名。
+// 返回值：int64 为标识值；bool 表示转换是否成功。
+func Int64Value(document Document, key string) (int64, bool) {
+	value, exists := document[key]
+	if !exists || value == nil {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case json.Number:
+		parsed, err := typed.Int64()
+		return parsed, err == nil
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		return int64(typed), typed == float64(int64(typed))
+	case string:
+		var parsed int64
+		_, err := fmt.Sscan(typed, &parsed)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
