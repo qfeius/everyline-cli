@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,7 +123,7 @@ func TestServiceOperationMappings(t *testing.T) {
 		{
 			name: "info", operationID: OperationTaskInfo, method: "GET", path: pathTaskInfo,
 			invoke: func(service *Service) error {
-				_, err := service.Info(context.Background(), TaskQuery{TaskID: 88})
+				_, err := service.Info(context.Background(), TaskQuery{TaskID: 88, BusinessID: "biz-1"})
 				return err
 			},
 		},
@@ -137,6 +138,45 @@ func TestServiceOperationMappings(t *testing.T) {
 				t.Fatalf("request=%#v", client.request)
 			}
 		})
+	}
+}
+
+// TestSnapshotRequiresBusinessID 验证文件快照请求不会把缺失业务 ID 的请求发送到远端。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestSnapshotRequiresBusinessID(t *testing.T) {
+	client := &recordingClient{data: `{"ok":true}`}
+	_, err := NewService(client, time.Second).Snapshot(context.Background(), 12, AppTypeThirdParty, " ")
+	if err == nil || !strings.Contains(err.Error(), "business-id 不能为空") {
+		t.Fatalf("err=%v", err)
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("缺少 business-id 不应调用 HTTP client: %#v", client.request)
+	}
+}
+
+// TestTaskQueriesRequireBusinessID 验证状态和详情查询不会把缺失业务 ID 的请求发送到远端。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestTaskQueriesRequireBusinessID(t *testing.T) {
+	for _, invoke := range []func(*Service) error{
+		func(service *Service) error {
+			_, err := service.Status(context.Background(), TaskQuery{TaskID: 88})
+			return err
+		},
+		func(service *Service) error {
+			_, err := service.Info(context.Background(), TaskQuery{TaskID: 88})
+			return err
+		},
+	} {
+		client := &recordingClient{data: `{"ok":true}`}
+		err := invoke(NewService(client, time.Second))
+		if err == nil || !strings.Contains(err.Error(), "business-id 不能为空") {
+			t.Fatalf("err=%v", err)
+		}
+		if client.request.OperationID != "" {
+			t.Fatalf("缺少 business-id 不应调用 HTTP client: %#v", client.request)
+		}
 	}
 }
 

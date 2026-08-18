@@ -183,6 +183,23 @@ func TestBatchDeleteRulesRejectsDuplicateIDs(t *testing.T) {
 	}
 }
 
+// TestBatchDeleteRulesUsesIDsObject 验证批量删除规则请求体按平台要求包装为 ids 对象。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestBatchDeleteRulesUsesIDsObject(t *testing.T) {
+	client := &recordingClient{}
+	if _, err := NewService(client, time.Second).BatchDeleteRules(context.Background(), "group-1", []string{"rule-1", "rule-2"}); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string][]string
+	if err := json.Unmarshal(client.request.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body["ids"]) != 2 || body["ids"][0] != "rule-1" || body["ids"][1] != "rule-2" {
+		t.Fatalf("body=%#v", body)
+	}
+}
+
 // assertMappings 执行映射测试表并校验请求三元组。
 // 入参：t *testing.T 为测试上下文；tests 为 operation/method/path 期望及调用函数。
 // 返回值：无；失败通过 t.Fatal 报告。

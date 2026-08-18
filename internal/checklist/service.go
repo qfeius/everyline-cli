@@ -118,7 +118,7 @@ func (service *Service) Delete(ctx context.Context, id string) (any, error) {
 	return service.doPayload(ctx, OperationDelete, http.MethodDelete, pathCollection+"/"+url.PathEscape(resolvedID), nil, nil, map[string]string{"id": resolvedID})
 }
 
-// BatchDelete 以全有或全无语义批量删除审查清单。
+// BatchDelete 以全有或全无语义批量删除审查清单，并按平台契约包装 ids 请求体。
 // 入参：ctx context.Context 控制取消；ids []string 为非空清单 ID 数组。
 // 返回值：any 为业务 data；error 为输入、编码或远端错误。
 func (service *Service) BatchDelete(ctx context.Context, ids []string) (any, error) {
@@ -126,7 +126,9 @@ func (service *Service) BatchDelete(ctx context.Context, ids []string) (any, err
 	if err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationBatchDelete, http.MethodDelete, pathBatch, nil, resolved, resolved)
+	// 平台 DELETE 批量接口要求对象形状，而不是裸 ID 数组。
+	payload := map[string]any{"ids": resolved}
+	return service.doPayload(ctx, OperationBatchDelete, http.MethodDelete, pathBatch, nil, payload, payload)
 }
 
 // validateBatch 校验批量数组非空且每项满足相应创建或更新契约。

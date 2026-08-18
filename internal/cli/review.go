@@ -164,8 +164,9 @@ func newReviewFileSnapshotCommand(runtime *Runtime, root *rootOptions) *cobra.Co
 	}
 	command.Flags().Int64Var(&fileID, "file-id", 0, "平台文件 ID")
 	command.Flags().StringVar(&appType, "app-type", "", "可选接入类型")
-	command.Flags().StringVar(&businessID, "business-id", "", "可选业务对象 ID")
+	command.Flags().StringVar(&businessID, "business-id", "", "业务对象 ID")
 	_ = command.MarkFlagRequired("file-id")
+	_ = command.MarkFlagRequired("business-id")
 	return command
 }
 
@@ -482,7 +483,8 @@ func addJSONInputFlags(command *cobra.Command, inputPath *string, inline *string
 // 返回值：无。
 func addTaskQueryFlags(command *cobra.Command, query *review.TaskQuery) {
 	command.Flags().Int64Var(&query.TaskID, "task-id", 0, "审查任务 ID")
-	command.Flags().StringVar(&query.BusinessID, "business-id", "", "可选业务对象 ID")
+	command.Flags().StringVar(&query.BusinessID, "business-id", "", "业务对象 ID")
 	command.Flags().StringVar(&query.AppType, "app-type", "", "可选接入类型")
 	_ = command.MarkFlagRequired("task-id")
+	_ = command.MarkFlagRequired("business-id")
 }

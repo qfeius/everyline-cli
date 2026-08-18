@@ -16,14 +16,22 @@ make build
 
 ```bash
 everyline-cli config add dev \
-  --base-url https://example.com \
-  --token-url https://example.com/open-apis/auth/v3/tenant_access_token/internal \
+  --base-url https://open.qfei.cn \
+  --token-url https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal \
   --app-id cli_xxx
 
 export EVERYLINE_APP_SECRET='replace-me'
 everyline-cli auth login
 
 everyline-cli review run --input review-run.json --output json
+```
+
+也可以使用内置环境地址创建 `test`、`blue` 或线上 `prod` Profile（`app-id` 仍需替换为该环境的应用 ID）：
+
+```bash
+everyline-cli config add test --env test --app-id cli_test_xxx
+everyline-cli config add blue --env blue --app-id cli_blue_xxx
+everyline-cli config add prod --env prod --app-id cli_prod_xxx
 ```
 
 `app_secret` 不写入 Profile，也不提供明文命令行参数。可使用 `EVERYLINE_APP_SECRET`、Profile 专用变量或 `auth login --app-secret-stdin`。专用变量以 `EVERYLINE_APP_SECRET_` 开头；常见的小写字母映射为大写，数字保持不变，其他 UTF-8 字节（包括原始大写字母）编码为 `_XX`，因此后缀可逆且不会因大小写或符号碰撞。例如 `prod-eu`、`prod.eu`、`prod_eu` 分别对应 `EVERYLINE_APP_SECRET_PROD_2DEU`、`EVERYLINE_APP_SECRET_PROD_2EEU`、`EVERYLINE_APP_SECRET_PROD_5FEU`。token 缓存在权限为 `0600` 的 `~/.everyline-cli/tokens.json`；CI 可用 `EVERYLINE_ACCESS_TOKEN` 覆盖。

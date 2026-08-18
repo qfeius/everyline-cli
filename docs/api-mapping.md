@@ -38,6 +38,10 @@
 
 `review task wait` 复用 `smartAuditTaskStatus` 做 CLI 侧轮询，不单独计为远端 operation。
 
+批量删除命令对外仍接受重复 `--id` 或 JSON ID 数组，但 HTTP 请求体统一包装为 `{"ids":[...]}`，以匹配平台批量删除接口契约。
+
+文件快照及任务 `status/info/wait` 查询需要同时传入 `businessId`；CLI 在参数层提前校验该必填字段。
+
 `review run` 的数据流为：上传 -> 必要时读取快照 -> 可选主体提取 -> 发起 -> 可选轮询 -> 详情。后续接口使用上传响应中的 `businessId/fileId/fileHash`，不自行生成业务 ID 或文件指纹。
 
 清单创建与更新请求按公开接口说明要求 `name`、`reviewRuleIds`；`contractCategory`、`reviewStage` 为可选兼容字段。

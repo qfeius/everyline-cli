@@ -4,11 +4,10 @@
   "title": "smartAuditTaskQuery",
   "type": "object",
   "additionalProperties": false,
-  "required": ["taskId"],
+  "required": ["taskId", "businessId"],
   "properties": {
     "taskId": {"type": "integer", "minimum": 1},
-    "businessId": {"type": "string"},
+    "businessId": {"type": "string", "minLength": 1},
     "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"]}
   }
 }
-

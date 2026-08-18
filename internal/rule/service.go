@@ -189,7 +189,7 @@ func (service *Service) DeleteRule(ctx context.Context, groupID string, ruleID s
 	return service.doPayload(ctx, OperationDeleteRule, http.MethodDelete, collection+"/"+url.PathEscape(resolvedRuleID), nil, nil, map[string]string{"id": resolvedRuleID})
 }
 
-// BatchDeleteRules 在同一分组内以全有或全无语义批量删除规则。
+// BatchDeleteRules 在同一分组内以全有或全无语义批量删除规则，并按平台契约包装 ids 请求体。
 // 入参：ctx context.Context 控制取消；groupID string 为分组 ID；ids []string 为规则 ID 数组。
 // 返回值：any 为业务 data；error 为输入、编码或远端错误。
 func (service *Service) BatchDeleteRules(ctx context.Context, groupID string, ids []string) (any, error) {
@@ -201,7 +201,9 @@ func (service *Service) BatchDeleteRules(ctx context.Context, groupID string, id
 	if err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationBatchDeleteRule, http.MethodDelete, collection+"/batch", nil, resolved, resolved)
+	// 平台 DELETE 批量接口要求对象形状，而不是裸 ID 数组。
+	payload := map[string]any{"ids": resolved}
+	return service.doPayload(ctx, OperationBatchDeleteRule, http.MethodDelete, collection+"/batch", nil, payload, payload)
 }
 
 // ruleCollectionPath 构造受限的分组规则相对路径。

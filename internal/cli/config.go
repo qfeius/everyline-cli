@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 
@@ -26,6 +27,7 @@ func newConfigCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 // 入参：runtime *Runtime 为配置仓库；root *rootOptions 为输出选项。
 // 返回值：*cobra.Command，可新增或覆盖 Profile。
 func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
+	var environment string
 	var baseURL string
 	var tokenURL string
 	var appID string
@@ -35,6 +37,21 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		Short: "新增或更新 Profile",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
+			if environment != "" {
+				// 预设环境统一提供 base/token 地址，避免同一个 Profile 混用不同环境的 URL。
+				if baseURL != "" || tokenURL != "" {
+					return fmt.Errorf("--env 不能与 --base-url 或 --token-url 同时使用")
+				}
+				preset, err := config.ResolveEnvironment(environment)
+				if err != nil {
+					return err
+				}
+				baseURL = preset.BaseURL
+				tokenURL = preset.TokenURL
+			}
+			if baseURL == "" || tokenURL == "" {
+				return fmt.Errorf("必须指定 --env，或同时指定 --base-url 和 --token-url")
+			}
 			profile := config.Profile{
 				Name:          args[0],
 				BaseURL:       baseURL,
@@ -60,12 +77,11 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			return render(runtime, root, "table", profile)
 		},
 	}
+	command.Flags().StringVar(&environment, "env", "", "使用预设环境：dev|test|blue|prod")
 	command.Flags().StringVar(&baseURL, "base-url", "", "智审开放平台基础 URL")
 	command.Flags().StringVar(&tokenURL, "token-url", "", "tenant token 完整 URL")
 	command.Flags().StringVar(&appID, "app-id", "", "开放平台 app ID")
 	command.Flags().StringVar(&defaultOutput, "default-output", "table", "默认输出格式")
-	_ = command.MarkFlagRequired("base-url")
-	_ = command.MarkFlagRequired("token-url")
 	_ = command.MarkFlagRequired("app-id")
 	return command
 }

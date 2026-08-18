@@ -48,6 +48,9 @@ func TestClientSuccessContract(t *testing.T) {
 		if request.URL.Query().Get("taskId") != "42" {
 			t.Errorf("query=%s", request.URL.RawQuery)
 		}
+		if request.URL.Query().Get("businessId") != "biz-42" {
+			t.Errorf("query=%s", request.URL.RawQuery)
+		}
 		if request.Header.Get("Authorization") != "Bearer token-test" {
 			t.Errorf("authorization=%q", request.Header.Get("Authorization"))
 		}
@@ -60,8 +63,8 @@ func TestClientSuccessContract(t *testing.T) {
 		OperationID:   "smartAuditTaskStatus",
 		Method:        http.MethodGet,
 		Path:          "/open-apis/contract-review/v3/smartAudit/task/status",
-		ContractInput: map[string]any{"taskId": 42},
-		Query:         url.Values{"taskId": []string{"42"}},
+		ContractInput: map[string]any{"taskId": 42, "businessId": "biz-42"},
+		Query:         url.Values{"taskId": []string{"42"}, "businessId": []string{"biz-42"}},
 		SuccessCode:   200,
 	})
 	if err != nil {
@@ -110,7 +113,7 @@ func TestClientAPIError(t *testing.T) {
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestClientRejectsAbsolutePath(t *testing.T) {
-	client := NewClient(config.Profile{BaseURL: "https://example.com"}, staticTokenProvider{}, nil)
+	client := NewClient(config.Profile{BaseURL: "https://open.qfei.cn"}, staticTokenProvider{}, nil)
 	_, err := client.Do(context.Background(), Request{Method: http.MethodGet, Path: "https://evil.example/open-apis/test"})
 	if err == nil {
 		t.Fatal("期望绝对 URL 被拒绝")
@@ -121,7 +124,7 @@ func TestClientRejectsAbsolutePath(t *testing.T) {
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestClientTimesOutTokenRefresh(t *testing.T) {
-	client := NewClient(config.Profile{BaseURL: "https://example.com"}, blockingTokenProvider{}, nil)
+	client := NewClient(config.Profile{BaseURL: "https://open.qfei.cn"}, blockingTokenProvider{}, nil)
 	started := time.Now()
 	_, err := client.Do(context.Background(), Request{OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{}, Timeout: 20 * time.Millisecond})
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -164,7 +167,7 @@ func TestClientTimeoutCoversRetries(t *testing.T) {
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestClientRejectsCatalogDrift(t *testing.T) {
-	client := NewClient(config.Profile{BaseURL: "https://example.com"}, staticTokenProvider{}, nil)
+	client := NewClient(config.Profile{BaseURL: "https://open.qfei.cn"}, staticTokenProvider{}, nil)
 	_, err := client.Do(context.Background(), Request{
 		OperationID: "listReviewChecklists", Method: http.MethodPost, Path: "/open-apis/review-rules/review-checklists",
 	})
@@ -177,7 +180,7 @@ func TestClientRejectsCatalogDrift(t *testing.T) {
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestClientValidatesFinalJSONBody(t *testing.T) {
-	client := NewClient(config.Profile{BaseURL: "https://example.com"}, staticTokenProvider{}, nil)
+	client := NewClient(config.Profile{BaseURL: "https://open.qfei.cn"}, staticTokenProvider{}, nil)
 	_, err := client.Do(context.Background(), Request{
 		OperationID:   "createReviewChecklist",
 		Method:        http.MethodPost,

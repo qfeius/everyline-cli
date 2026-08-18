@@ -152,11 +152,15 @@ func (service *Service) UploadURL(ctx context.Context, fileURL string, name stri
 }
 
 // Snapshot 获取服务端权威文件指纹，供发起审查前校验一致性。
-// 入参：ctx context.Context；fileID int64 为平台文件 ID；appType string、businessID string 为可选业务上下文。
+// 入参：ctx context.Context；fileID int64 为平台文件 ID；appType string 为可选接入类型；businessID string 为必填业务上下文。
 // 返回值：Document 为文件快照；error 为输入或 API 失败。
 func (service *Service) Snapshot(ctx context.Context, fileID int64, appType string, businessID string) (Document, error) {
 	if fileID <= 0 {
 		return nil, fmt.Errorf("file-id 必须大于 0")
+	}
+	businessID = strings.TrimSpace(businessID)
+	if businessID == "" {
+		return nil, fmt.Errorf("business-id 不能为空")
 	}
 	query := url.Values{"fileId": []string{strconv.FormatInt(fileID, 10)}}
 	if appType != "" {
@@ -165,16 +169,12 @@ func (service *Service) Snapshot(ctx context.Context, fileID int64, appType stri
 		}
 		query.Set("appType", appType)
 	}
-	if businessID != "" {
-		query.Set("businessId", businessID)
-	}
+	query.Set("businessId", businessID)
 	input := map[string]any{"fileId": fileID}
 	if appType != "" {
 		input["appType"] = appType
 	}
-	if businessID != "" {
-		input["businessId"] = businessID
-	}
+	input["businessId"] = businessID
 	return service.doJSON(ctx, OperationFileSnapshot, http.MethodGet, pathFileSnapshot, query, nil, input)
 }
 
@@ -227,7 +227,7 @@ func (service *Service) StartFeishu(ctx context.Context, request FeishuStartRequ
 }
 
 // Status 查询轻量任务快照，供轮询器使用。
-// 入参：ctx context.Context；query TaskQuery 为 taskId 和可选业务上下文。
+// 入参：ctx context.Context；query TaskQuery 为 taskId 和必填业务上下文。
 // 返回值：Document 为状态快照；error 为输入或 API 失败。
 func (service *Service) Status(ctx context.Context, query TaskQuery) (Document, error) {
 	values, err := taskQueryValues(query)
@@ -238,7 +238,7 @@ func (service *Service) Status(ctx context.Context, query TaskQuery) (Document, 
 }
 
 // Info 查询终态或调试用任务详情，并保留所有扩展展示字段。
-// 入参：ctx context.Context；query TaskQuery 为 taskId 和可选业务上下文。
+// 入参：ctx context.Context；query TaskQuery 为 taskId 和必填业务上下文。
 // 返回值：Document 为完整详情；error 为输入或 API 失败。
 func (service *Service) Info(ctx context.Context, query TaskQuery) (Document, error) {
 	values, err := taskQueryValues(query)
@@ -317,10 +317,12 @@ func taskQueryValues(query TaskQuery) (url.Values, error) {
 	if query.TaskID <= 0 {
 		return nil, fmt.Errorf("task-id 必须大于 0")
 	}
-	values := url.Values{"taskId": []string{strconv.FormatInt(query.TaskID, 10)}}
-	if query.BusinessID != "" {
-		values.Set("businessId", query.BusinessID)
+	query.BusinessID = strings.TrimSpace(query.BusinessID)
+	if query.BusinessID == "" {
+		return nil, fmt.Errorf("business-id 不能为空")
 	}
+	values := url.Values{"taskId": []string{strconv.FormatInt(query.TaskID, 10)}}
+	values.Set("businessId", query.BusinessID)
 	if query.AppType != "" {
 		if err := ValidateAppType(query.AppType); err != nil {
 			return nil, err

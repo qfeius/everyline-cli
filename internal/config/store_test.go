@@ -15,8 +15,8 @@ import (
 func TestFileStoreLifecycle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")
 	store := NewFileStore(path)
-	dev := Profile{Name: "dev", BaseURL: "https://dev.example.com", TokenURL: "https://dev.example.com/token", AppID: "cli-dev", DefaultOutput: "json"}
-	prod := Profile{Name: "prod", BaseURL: "https://example.com", TokenURL: "https://example.com/token", AppID: "cli-prod", DefaultOutput: "table"}
+	dev := Profile{Name: "dev", BaseURL: "https://dev-open.qtech.cn", TokenURL: "https://dev-open.qtech.cn/token", AppID: "cli-dev", DefaultOutput: "json"}
+	prod := Profile{Name: "prod", BaseURL: "https://blue-open.qtech.cn", TokenURL: "https://blue-open.qtech.cn/token", AppID: "cli-prod", DefaultOutput: "table"}
 	if err := store.Add(prod); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestFileStoreConcurrentInstances(t *testing.T) {
 			<-start
 			name := fmt.Sprintf("profile-%02d", index)
 			errors <- NewFileStore(path).Add(Profile{
-				Name: name, BaseURL: "https://example.com", TokenURL: "https://example.com/token", AppID: name,
+				Name: name, BaseURL: "https://open.qfei.cn", TokenURL: "https://open.qfei.cn/token", AppID: name,
 			})
 		}(index)
 	}

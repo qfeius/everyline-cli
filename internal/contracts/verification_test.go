@@ -56,9 +56,9 @@ func validContractInput(schema string) any {
 	case "review-upload.schema.json":
 		return map[string]any{"file": "contract.pdf", "name": "contract.pdf", "appType": "THIRD_PARTY"}
 	case "review-upload-url.schema.json":
-		return map[string]any{"fileUrl": "https://example.com/contract.pdf", "fileName": "contract.pdf"}
+		return map[string]any{"fileUrl": "https://open.qfei.cn/contract.pdf", "fileName": "contract.pdf"}
 	case "review-file-snapshot.schema.json":
-		return map[string]any{"fileId": 1}
+		return map[string]any{"fileId": 1, "businessId": "biz"}
 	case "review-subject.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "hash"}
 	case "review-start.schema.json":
@@ -66,7 +66,7 @@ func validContractInput(schema string) any {
 	case "review-start-feishu.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "hash", "config": map[string]any{}, "hasQuota": true, "baseSignature": "signature", "packID": "pack"}
 	case "review-task-query.schema.json":
-		return map[string]any{"taskId": 1}
+		return map[string]any{"taskId": 1, "businessId": "biz"}
 	case "checklist.schema.json":
 		return checklist
 	case "checklist-batch-create.schema.json":
@@ -79,7 +79,7 @@ func validContractInput(schema string) any {
 	case "resource-id.schema.json":
 		return map[string]any{"id": "id-1"}
 	case "resource-ids.schema.json":
-		return []string{"id-1"}
+		return map[string]any{"ids": []string{"id-1"}}
 	case "rule-group.schema.json":
 		return map[string]any{"name": "分组"}
 	case "rule.schema.json":
@@ -98,7 +98,7 @@ func validContractInput(schema string) any {
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestRequestSchemaRejectsDrift(t *testing.T) {
-	err := ValidateRequest("batchDeleteReviewChecklists", "DELETE", "/open-apis/review-rules/review-checklists/batch", []string{"same", "same"})
+	err := ValidateRequest("batchDeleteReviewChecklists", "DELETE", "/open-apis/review-rules/review-checklists/batch", map[string]any{"ids": []string{"same", "same"}})
 	if !errors.Is(err, ErrContractMismatch) {
 		t.Fatalf("err=%v，期望 ErrContractMismatch", err)
 	}

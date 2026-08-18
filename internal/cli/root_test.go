@@ -58,6 +58,36 @@ func TestConfigCommands(t *testing.T) {
 	}
 }
 
+// TestConfigAddEnvironmentPreset 验证 config add 可用预设环境创建 test 和 blue Profile。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestConfigAddEnvironmentPreset(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	for _, test := range []struct {
+		name     string
+		baseURL  string
+		tokenURL string
+	}{
+		{name: "test", baseURL: "https://test-open.qtech.cn", tokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
+		{name: "blue", baseURL: "https://blue-open.qtech.cn", tokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
+	} {
+		if err := Execute(context.Background(), runtime, []string{
+			"config", "add", test.name,
+			"--env", test.name,
+			"--app-id", "cli-" + test.name,
+		}); err != nil {
+			t.Fatalf("environment=%s err=%v", test.name, err)
+		}
+		profile, err := runtime.Profiles.Get(test.name)
+		if err != nil {
+			t.Fatalf("environment=%s profile err=%v", test.name, err)
+		}
+		if profile.BaseURL != test.baseURL || profile.TokenURL != test.tokenURL {
+			t.Fatalf("environment=%s profile=%#v", test.name, profile)
+		}
+	}
+}
+
 // TestConfigOverwriteClearsStaleToken 验证同名 Profile 改变环境或 app ID 时不会复用旧 token。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

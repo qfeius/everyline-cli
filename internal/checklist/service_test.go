@@ -153,3 +153,20 @@ func TestBatchDeleteRejectsDuplicateIDs(t *testing.T) {
 		t.Fatalf("重复 ID 不得调用 client: %#v", client.request)
 	}
 }
+
+// TestBatchDeleteUsesIDsObject 验证批量删除请求体按平台要求包装为 ids 对象。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestBatchDeleteUsesIDsObject(t *testing.T) {
+	client := &recordingClient{}
+	if _, err := NewService(client, time.Second).BatchDelete(context.Background(), []string{"check-1", "check-2"}); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string][]string
+	if err := json.Unmarshal(client.request.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body["ids"]) != 2 || body["ids"][0] != "check-1" || body["ids"][1] != "check-2" {
+		t.Fatalf("body=%#v", body)
+	}
+}
