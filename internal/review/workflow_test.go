@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -106,6 +107,32 @@ func TestWorkflowRun(t *testing.T) {
 	for index := range expected {
 		if api.calls[index] != expected[index] {
 			t.Fatalf("calls=%#v", api.calls)
+		}
+	}
+}
+
+// TestWorkflowRunReturnsFailedSnapshot 验证远端任务失败时工作流返回可识别错误，并保留失败终态供调用方诊断。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestWorkflowRunReturnsFailedSnapshot(t *testing.T) {
+	api := &fakeAPI{statuses: []Document{{"status": "fail", "message": "规则执行失败"}}}
+	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
+	result, err := workflow.Run(context.Background(), RunSpec{
+		Source:     RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
+		BusinessID: "biz-1",
+		AppType:    AppTypeThirdParty,
+		Config:     map[string]any{},
+		Wait:       true,
+	})
+	if !errors.Is(err, ErrTaskFailed) {
+		t.Fatalf("err=%v，期望 ErrTaskFailed", err)
+	}
+	if status, _ := StringValue(result.Final, "status"); status != "fail" {
+		t.Fatalf("final=%#v，期望保留失败终态", result.Final)
+	}
+	for _, call := range api.calls {
+		if call == "info" {
+			t.Fatalf("失败终态后不应继续查询详情: calls=%#v", api.calls)
 		}
 	}
 }

@@ -109,6 +109,46 @@ func TestClientAPIError(t *testing.T) {
 	}
 }
 
+// TestClientRetriesNonJSONRateLimit 验证 GET 在网关返回非 JSON 429 时仍按安全重试策略继续执行。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestClientRetriesNonJSONRateLimit(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if attempts.Add(1) == 1 {
+			writer.Header().Set("Retry-After", "1")
+			writer.WriteHeader(http.StatusTooManyRequests)
+			_, _ = writer.Write([]byte("rate limited"))
+			return
+		}
+		_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[]}`))
+	}))
+	defer server.Close()
+	client := NewClient(config.Profile{BaseURL: server.URL}, staticTokenProvider{}, server.Client())
+	// 测试只验证重试决策，不等待真实 Retry-After 时长。
+	client.sleep = func(context.Context, time.Duration) error { return nil }
+	_, err := client.Do(context.Background(), Request{
+		OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{}, Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("attempts=%d，期望非 JSON 429 后重试一次", attempts.Load())
+	}
+}
+
+// TestParseRetryAfterHTTPDate 验证标准 HTTP-date 形式也会转换为正的退避时间。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestParseRetryAfterHTTPDate(t *testing.T) {
+	value := time.Now().Add(5 * time.Second).UTC().Format(http.TimeFormat)
+	delay := parseRetryAfter(value)
+	if delay < 3*time.Second || delay > 5*time.Second {
+		t.Fatalf("delay=%s，期望解析 HTTP-date Retry-After", delay)
+	}
+}
+
 // TestClientRejectsAbsolutePath 验证业务 Client 不会把 token 发送到任意 URL。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

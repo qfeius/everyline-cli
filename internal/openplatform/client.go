@@ -168,7 +168,16 @@ func (client *Client) doOnce(ctx context.Context, operation Request, accessToken
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(content, &envelope); err != nil {
-		apiError := &APIError{HTTPStatus: httpResponse.StatusCode, Code: "INVALID_RESPONSE", Message: "远端响应不是合法 JSON", RequestID: requestID, Retryable: httpResponse.StatusCode >= 500}
+		// 网关可能在限流或故障时返回空 body/HTML；重试决策必须独立于业务 envelope 是否可解析。
+		retryable := httpResponse.StatusCode == http.StatusTooManyRequests || httpResponse.StatusCode >= 500
+		apiError := &APIError{
+			HTTPStatus: httpResponse.StatusCode,
+			Code:       "INVALID_RESPONSE",
+			Message:    "远端响应不是合法 JSON",
+			RequestID:  requestID,
+			RetryAfter: parseRetryAfter(httpResponse.Header.Get("Retry-After")),
+			Retryable:  retryable,
+		}
 		return Response{}, apiError.Retryable, apiError
 	}
 	code := rawCode(envelope.Code)
@@ -206,15 +215,24 @@ func rawCode(value json.RawMessage) string {
 	return strings.TrimSpace(string(value))
 }
 
-// parseRetryAfter 解析 Retry-After 的秒数形式。
+// parseRetryAfter 解析 Retry-After 的秒数或标准 HTTP-date 形式。
 // 入参：value string 为响应头值。
 // 返回值：time.Duration，无法解析时为 0。
 func parseRetryAfter(value string) time.Duration {
-	seconds, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || seconds <= 0 {
+	normalized := strings.TrimSpace(value)
+	seconds, err := strconv.Atoi(normalized)
+	if err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	retryAt, err := http.ParseTime(normalized)
+	if err != nil {
 		return 0
 	}
-	return time.Duration(seconds) * time.Second
+	delay := time.Until(retryAt)
+	if delay <= 0 {
+		return 0
+	}
+	return delay
 }
 
 // retryDelay 计算带轻微抖动的指数退避，并优先尊重 Retry-After。

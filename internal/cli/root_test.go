@@ -18,6 +18,7 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
+	"git.qtech.cn/ai/everyline-cli/internal/review"
 )
 
 // testRuntime 创建隔离文件仓库和内存 I/O 的 CLI 运行时。
@@ -314,6 +315,35 @@ func TestBatchDeleteDryRunRejectsDuplicateIDs(t *testing.T) {
 		if err := Execute(context.Background(), runtime, args); err == nil || !strings.Contains(err.Error(), "重复") {
 			t.Fatalf("args=%v err=%v", args, err)
 		}
+	}
+}
+
+// TestChecklistBatchDeleteDryRunMatchesRequestBody 验证 dry-run 输出与真实批量删除 JSON body 保持一致。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestChecklistBatchDeleteDryRunMatchesRequestBody(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	err := Execute(context.Background(), runtime, []string{"checklist", "batch-delete", "--id", "check-1", "--id", "check-2", "--dry-run", "--output", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.IDs) != 2 || output.IDs[0] != "check-1" || output.IDs[1] != "check-2" {
+		t.Fatalf("output=%s，期望对象形状的 ids", stdout.String())
+	}
+}
+
+// TestExitCodeMapsTaskFailureToAPI 验证远端审查任务失败不会被误判为参数错误或成功。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestExitCodeMapsTaskFailureToAPI(t *testing.T) {
+	if code := ExitCode(review.ErrTaskFailed); code != ExitAPI {
+		t.Fatalf("code=%d，期望 %d", code, ExitAPI)
 	}
 }
 

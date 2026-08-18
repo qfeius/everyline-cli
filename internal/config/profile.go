@@ -26,7 +26,7 @@ func (profile Profile) Validate() error {
 	if !profileNamePattern.MatchString(profile.Name) {
 		return fmt.Errorf("profile 名称只能包含字母、数字、点、下划线和短横线")
 	}
-	if err := validateHTTPURL("base-url", profile.BaseURL); err != nil {
+	if err := validateBaseURL(profile.BaseURL); err != nil {
 		return err
 	}
 	if err := validateHTTPURL("token-url", profile.TokenURL); err != nil {
@@ -46,11 +46,33 @@ func (profile Profile) Validate() error {
 	}
 }
 
+// validateBaseURL 校验业务基础地址可被 HTTP Adapter 安全拼接固定的 /open-apis/ 路径。
+// 入参：value string 为待校验的基础 URL。
+// 返回值：error，URL 完整、安全且不含 query/fragment 时为 nil。
+func validateBaseURL(value string) error {
+	if err := validateHTTPURL("base-url", value); err != nil {
+		return err
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil {
+		return fmt.Errorf("base-url 必须是完整的 http/https URL")
+	}
+	// HTTP Adapter 会在 BaseURL 后拼接固定路径，query/fragment 会改变最终请求目标。
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("base-url 不能包含 query 或 fragment")
+	}
+	return nil
+}
+
 // validateHTTPURL 校验字符串是完整的 HTTPS URL；仅为本机开发保留 loopback HTTP。
 // 入参：field string 为字段名；value string 为待校验 URL。
 // 返回值：error，URL 合法时为 nil。
 func validateHTTPURL(field string, value string) error {
-	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
+	normalized := strings.TrimSpace(value)
+	if value != normalized {
+		return fmt.Errorf("%s 不能包含首尾空白", field)
+	}
+	parsed, err := url.ParseRequestURI(normalized)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("%s 必须是完整的 http/https URL", field)
 	}

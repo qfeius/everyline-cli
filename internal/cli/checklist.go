@@ -268,7 +268,8 @@ func newChecklistBatchDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.
 				return err
 			}
 			if dryRun || printInput {
-				return render(runtime, root, "json", resolved)
+				// dry-run 与真实 DELETE body 使用同一对象形状，避免脚本依据错误预览生成请求。
+				return render(runtime, root, "json", map[string]any{"ids": resolved})
 			}
 			if !yes {
 				return fmt.Errorf("批量删除必须显式传 --yes")

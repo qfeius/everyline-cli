@@ -2,9 +2,13 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
+
+// ErrTaskFailed 表示远端审查任务已进入明确的失败终态。
+var ErrTaskFailed = errors.New("审查任务失败")
 
 // Clock 隔离真实时间与测试假时钟。
 type Clock interface {
@@ -127,7 +131,9 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 		return result, fmt.Errorf("发起审查响应缺少有效 taskId")
 	}
 	query := TaskQuery{TaskID: taskID, BusinessID: businessID, AppType: spec.AppType}
-	if _, err := workflow.Wait(ctx, query); err != nil {
+	// 先保存轮询终态；失败时调用方仍可读取诊断字段，成功时再用完整详情替换。
+	result.Final, err = workflow.Wait(ctx, query)
+	if err != nil {
 		return result, err
 	}
 	result.Final, err = workflow.api.Info(ctx, query)
@@ -136,7 +142,7 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 
 // Wait 持续查询 status，直到 success/fail 或 deadline/cancel。
 // 入参：ctx context.Context 控制取消；query TaskQuery 为任务身份。
-// 返回值：Document 为最后状态快照；error 为超时、取消或 API 失败。
+// 返回值：Document 为最后状态快照；error 为任务失败、超时、取消或 API 失败。
 func (workflow *Workflow) Wait(ctx context.Context, query TaskQuery) (Document, error) {
 	waitContext, cancel := context.WithTimeout(ctx, workflow.options.Deadline)
 	defer cancel()
@@ -146,8 +152,15 @@ func (workflow *Workflow) Wait(ctx context.Context, query TaskQuery) (Document, 
 			return nil, err
 		}
 		status, _ := StringValue(snapshot, "status")
-		if status == "success" || status == "fail" {
+		if status == "success" {
 			return snapshot, nil
+		}
+		if status == "fail" {
+			failureMessage, _ := StringValue(snapshot, "message")
+			if failureMessage != "" {
+				return snapshot, fmt.Errorf("%w: %s", ErrTaskFailed, failureMessage)
+			}
+			return snapshot, ErrTaskFailed
 		}
 		if status != "running" {
 			return nil, fmt.Errorf("未知任务状态: %q", status)

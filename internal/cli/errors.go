@@ -9,6 +9,7 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
+	"git.qtech.cn/ai/everyline-cli/internal/review"
 )
 
 const (
@@ -30,7 +31,7 @@ func ExitCode(err error) int {
 	if errors.As(err, &apiError) {
 		return ExitAPI
 	}
-	if errors.Is(err, contracts.ErrContractUnverified) || errors.Is(err, contracts.ErrContractMismatch) {
+	if errors.Is(err, contracts.ErrContractUnverified) || errors.Is(err, contracts.ErrContractMismatch) || errors.Is(err, review.ErrTaskFailed) {
 		return ExitAPI
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
