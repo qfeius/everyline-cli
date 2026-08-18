@@ -22,7 +22,7 @@ NODE
 fi
 
 node "$package_root/scripts/verify-package-version.js"
-(cd "$package_root" && npm pack --dry-run --json --ignore-scripts) > "$manifest"
+(cd "$package_root" && npm pack --dry-run --json) > "$manifest"
 
 # 由 Node 解析 npm 的 JSON 清单，精确核对 wrapper、checksum 和六个平台产物。
 node - "$manifest" <<'NODE'

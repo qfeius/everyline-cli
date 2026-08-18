@@ -57,11 +57,12 @@ func TestClientSuccessContract(t *testing.T) {
 	defer server.Close()
 	client := NewClient(config.Profile{BaseURL: server.URL}, staticTokenProvider{}, server.Client())
 	response, err := client.Do(context.Background(), Request{
-		OperationID: "smartAuditTaskStatus",
-		Method:      http.MethodGet,
-		Path:        "/open-apis/contract-review/v3/smartAudit/task/status",
-		Query:       url.Values{"taskId": []string{"42"}},
-		SuccessCode: 200,
+		OperationID:   "smartAuditTaskStatus",
+		Method:        http.MethodGet,
+		Path:          "/open-apis/contract-review/v3/smartAudit/task/status",
+		ContractInput: map[string]any{"taskId": 42},
+		Query:         url.Values{"taskId": []string{"42"}},
+		SuccessCode:   200,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +88,15 @@ func TestClientAPIError(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewClient(config.Profile{BaseURL: server.URL}, staticTokenProvider{}, server.Client())
-	_, err := client.Do(context.Background(), Request{OperationID: "createReviewChecklist", Method: http.MethodPost, Path: "/open-apis/review-rules/review-checklists", SuccessCode: 200})
+	_, err := client.Do(context.Background(), Request{
+		OperationID:   "createReviewChecklist",
+		Method:        http.MethodPost,
+		Path:          "/open-apis/review-rules/review-checklists",
+		ContractInput: map[string]any{"name": "清单", "reviewRuleIds": []string{"rule-1"}},
+		Header:        http.Header{"Content-Type": []string{"application/json"}},
+		Body:          []byte(`{"name":"清单","reviewRuleIds":["rule-1"]}`),
+		SuccessCode:   200,
+	})
 	var apiError *APIError
 	if !errors.As(err, &apiError) {
 		t.Fatalf("err=%T %v", err, err)
@@ -114,7 +123,7 @@ func TestClientRejectsAbsolutePath(t *testing.T) {
 func TestClientTimesOutTokenRefresh(t *testing.T) {
 	client := NewClient(config.Profile{BaseURL: "https://example.com"}, blockingTokenProvider{}, nil)
 	started := time.Now()
-	_, err := client.Do(context.Background(), Request{OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", Timeout: 20 * time.Millisecond})
+	_, err := client.Do(context.Background(), Request{OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{}, Timeout: 20 * time.Millisecond})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v，期望 context deadline exceeded", err)
 	}
@@ -138,7 +147,7 @@ func TestClientTimeoutCoversRetries(t *testing.T) {
 	client := NewClient(config.Profile{BaseURL: server.URL}, staticTokenProvider{}, server.Client())
 	started := time.Now()
 	_, err := client.Do(context.Background(), Request{
-		OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", Timeout: 40 * time.Millisecond,
+		OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{}, Timeout: 40 * time.Millisecond,
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v，期望 context deadline exceeded", err)
@@ -158,6 +167,24 @@ func TestClientRejectsCatalogDrift(t *testing.T) {
 	client := NewClient(config.Profile{BaseURL: "https://example.com"}, staticTokenProvider{}, nil)
 	_, err := client.Do(context.Background(), Request{
 		OperationID: "listReviewChecklists", Method: http.MethodPost, Path: "/open-apis/review-rules/review-checklists",
+	})
+	if !errors.Is(err, contracts.ErrContractMismatch) {
+		t.Fatalf("err=%v，期望 ErrContractMismatch", err)
+	}
+}
+
+// TestClientValidatesFinalJSONBody 验证最终 body 漂移时不会被旁路 ContractInput 掩盖。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestClientValidatesFinalJSONBody(t *testing.T) {
+	client := NewClient(config.Profile{BaseURL: "https://example.com"}, staticTokenProvider{}, nil)
+	_, err := client.Do(context.Background(), Request{
+		OperationID:   "createReviewChecklist",
+		Method:        http.MethodPost,
+		Path:          "/open-apis/review-rules/review-checklists",
+		ContractInput: map[string]any{"name": "清单", "reviewRuleIds": []string{"rule-1"}},
+		Header:        http.Header{"Content-Type": []string{"application/json"}},
+		Body:          []byte(`{"name":"清单"}`),
 	})
 	if !errors.Is(err, contracts.ErrContractMismatch) {
 		t.Fatalf("err=%v，期望 ErrContractMismatch", err)

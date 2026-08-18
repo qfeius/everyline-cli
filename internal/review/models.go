@@ -163,9 +163,9 @@ type RunResult struct {
 
 // TaskQuery 是 status、info 和 wait 的公共查询上下文。
 type TaskQuery struct {
-	TaskID     int64
-	BusinessID string
-	AppType    string
+	TaskID     int64  `json:"taskId"`
+	BusinessID string `json:"businessId,omitempty"`
+	AppType    string `json:"appType,omitempty"`
 }
 
 // ValidateAppType 校验后端冻结的三种接入应用类型。

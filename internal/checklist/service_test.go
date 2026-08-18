@@ -22,7 +22,7 @@ type recordingClient struct {
 // 返回值：openplatform.Response 为固定对象；error 在请求偏离契约目录时非 nil。
 func (client *recordingClient) Do(_ context.Context, request openplatform.Request) (openplatform.Response, error) {
 	client.request = request
-	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path); err != nil {
+	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path, request.ContractInput); err != nil {
 		return openplatform.Response{}, err
 	}
 	return openplatform.Response{Data: json.RawMessage(`{"ok":true}`)}, nil
@@ -111,5 +111,45 @@ func TestListQueryContract(t *testing.T) {
 	}
 	if len(client.request.Query["reviewStages"]) != 2 || client.request.Query.Get("enabled") != "false" || client.request.Query.Get("pageIndex") != "2" {
 		t.Fatalf("query=%s", client.request.Query.Encode())
+	}
+}
+
+// TestSingleUpdateIDContract 验证单项更新拒绝路径/body ID 冲突，并在一致时只发送路径 ID。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestSingleUpdateIDContract(t *testing.T) {
+	payload := Checklist{ID: "other", Name: "清单", ReviewRuleIDs: []string{"rule-1"}}
+	client := &recordingClient{}
+	service := NewService(client, time.Second)
+	if _, err := service.Update(context.Background(), "check-1", payload); err == nil {
+		t.Fatal("路径 ID 与 body ID 冲突时应拒绝")
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("冲突请求不得调用 client: %#v", client.request)
+	}
+	payload.ID = "check-1"
+	if _, err := service.Update(context.Background(), "check-1", payload); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(client.request.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := body["id"]; exists {
+		t.Fatalf("单项更新 body 不应包含 id: %#v", body)
+	}
+}
+
+// TestBatchDeleteRejectsDuplicateIDs 验证服务边界按 resource-ids Schema 拒绝规范化后的重复 ID。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestBatchDeleteRejectsDuplicateIDs(t *testing.T) {
+	client := &recordingClient{}
+	_, err := NewService(client, time.Second).BatchDelete(context.Background(), []string{"check-1", " check-1 "})
+	if err == nil {
+		t.Fatal("重复 ID 应被拒绝")
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("重复 ID 不得调用 client: %#v", client.request)
 	}
 }

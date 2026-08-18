@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -20,7 +19,6 @@ import (
 var (
 	ErrCredentialsMissing = errors.New("缺少应用密钥或有效 token")
 	ErrAuthentication     = errors.New("鉴权失败")
-	profileEnvSanitizer   = regexp.MustCompile(`[^A-Za-z0-9]`)
 )
 
 const OperationTenantAccessTokenInternal = "tenantAccessTokenInternal"
@@ -89,10 +87,11 @@ func (provider *Provider) Login(ctx context.Context, profile config.Profile, app
 	if strings.TrimSpace(appSecret) == "" {
 		return Token{}, ErrCredentialsMissing
 	}
-	if err := contracts.ValidateRequest(OperationTenantAccessTokenInternal, http.MethodPost, "profile.token_url"); err != nil {
+	contractInput := map[string]string{"appId": profile.AppID, "appSecret": appSecret}
+	if err := contracts.ValidateRequest(OperationTenantAccessTokenInternal, http.MethodPost, "profile.token_url", contractInput); err != nil {
 		return Token{}, err
 	}
-	payload, err := json.Marshal(map[string]string{"appId": profile.AppID, "appSecret": appSecret})
+	payload, err := json.Marshal(contractInput)
 	if err != nil {
 		return Token{}, fmt.Errorf("编码 token 请求: %w", err)
 	}
@@ -143,11 +142,34 @@ func (provider *Provider) Login(ctx context.Context, profile config.Profile, app
 // 入参：profileName string 为 Profile 名称。
 // 返回值：string，仅驻留进程内存的 app secret；未配置时为空。
 func SecretFromEnvironment(profileName string) string {
-	suffix := strings.ToUpper(profileEnvSanitizer.ReplaceAllString(profileName, "_"))
-	if suffix != "" {
-		if secret := strings.TrimSpace(os.Getenv("EVERYLINE_APP_SECRET_" + suffix)); secret != "" {
+	key := profileSecretEnvironmentKey(profileName)
+	if key != "" {
+		if secret := strings.TrimSpace(os.Getenv(key)); secret != "" {
 			return secret
 		}
 	}
 	return strings.TrimSpace(os.Getenv("EVERYLINE_APP_SECRET"))
+}
+
+// profileSecretEnvironmentKey 将 Profile 名编码为无碰撞的专用密钥环境变量名。
+// 入参：profileName string 为配置中受限为字母、数字、点、下划线和连字符的名称。
+// 返回值：string，为 EVERYLINE_APP_SECRET_ 前缀加可逆后缀；空名称返回空字符串。
+func profileSecretEnvironmentKey(profileName string) string {
+	if profileName == "" {
+		return ""
+	}
+	var suffix strings.Builder
+	for _, character := range []byte(profileName) {
+		if character >= 'a' && character <= 'z' {
+			suffix.WriteByte(character - ('a' - 'A'))
+			continue
+		}
+		if character >= '0' && character <= '9' {
+			suffix.WriteByte(character)
+			continue
+		}
+		// 原始大写字母和所有符号都转为固定十六进制，既保留常见小写名称的可读性，也保持大小写可逆。
+		_, _ = fmt.Fprintf(&suffix, "_%02X", character)
+	}
+	return "EVERYLINE_APP_SECRET_" + suffix.String()
 }

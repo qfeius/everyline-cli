@@ -111,25 +111,22 @@ func newRuleGroupUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use: "update", Short: "更新规则分组", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			resolvedID, err := normalizeRequiredID(id, "id")
-			if err != nil {
-				return err
-			}
 			var payload rule.Group
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
 				return err
 			}
-			if err := payload.Validate(false); err != nil {
+			resolvedID, normalized, err := payload.NormalizeUpdate(id)
+			if err != nil {
 				return err
 			}
 			if dryRun || printInput {
-				return render(runtime, root, "json", map[string]any{"id": resolvedID, "data": payload})
+				return render(runtime, root, "json", map[string]any{"id": resolvedID, "data": normalized})
 			}
 			service, profile, err := buildRuleService(runtime, root)
 			if err != nil {
 				return err
 			}
-			result, err := service.UpdateGroup(command.Context(), resolvedID, payload)
+			result, err := service.UpdateGroup(command.Context(), resolvedID, normalized)
 			if err != nil {
 				return err
 			}
@@ -290,25 +287,22 @@ func newRuleUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use: "update", Short: "更新审查规则", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			resolvedRuleID, err := normalizeRequiredID(ruleID, "rule-id")
-			if err != nil {
-				return err
-			}
 			var payload rule.Rule
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
 				return err
 			}
-			if err := payload.Validate(false); err != nil {
+			resolvedRuleID, normalized, err := payload.NormalizeUpdate(ruleID)
+			if err != nil {
 				return err
 			}
 			if dryRun || printInput {
-				return render(runtime, root, "json", map[string]any{"groupId": groupID, "ruleId": resolvedRuleID, "data": payload})
+				return render(runtime, root, "json", map[string]any{"groupId": groupID, "ruleId": resolvedRuleID, "data": normalized})
 			}
 			service, profile, err := buildRuleService(runtime, root)
 			if err != nil {
 				return err
 			}
-			result, err := service.UpdateRule(command.Context(), groupID, resolvedRuleID, payload)
+			result, err := service.UpdateRule(command.Context(), groupID, resolvedRuleID, normalized)
 			if err != nil {
 				return err
 			}

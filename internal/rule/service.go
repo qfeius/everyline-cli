@@ -60,7 +60,7 @@ func (service *Service) CreateGroup(ctx context.Context, payload Group) (any, er
 	if err := payload.Validate(false); err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationCreateGroup, http.MethodPost, pathGroups, nil, payload)
+	return service.doPayload(ctx, OperationCreateGroup, http.MethodPost, pathGroups, nil, payload, payload)
 }
 
 // ListGroups 查询规则分组。
@@ -71,21 +71,18 @@ func (service *Service) ListGroups(ctx context.Context, query Query) (any, error
 	if err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationListGroups, http.MethodGet, pathGroups, values, nil)
+	return service.doPayload(ctx, OperationListGroups, http.MethodGet, pathGroups, values, nil, query)
 }
 
 // UpdateGroup 更新路径 ID 指定的规则分组。
 // 入参：ctx context.Context 控制取消；id string 为分组 ID；payload Group 为更新字段。
 // 返回值：any 为业务 data；error 为输入、编码或远端错误。
 func (service *Service) UpdateGroup(ctx context.Context, id string, payload Group) (any, error) {
-	resolvedID, err := requireID(id, "id")
+	resolvedID, normalized, err := payload.NormalizeUpdate(id)
 	if err != nil {
 		return nil, err
 	}
-	if err := payload.Validate(false); err != nil {
-		return nil, err
-	}
-	return service.doPayload(ctx, OperationUpdateGroup, http.MethodPut, pathGroups+"/"+url.PathEscape(resolvedID), nil, payload)
+	return service.doPayload(ctx, OperationUpdateGroup, http.MethodPut, pathGroups+"/"+url.PathEscape(resolvedID), nil, normalized, normalized)
 }
 
 // DeleteGroup 删除规则分组；调用方负责在执行前取得级联删除确认。
@@ -96,7 +93,7 @@ func (service *Service) DeleteGroup(ctx context.Context, id string) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationDeleteGroup, http.MethodDelete, pathGroups+"/"+url.PathEscape(resolvedID), nil, nil)
+	return service.doPayload(ctx, OperationDeleteGroup, http.MethodDelete, pathGroups+"/"+url.PathEscape(resolvedID), nil, nil, map[string]string{"id": resolvedID})
 }
 
 // CreateRule 在指定分组内创建规则。
@@ -110,7 +107,7 @@ func (service *Service) CreateRule(ctx context.Context, groupID string, payload 
 	if err := payload.Validate(false); err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationCreateRule, http.MethodPost, collection, nil, payload)
+	return service.doPayload(ctx, OperationCreateRule, http.MethodPost, collection, nil, payload, payload)
 }
 
 // BatchCreateRules 在同一分组内以全有或全无语义批量创建规则。
@@ -127,7 +124,7 @@ func (service *Service) BatchCreateRules(ctx context.Context, groupID string, pa
 	if err := contracts.RequireVerified(OperationBatchCreateRule); err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationBatchCreateRule, http.MethodPost, collection+"/batch", nil, payload)
+	return service.doPayload(ctx, OperationBatchCreateRule, http.MethodPost, collection+"/batch", nil, payload, payload)
 }
 
 // ListRules 查询指定分组内的规则。
@@ -142,7 +139,7 @@ func (service *Service) ListRules(ctx context.Context, groupID string, query Que
 	if err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationListRules, http.MethodGet, collection, values, nil)
+	return service.doPayload(ctx, OperationListRules, http.MethodGet, collection, values, nil, query)
 }
 
 // UpdateRule 更新指定分组中的一条规则。
@@ -153,14 +150,11 @@ func (service *Service) UpdateRule(ctx context.Context, groupID string, ruleID s
 	if err != nil {
 		return nil, err
 	}
-	resolvedRuleID, err := requireID(ruleID, "rule-id")
+	resolvedRuleID, normalized, err := payload.NormalizeUpdate(ruleID)
 	if err != nil {
 		return nil, err
 	}
-	if err := payload.Validate(false); err != nil {
-		return nil, err
-	}
-	return service.doPayload(ctx, OperationUpdateRule, http.MethodPut, collection+"/"+url.PathEscape(resolvedRuleID), nil, payload)
+	return service.doPayload(ctx, OperationUpdateRule, http.MethodPut, collection+"/"+url.PathEscape(resolvedRuleID), nil, normalized, normalized)
 }
 
 // BatchUpdateRules 在同一分组内以全有或全无语义批量更新规则。
@@ -177,7 +171,7 @@ func (service *Service) BatchUpdateRules(ctx context.Context, groupID string, pa
 	if err := contracts.RequireVerified(OperationBatchUpdateRule); err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationBatchUpdateRule, http.MethodPut, collection+"/batch", nil, payload)
+	return service.doPayload(ctx, OperationBatchUpdateRule, http.MethodPut, collection+"/batch", nil, payload, payload)
 }
 
 // DeleteRule 删除指定分组中的一条规则。
@@ -192,7 +186,7 @@ func (service *Service) DeleteRule(ctx context.Context, groupID string, ruleID s
 	if err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationDeleteRule, http.MethodDelete, collection+"/"+url.PathEscape(resolvedRuleID), nil, nil)
+	return service.doPayload(ctx, OperationDeleteRule, http.MethodDelete, collection+"/"+url.PathEscape(resolvedRuleID), nil, nil, map[string]string{"id": resolvedRuleID})
 }
 
 // BatchDeleteRules 在同一分组内以全有或全无语义批量删除规则。
@@ -203,10 +197,11 @@ func (service *Service) BatchDeleteRules(ctx context.Context, groupID string, id
 	if err != nil {
 		return nil, err
 	}
-	if err := validateIDs(ids); err != nil {
+	resolved, err := contracts.NormalizeUniqueIDs(ids, "rule-id")
+	if err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationBatchDeleteRule, http.MethodDelete, collection+"/batch", nil, ids)
+	return service.doPayload(ctx, OperationBatchDeleteRule, http.MethodDelete, collection+"/batch", nil, resolved, resolved)
 }
 
 // ruleCollectionPath 构造受限的分组规则相对路径。
@@ -235,21 +230,6 @@ func validateBatch(payload []Rule, requireID bool) error {
 	return nil
 }
 
-// validateIDs 校验规则 ID 数组不为空且不含空值。
-// 入参：ids []string 为规则 ID 数组。
-// 返回值：error，数组有效时为 nil。
-func validateIDs(ids []string) error {
-	if len(ids) == 0 {
-		return fmt.Errorf("rule-id 列表不能为空")
-	}
-	for index, id := range ids {
-		if strings.TrimSpace(id) == "" {
-			return fmt.Errorf("第 %d 个 rule-id 不能为空", index+1)
-		}
-	}
-	return nil
-}
-
 // queryValues 将规则分页排序模型编码为 URL 参数。
 // 入参：query Query 为分页排序条件。
 // 返回值：url.Values 为编码结果；error 为校验错误。
@@ -271,9 +251,9 @@ func queryValues(query Query) (url.Values, error) {
 }
 
 // doPayload 编码可选 JSON body，执行请求并保留 data 的对象、数组或标量形状。
-// 入参：ctx context.Context；operationID/method/path string 定义契约；query url.Values 为查询；payload any 为可选 body。
+// 入参：ctx context.Context；operationID/method/path string 定义契约；query url.Values 为查询；payload any 为可选 body；contractInput any 为 Schema 输入。
 // 返回值：any 为业务 data；error 为编码、HTTP Adapter 或解码失败。
-func (service *Service) doPayload(ctx context.Context, operationID string, method string, path string, query url.Values, payload any) (any, error) {
+func (service *Service) doPayload(ctx context.Context, operationID string, method string, path string, query url.Values, payload any, contractInput any) (any, error) {
 	var body []byte
 	header := http.Header{}
 	if payload != nil {
@@ -284,7 +264,7 @@ func (service *Service) doPayload(ctx context.Context, operationID string, metho
 		body = encoded
 		header.Set("Content-Type", "application/json")
 	}
-	response, err := service.client.Do(ctx, openplatform.Request{OperationID: operationID, Method: method, Path: path, Query: query, Header: header, Body: body, Timeout: service.timeout, SuccessCode: 200})
+	response, err := service.client.Do(ctx, openplatform.Request{OperationID: operationID, Method: method, Path: path, ContractInput: contractInput, Query: query, Header: header, Body: body, Timeout: service.timeout, SuccessCode: 200})
 	if err != nil {
 		return nil, err
 	}

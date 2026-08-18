@@ -24,14 +24,15 @@ const maxResponseBytes = 32 << 20
 
 // Request 描述 HTTP Adapter 内部的一个远端操作。
 type Request struct {
-	OperationID string
-	Method      string
-	Path        string
-	Query       url.Values
-	Header      http.Header
-	Body        []byte
-	Timeout     time.Duration
-	SuccessCode int
+	OperationID   string
+	Method        string
+	Path          string
+	ContractInput any
+	Query         url.Values
+	Header        http.Header
+	Body          []byte
+	Timeout       time.Duration
+	SuccessCode   int
 }
 
 // Response 是已验证成功码后的业务响应，不向 CLI handler 暴露远端 envelope。
@@ -63,8 +64,8 @@ func NewClient(profile config.Profile, tokens TokenProvider, httpClient *http.Cl
 	return &Client{profile: profile, tokens: tokens, httpClient: httpClient, sleep: sleepContext}
 }
 
-// Do 执行远端请求，验证 HTTP 状态与接口专属业务成功码，并返回 data。
-// 入参：ctx context.Context 控制取消；operation Request 描述方法、路径、body 和成功码。
+// Do 执行远端请求，先校验路由与 Schema，再验证 HTTP 状态和接口专属业务成功码。
+// 入参：ctx context.Context 控制取消；operation Request 描述方法、路径、逻辑契约输入、body 和成功码。
 // 返回值：Response 为成功业务数据；error 为鉴权、网络或 API 错误。
 func (client *Client) Do(ctx context.Context, operation Request) (Response, error) {
 	if operation.SuccessCode == 0 {
@@ -76,7 +77,11 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 	if !strings.HasPrefix(operation.Path, "/open-apis/") || strings.Contains(operation.Path, "://") {
 		return Response{}, fmt.Errorf("拒绝非 /open-apis/ 相对路径: %s", operation.Path)
 	}
-	if err := contracts.ValidateRequest(operation.OperationID, operation.Method, operation.Path); err != nil {
+	contractInput, err := requestContractInput(operation)
+	if err != nil {
+		return Response{}, err
+	}
+	if err := contracts.ValidateRequest(operation.OperationID, operation.Method, operation.Path, contractInput); err != nil {
 		return Response{}, err
 	}
 	// token 获取、所有请求尝试与退避共享一个截止时间，--timeout 表示整次操作预算。
@@ -102,6 +107,27 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 		}
 	}
 	return Response{}, fmt.Errorf("请求未执行")
+}
+
+// requestContractInput 对 JSON 操作解析最终 HTTP body，其他操作使用显式的 query/path/multipart 逻辑输入。
+// 入参：operation Request 为待发送请求。
+// 返回值：any 为 Schema 校验输入；error 在 JSON body 非法或包含多值时包装 ErrContractMismatch。
+func requestContractInput(operation Request) (any, error) {
+	contentType := strings.ToLower(operation.Header.Get("Content-Type"))
+	if !strings.HasPrefix(contentType, "application/json") {
+		return operation.ContractInput, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(operation.Body))
+	decoder.UseNumber()
+	var input any
+	if err := decoder.Decode(&input); err != nil {
+		return nil, fmt.Errorf("%w: %s JSON body 无效: %v", contracts.ErrContractMismatch, operation.OperationID, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, fmt.Errorf("%w: %s JSON body 只能包含一个值", contracts.ErrContractMismatch, operation.OperationID)
+	}
+	return input, nil
 }
 
 // doOnce 执行单次请求并判断是否允许 GET 安全重试。

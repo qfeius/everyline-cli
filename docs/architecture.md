@@ -1,6 +1,6 @@
 # 架构
 
-CLI handler 只负责参数解析、输入校验、调用模块和输出渲染。`internal/openplatform.Client` 持有基础 URL、Bearer token、响应 envelope、request ID、超时与 GET 安全重试；`internal/review.Workflow` 隐藏上传、快照、主体提取、发起、轮询和详情编排。
+CLI handler 只负责参数解析、输入校验、调用模块和输出渲染。`internal/openplatform.Client` 持有基础 URL、Bearer token、响应 envelope、request ID、超时与 GET 安全重试，并在发送前按 operation 校验 method/path 与嵌入的 JSON Schema；`internal/review.Workflow` 隐藏上传、快照、主体提取、发起、轮询和详情编排。
 
 ```text
 Shell / Agent / CI

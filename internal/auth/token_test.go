@@ -83,3 +83,24 @@ func TestFileTokenStoreConcurrentInstances(t *testing.T) {
 		}
 	}
 }
+
+// TestProfileSecretEnvironmentKeysDoNotCollide 验证点、横线和下划线 Profile 使用不同的专用密钥变量。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestProfileSecretEnvironmentKeysDoNotCollide(t *testing.T) {
+	t.Setenv("EVERYLINE_APP_SECRET_PROD_2DEU", "hyphen-secret")
+	t.Setenv("EVERYLINE_APP_SECRET_PROD_2EEU", "dot-secret")
+	t.Setenv("EVERYLINE_APP_SECRET_PROD_5FEU", "underscore-secret")
+	t.Setenv("EVERYLINE_APP_SECRET__50_52_4F_44_2D_45_55", "uppercase-secret")
+	tests := map[string]string{
+		"prod-eu": "hyphen-secret",
+		"prod.eu": "dot-secret",
+		"prod_eu": "underscore-secret",
+		"PROD-EU": "uppercase-secret",
+	}
+	for profileName, expected := range tests {
+		if actual := SecretFromEnvironment(profileName); actual != expected {
+			t.Errorf("profile=%s secret=%q，期望 %q", profileName, actual, expected)
+		}
+	}
+}

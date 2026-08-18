@@ -9,7 +9,7 @@ import (
 // ErrContractUnverified 表示技术方案尚未提供字段级详情，CLI 不得猜测写请求契约。
 var ErrContractUnverified = errors.New("接口契约尚未核验")
 
-// ErrContractMismatch 表示业务服务生成的 method/path 与 27 项映射目录不一致。
+// ErrContractMismatch 表示业务服务生成的 method/path 或逻辑输入与 27 项映射目录不一致。
 var ErrContractMismatch = errors.New("请求与接口映射不一致")
 
 var unverifiedOperations = map[string]struct{}{
@@ -54,10 +54,10 @@ func IsVerified(operationID string) bool {
 	return found && !exists
 }
 
-// ValidateRequest 以契约目录为运行时单一真相源，校验业务服务最终生成的 method/path。
-// 入参：operationID/method/path string 分别为操作标识、HTTP 方法和已展开的相对路径。
-// 返回值：error，目录中不存在操作或方法、路径漂移时包装 ErrContractMismatch。
-func ValidateRequest(operationID string, method string, path string) error {
+// ValidateRequest 以契约目录为运行时单一真相源，校验 method/path 和对应 Schema 输入。
+// 入参：operationID/method/path string 分别为操作标识、HTTP 方法和已展开路径；input any 为逻辑请求输入。
+// 返回值：error，操作未知、路由漂移或 Schema 输入不匹配时包装 ErrContractMismatch。
+func ValidateRequest(operationID string, method string, path string, input any) error {
 	for _, spec := range catalog {
 		if spec.OperationID != operationID {
 			continue
@@ -65,7 +65,7 @@ func ValidateRequest(operationID string, method string, path string) error {
 		if spec.Method != method || !matchesPath(spec.Path, path) {
 			return fmt.Errorf("%w: %s 期望 %s %s，实际 %s %s", ErrContractMismatch, operationID, spec.Method, spec.Path, method, path)
 		}
-		return nil
+		return validateInput(spec, input)
 	}
 	return fmt.Errorf("%w: 未知 operation %s", ErrContractMismatch, operationID)
 }

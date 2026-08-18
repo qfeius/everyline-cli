@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/checklist"
@@ -149,25 +148,22 @@ func newChecklistUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use: "update", Short: "更新审查清单", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			resolvedID, err := normalizeRequiredID(id, "id")
-			if err != nil {
-				return err
-			}
 			var payload checklist.Checklist
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
 				return err
 			}
-			if err := payload.Validate(false); err != nil {
+			resolvedID, normalized, err := payload.NormalizeUpdate(id)
+			if err != nil {
 				return err
 			}
 			if dryRun || printInput {
-				return render(runtime, root, "json", map[string]any{"id": resolvedID, "data": payload})
+				return render(runtime, root, "json", map[string]any{"id": resolvedID, "data": normalized})
 			}
 			service, profile, err := buildChecklistService(runtime, root)
 			if err != nil {
 				return err
 			}
-			result, err := service.Update(command.Context(), resolvedID, payload)
+			result, err := service.Update(command.Context(), resolvedID, normalized)
 			if err != nil {
 				return err
 			}
@@ -346,14 +342,5 @@ func readIDList(ids []string, inputPath string, inline string) ([]string, error)
 			return nil, err
 		}
 	}
-	if len(resolved) == 0 {
-		return nil, fmt.Errorf("id 列表不能为空")
-	}
-	for index := range resolved {
-		resolved[index] = strings.TrimSpace(resolved[index])
-		if resolved[index] == "" {
-			return nil, fmt.Errorf("第 %d 个 id 不能为空", index+1)
-		}
-	}
-	return resolved, nil
+	return contracts.NormalizeUniqueIDs(resolved, "id")
 }

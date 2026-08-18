@@ -19,12 +19,12 @@ vet:
 	go mod tidy -diff
 
 release-assets:
-	VERSION="$(VERSION)" COMMIT="$(COMMIT)" BUILD_DATE="$(BUILD_DATE)" sh scripts/build-release-assets.sh
+	VERSION="$(PACKAGE_VERSION)" COMMIT="$(COMMIT)" BUILD_DATE="$(BUILD_DATE)" sh scripts/build-release-assets.sh
 
 package-check:
 	sh tests/release/verify-assets.sh
 	EXPECTED_PACKAGE_VERSION="$(PACKAGE_VERSION)" sh tests/release/package-dry-run.sh
-	EXPECTED_VERSION="$(VERSION)" sh tests/release/local-install.sh
+	EXPECTED_VERSION="$(PACKAGE_VERSION)" sh tests/release/local-install.sh
 
 release-check: test vet release-assets package-check
 

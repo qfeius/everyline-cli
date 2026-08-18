@@ -14,10 +14,19 @@ test:
 build:
   stage: build
   script:
-    - VERSION="${CI_COMMIT_TAG:-0.0.0-${CI_COMMIT_SHORT_SHA}}" COMMIT="$CI_COMMIT_SHA" BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" sh scripts/build-release-assets.sh
+    - |
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        RELEASE_VERSION="${CI_COMMIT_TAG#v}"
+      else
+        RELEASE_VERSION="0.0.0-build-${CI_COMMIT_SHORT_SHA}"
+      fi
+      VERSION="$RELEASE_VERSION" COMMIT="$CI_COMMIT_SHA" BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" sh scripts/build-release-assets.sh
+      printf 'RELEASE_VERSION=%s\n' "$RELEASE_VERSION" > bin/version.env
   artifacts:
     paths:
       - bin/
+    reports:
+      dotenv: bin/version.env
 
 package:
   image: node:22
@@ -26,12 +35,13 @@ package:
     - job: build
       artifacts: true
   script:
-    - PACKAGE_VERSION="$(node scripts/package-version.js "${CI_COMMIT_TAG:-0.0.0-${CI_COMMIT_SHORT_SHA}}")"; npm version --no-git-tag-version --allow-same-version "$PACKAGE_VERSION"; export PACKAGE_VERSION
+    - test "$(node scripts/package-version.js "$RELEASE_VERSION")" = "$RELEASE_VERSION"
+    - npm version --no-git-tag-version --allow-same-version "$RELEASE_VERSION"
     - npm test
     - sh tests/release/verify-assets.sh
-    - EXPECTED_PACKAGE_VERSION="$PACKAGE_VERSION" sh tests/release/package-dry-run.sh
-    - EXPECTED_VERSION="${CI_COMMIT_TAG:-0.0.0-${CI_COMMIT_SHORT_SHA}}" sh tests/release/local-install.sh
-    - npm pack --ignore-scripts
+    - EXPECTED_PACKAGE_VERSION="$RELEASE_VERSION" sh tests/release/package-dry-run.sh
+    - EXPECTED_VERSION="$RELEASE_VERSION" sh tests/release/local-install.sh
+    - npm pack
   artifacts:
     paths:
       - everyline-cli-*.tgz

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -234,6 +235,58 @@ func TestRuleDryRunRequiresRiskLevel(t *testing.T) {
 	}
 }
 
+// TestSingleUpdateDryRunEnforcesOneIDSource 验证三个单项更新命令拒绝冲突 ID，且一致 ID 不进入 body。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestSingleUpdateDryRunEnforcesOneIDSource(t *testing.T) {
+	tests := [][]string{
+		{"checklist", "update", "--id", "check-1", "--data", `{"id":"other","name":"清单","reviewRuleIds":["rule-1"]}`, "--dry-run"},
+		{"rule", "group", "update", "--id", "group-1", "--data", `{"id":"other","name":"分组"}`, "--dry-run"},
+		{"rule", "update", "--group-id", "group-1", "--rule-id", "rule-1", "--data", `{"id":"other","name":"规则","riskLevel":1,"content":"内容"}`, "--dry-run"},
+	}
+	for _, args := range tests {
+		runtime, _, _ := testRuntime(t)
+		if err := Execute(context.Background(), runtime, args); err == nil || !strings.Contains(err.Error(), "不一致") {
+			t.Fatalf("args=%v err=%v", args, err)
+		}
+	}
+
+	runtime, stdout, _ := testRuntime(t)
+	err := Execute(context.Background(), runtime, []string{"checklist", "update", "--id", "check-1", "--data", `{"id":"check-1","name":"清单","reviewRuleIds":["rule-1"]}`, "--dry-run", "--output", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output struct {
+		ID   string         `json:"id"`
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.ID != "check-1" {
+		t.Fatalf("path id=%q", output.ID)
+	}
+	if _, exists := output.Data["id"]; exists {
+		t.Fatalf("dry-run body 不应包含 id: %#v", output.Data)
+	}
+}
+
+// TestBatchDeleteDryRunRejectsDuplicateIDs 验证 flag 和 JSON 两种批量删除输入都拒绝规范化后的重复项。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestBatchDeleteDryRunRejectsDuplicateIDs(t *testing.T) {
+	tests := [][]string{
+		{"checklist", "batch-delete", "--id", "same", "--id", " same ", "--dry-run"},
+		{"rule", "batch-delete", "--group-id", "group-1", "--data", `["same","same"]`, "--dry-run"},
+	}
+	for _, args := range tests {
+		runtime, _, _ := testRuntime(t)
+		if err := Execute(context.Background(), runtime, args); err == nil || !strings.Contains(err.Error(), "重复") {
+			t.Fatalf("args=%v err=%v", args, err)
+		}
+	}
+}
+
 // TestUnverifiedBatchWriteFailsBeforeProfile 验证真实批量写在装配鉴权前就返回可识别的契约错误。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -297,5 +350,16 @@ func TestExitCodePrefersNetwork(t *testing.T) {
 	}
 	if ExitCode(auth.ErrCredentialsMissing) != ExitAuth {
 		t.Fatalf("auth exit=%d", ExitCode(auth.ErrCredentialsMissing))
+	}
+}
+
+// TestExitCodeMapsContractFailuresToAPI 验证未核验和运行时契约漂移不会被误报为命令用法错误。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestExitCodeMapsContractFailuresToAPI(t *testing.T) {
+	for _, err := range []error{contracts.ErrContractUnverified, contracts.ErrContractMismatch} {
+		if ExitCode(err) != ExitAPI {
+			t.Fatalf("err=%v exit=%d", err, ExitCode(err))
+		}
 	}
 }

@@ -22,7 +22,7 @@ type recordingClient struct {
 // 返回值：openplatform.Response 为固定对象；error 在请求偏离契约目录时非 nil。
 func (client *recordingClient) Do(_ context.Context, request openplatform.Request) (openplatform.Response, error) {
 	client.request = request
-	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path); err != nil {
+	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path, request.ContractInput); err != nil {
 		return openplatform.Response{}, err
 	}
 	return openplatform.Response{Data: json.RawMessage(`{"ok":true}`)}, nil
@@ -123,6 +123,63 @@ func TestUnverifiedRuleBatchWritesFailClosed(t *testing.T) {
 		if client.request.OperationID != "" {
 			t.Fatalf("未核验接口不应调用 HTTP client: %#v", client.request)
 		}
+	}
+}
+
+// TestSingleUpdateIDContracts 验证分组和规则单项更新均拒绝冲突 ID，并移除一致的 body ID。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestSingleUpdateIDContracts(t *testing.T) {
+	riskLevel := int32(1)
+	tests := []struct {
+		name   string
+		invoke func(*Service, string) error
+	}{
+		{"group", func(service *Service, bodyID string) error {
+			_, err := service.UpdateGroup(context.Background(), "group-1", Group{ID: bodyID, Name: "分组"})
+			return err
+		}},
+		{"rule", func(service *Service, bodyID string) error {
+			_, err := service.UpdateRule(context.Background(), "group-1", "rule-1", Rule{ID: bodyID, Name: "规则", RiskLevel: &riskLevel, Content: "内容"})
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &recordingClient{}
+			service := NewService(client, time.Second)
+			if err := test.invoke(service, "other"); err == nil {
+				t.Fatal("路径 ID 与 body ID 冲突时应拒绝")
+			}
+			expectedID := "group-1"
+			if test.name == "rule" {
+				expectedID = "rule-1"
+			}
+			if err := test.invoke(service, expectedID); err != nil {
+				t.Fatal(err)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(client.request.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := body["id"]; exists {
+				t.Fatalf("单项更新 body 不应包含 id: %#v", body)
+			}
+		})
+	}
+}
+
+// TestBatchDeleteRulesRejectsDuplicateIDs 验证规则批量删除拒绝规范化后的重复 ID。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestBatchDeleteRulesRejectsDuplicateIDs(t *testing.T) {
+	client := &recordingClient{}
+	_, err := NewService(client, time.Second).BatchDeleteRules(context.Background(), "group-1", []string{"rule-1", " rule-1 "})
+	if err == nil {
+		t.Fatal("重复 ID 应被拒绝")
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("重复 ID 不得调用 client: %#v", client.request)
 	}
 }
 

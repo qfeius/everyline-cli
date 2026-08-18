@@ -27,7 +27,7 @@ type recordingClient struct {
 // 返回值：openplatform.Response 为固定 data；error 在请求偏离契约目录时非 nil。
 func (client *recordingClient) Do(_ context.Context, request openplatform.Request) (openplatform.Response, error) {
 	client.request = request
-	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path); err != nil {
+	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path, request.ContractInput); err != nil {
 		return openplatform.Response{}, err
 	}
 	return openplatform.Response{Data: json.RawMessage(client.data)}, nil
@@ -175,6 +175,9 @@ func TestServiceUploadMultipartContract(t *testing.T) {
 	}
 	if fields["file"] != "pdf-content" || fields["name"] != "采购合同.PDF" || fields["appType"] != AppTypeThirdParty || fields["businessId"] != "biz-1" {
 		t.Fatalf("fields=%#v", fields)
+	}
+	if client.request.Timeout != time.Second {
+		t.Fatalf("upload timeout=%s，期望显式配置的 1s", client.request.Timeout)
 	}
 }
 

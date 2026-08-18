@@ -26,7 +26,7 @@ everyline-cli auth login
 everyline-cli review run --input review-run.json --output json
 ```
 
-`app_secret` 不写入 Profile，也不提供明文命令行参数。可使用 `EVERYLINE_APP_SECRET`、`EVERYLINE_APP_SECRET_<PROFILE>` 或 `auth login --app-secret-stdin`。token 缓存在权限为 `0600` 的 `~/.everyline-cli/tokens.json`；CI 可用 `EVERYLINE_ACCESS_TOKEN` 覆盖。
+`app_secret` 不写入 Profile，也不提供明文命令行参数。可使用 `EVERYLINE_APP_SECRET`、Profile 专用变量或 `auth login --app-secret-stdin`。专用变量以 `EVERYLINE_APP_SECRET_` 开头；常见的小写字母映射为大写，数字保持不变，其他 UTF-8 字节（包括原始大写字母）编码为 `_XX`，因此后缀可逆且不会因大小写或符号碰撞。例如 `prod-eu`、`prod.eu`、`prod_eu` 分别对应 `EVERYLINE_APP_SECRET_PROD_2DEU`、`EVERYLINE_APP_SECRET_PROD_2EEU`、`EVERYLINE_APP_SECRET_PROD_5FEU`。token 缓存在权限为 `0600` 的 `~/.everyline-cli/tokens.json`；CI 可用 `EVERYLINE_ACCESS_TOKEN` 覆盖。
 
 ## 一键审查输入
 

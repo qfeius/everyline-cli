@@ -80,8 +80,8 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 	if err := ValidateUploadFile(filePath); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(name) == "" {
-		return nil, fmt.Errorf("name 不能为空")
+	if err := ValidateFileName(name); err != nil {
+		return nil, err
 	}
 	if err := ValidateAppType(appType); err != nil {
 		return nil, err
@@ -117,13 +117,14 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 		return nil, fmt.Errorf("结束 multipart 请求: %w", err)
 	}
 	response, err := service.client.Do(ctx, openplatform.Request{
-		OperationID: OperationUploadFile,
-		Method:      http.MethodPost,
-		Path:        pathUploadFile,
-		Header:      http.Header{"Content-Type": []string{writer.FormDataContentType()}},
-		Body:        body.Bytes(),
-		Timeout:     maxDuration(service.timeout, 2*time.Minute),
-		SuccessCode: 200,
+		OperationID:   OperationUploadFile,
+		Method:        http.MethodPost,
+		Path:          pathUploadFile,
+		ContractInput: uploadFileContractInput(filePath, name, appType, businessID),
+		Header:        http.Header{"Content-Type": []string{writer.FormDataContentType()}},
+		Body:          body.Bytes(),
+		Timeout:       service.timeout,
+		SuccessCode:   200,
 	})
 	if err != nil {
 		return nil, err
@@ -142,11 +143,12 @@ func (service *Service) UploadURL(ctx context.Context, fileURL string, name stri
 	if err := ValidateFileName(name); err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(map[string]string{"fileUrl": fileURL, "fileName": name})
+	input := map[string]string{"fileUrl": fileURL, "fileName": name}
+	body, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("编码 URL 上传请求: %w", err)
 	}
-	return service.doJSON(ctx, OperationUploadFileURL, http.MethodPost, pathUploadFileURL, nil, body)
+	return service.doJSON(ctx, OperationUploadFileURL, http.MethodPost, pathUploadFileURL, nil, body, input)
 }
 
 // Snapshot 获取服务端权威文件指纹，供发起审查前校验一致性。
@@ -166,7 +168,14 @@ func (service *Service) Snapshot(ctx context.Context, fileID int64, appType stri
 	if businessID != "" {
 		query.Set("businessId", businessID)
 	}
-	return service.doJSON(ctx, OperationFileSnapshot, http.MethodGet, pathFileSnapshot, query, nil)
+	input := map[string]any{"fileId": fileID}
+	if appType != "" {
+		input["appType"] = appType
+	}
+	if businessID != "" {
+		input["businessId"] = businessID
+	}
+	return service.doJSON(ctx, OperationFileSnapshot, http.MethodGet, pathFileSnapshot, query, nil, input)
 }
 
 // ExtractSubjects 无副作用提取合同主体，复用 start 请求中的文件身份四元组。
@@ -176,16 +185,17 @@ func (service *Service) ExtractSubjects(ctx context.Context, request StartReques
 	if err := ValidateReviewIdentity(request); err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(map[string]any{
+	input := map[string]any{
 		"businessId": request.BusinessID,
 		"appType":    request.AppType,
 		"fileId":     request.FileID,
 		"fileHash":   request.FileHash,
-	})
+	}
+	body, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("编码主体提取请求: %w", err)
 	}
-	return service.doJSON(ctx, OperationExtractSubjects, http.MethodPost, pathExtractSubjects, nil, body)
+	return service.doJSON(ctx, OperationExtractSubjects, http.MethodPost, pathExtractSubjects, nil, body, input)
 }
 
 // Start 发起普通 V3 智审任务，完整透传冻结的 typed request。
@@ -199,7 +209,7 @@ func (service *Service) Start(ctx context.Context, request StartRequest) (Docume
 	if err != nil {
 		return nil, fmt.Errorf("编码发起审查请求: %w", err)
 	}
-	return service.doJSON(ctx, OperationStartReview, http.MethodPost, pathStartReview, nil, body)
+	return service.doJSON(ctx, OperationStartReview, http.MethodPost, pathStartReview, nil, body, request)
 }
 
 // StartFeishu 发起字段捷径 V3 审查，完整透传签名、包 ID 和额度判定字段。
@@ -213,7 +223,7 @@ func (service *Service) StartFeishu(ctx context.Context, request FeishuStartRequ
 	if err != nil {
 		return nil, fmt.Errorf("编码飞书快捷发起审查请求: %w", err)
 	}
-	return service.doJSON(ctx, OperationStartFeishu, http.MethodPost, pathStartFeishu, nil, body)
+	return service.doJSON(ctx, OperationStartFeishu, http.MethodPost, pathStartFeishu, nil, body, request)
 }
 
 // Status 查询轻量任务快照，供轮询器使用。
@@ -224,7 +234,7 @@ func (service *Service) Status(ctx context.Context, query TaskQuery) (Document, 
 	if err != nil {
 		return nil, err
 	}
-	return service.doJSON(ctx, OperationTaskStatus, http.MethodGet, pathTaskStatus, values, nil)
+	return service.doJSON(ctx, OperationTaskStatus, http.MethodGet, pathTaskStatus, values, nil, query)
 }
 
 // Info 查询终态或调试用任务详情，并保留所有扩展展示字段。
@@ -235,26 +245,27 @@ func (service *Service) Info(ctx context.Context, query TaskQuery) (Document, er
 	if err != nil {
 		return nil, err
 	}
-	return service.doJSON(ctx, OperationTaskInfo, http.MethodGet, pathTaskInfo, values, nil)
+	return service.doJSON(ctx, OperationTaskInfo, http.MethodGet, pathTaskInfo, values, nil, query)
 }
 
 // doJSON 执行 JSON 或 GET 操作，并解开已验证的业务 data。
-// 入参：ctx context.Context；operationID/method/path string 定义契约；query url.Values 为查询；body []byte 为 JSON 请求体。
+// 入参：ctx context.Context；operationID/method/path string 定义契约；query url.Values 为查询；body []byte 为 JSON 请求体；contractInput any 为 Schema 输入。
 // 返回值：Document 为业务 data；error 为 HTTP Adapter 或解码失败。
-func (service *Service) doJSON(ctx context.Context, operationID string, method string, path string, query url.Values, body []byte) (Document, error) {
+func (service *Service) doJSON(ctx context.Context, operationID string, method string, path string, query url.Values, body []byte, contractInput any) (Document, error) {
 	header := http.Header{}
 	if body != nil {
 		header.Set("Content-Type", "application/json")
 	}
 	response, err := service.client.Do(ctx, openplatform.Request{
-		OperationID: operationID,
-		Method:      method,
-		Path:        path,
-		Query:       query,
-		Header:      header,
-		Body:        body,
-		Timeout:     service.timeout,
-		SuccessCode: 200,
+		OperationID:   operationID,
+		Method:        method,
+		Path:          path,
+		ContractInput: contractInput,
+		Query:         query,
+		Header:        header,
+		Body:          body,
+		Timeout:       service.timeout,
+		SuccessCode:   200,
 	})
 	if err != nil {
 		return nil, err
@@ -319,12 +330,13 @@ func taskQueryValues(query TaskQuery) (url.Values, error) {
 	return values, nil
 }
 
-// maxDuration 返回两个时长中较大者，确保上传保留独立的长超时。
-// 入参：left/right time.Duration 为候选值。
-// 返回值：time.Duration，较大的时长。
-func maxDuration(left time.Duration, right time.Duration) time.Duration {
-	if left > right {
-		return left
+// uploadFileContractInput 构造本地上传对应的逻辑 Schema 输入，不暴露 multipart 二进制内容。
+// 入参：filePath/name/appType/businessID string 分别为本地文件、业务文件名、应用类型和可选业务 ID。
+// 返回值：map[string]any，为 review-upload.schema.json 对应的字段对象。
+func uploadFileContractInput(filePath string, name string, appType string, businessID string) map[string]any {
+	input := map[string]any{"file": filePath, "name": name, "appType": appType}
+	if businessID != "" {
+		input["businessId"] = businessID
 	}
-	return right
+	return input
 }
