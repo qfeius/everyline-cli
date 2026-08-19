@@ -215,6 +215,25 @@ func TestReviewStartDryRun(t *testing.T) {
 	}
 }
 
+// TestReviewSubjectExtractDryRun 验证主体提取命令的 dry-run 输出与真实请求保持字符串 fileId 类型一致。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；输出类型漂移时通过 t.Fatal 报告。
+func TestReviewSubjectExtractDryRun(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	err := Execute(context.Background(), runtime, []string{
+		"review", "subject", "extract",
+		"--business-id", "biz-1",
+		"--file-id", "12",
+		"--dry-run", "--output", "json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"fileId": "12"`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
 // TestReviewStartRejectsUnknownField 验证命令处理器不会猜测未声明字段。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -227,6 +246,18 @@ func TestReviewStartRejectsUnknownField(t *testing.T) {
 	}
 	if ExitCode(err) != ExitUsage {
 		t.Fatalf("exit=%d", ExitCode(err))
+	}
+}
+
+// TestReviewStartRejectsUsageReportContext 验证 startReview 不接受仅供服务端内部自动触发链路使用的字段。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；字段出现在 CLI 请求时通过未知字段错误阻断。
+func TestReviewStartRejectsUsageReportContext(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","usageReportContext":{}}`
+	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -345,6 +376,26 @@ func TestSingleUpdateDryRunEnforcesOneIDSource(t *testing.T) {
 	}
 	if _, exists := output.Data["id"]; exists {
 		t.Fatalf("dry-run body 不应包含 id: %#v", output.Data)
+	}
+}
+
+// TestRuleGroupDeleteDryRunOmitsUndefinedCascadeField 验证分组删除预览只包含接口路径 ID。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestRuleGroupDeleteDryRunOmitsUndefinedCascadeField(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{"rule", "group", "delete", "--id", "group-1", "--dry-run", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := output["cascade"]; exists {
+		t.Fatalf("dry-run 不应输出未定义的 cascade 字段: %#v", output)
+	}
+	if output["id"] != "group-1" {
+		t.Fatalf("output=%#v", output)
 	}
 }
 
@@ -512,6 +563,9 @@ func TestExitCodePrefersNetwork(t *testing.T) {
 	}
 	if ExitCode(auth.ErrCredentialsMissing) != ExitAuth {
 		t.Fatalf("auth exit=%d", ExitCode(auth.ErrCredentialsMissing))
+	}
+	if ExitCode(auth.ErrUserAuthentication) != ExitAuth {
+		t.Fatalf("user auth exit=%d", ExitCode(auth.ErrUserAuthentication))
 	}
 }
 

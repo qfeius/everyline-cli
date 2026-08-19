@@ -42,6 +42,8 @@
 
 任务 `status/info/wait` 查询默认只要求 `taskId`；使用 `visibilityScope=contractResult` 时，必须同时提供 `businessId` 与 `appType`，该范围当前只接受 `contractResult`。
 
+`review task start` 仅接受 V3 `startReview` 定义的 `businessId`、`appType`、`fileId`、`fileHash`、`config`、`allowInvalidSelectedChecklists` 和 `triggerScene`。内部自动触发链路的 `usageReportContext` 不属于开放接口入参，CLI 会在 JSON 解码阶段拒绝该字段。`review subject extract` 的 `fileHash` 仍按文档作为可选链路追踪字段透传。
+
 `review run` 的数据流为：上传 -> 可选主体提取 -> 发起 -> 可选轮询 -> 详情。文件上传响应优先提供 `businessId/fileId/fileHash`；标准 URL 上传接口只返回文件对象，因此 URL 来源需要在 RunSpec 中额外提供 `businessId` 和文件内容 SHA-256 的 `fileHash`。
 
 字段捷径入口的后端源路由为 `/open-api/feishu/v1/smartAudit/init`；开放平台网关对 `/open-apis/contract-review/(?<remaining>.*)` 执行 rewrite 到 `/open-api/${remaining}`，因此 CLI 的外部路径固定为 `/open-apis/contract-review/feishu/v1/smartAudit/init`。该映射与 `open-platform/src/main/java/com/bytedance/qfei/openplatform/config/GatewayFilterConfiguration.java` 的 `openapi-contract-review` 路由一致。
@@ -49,3 +51,5 @@
 字段捷径入口返回 `smartAuditId` 和数值 `taskStatus`，不复用 V3 的 `taskId/status` 查询。`review task info-feishu` 和 `review task wait-feishu` 改用 `/open-apis/contract-review/v1/smartAudit/info`，将 `taskStatus=0/1/2/3/4` 解释为 running/success/fail/skipped/prepare，并保留后端原始详情。
 
 清单创建与更新请求按公开接口说明要求 `name`、`reviewRuleIds`；`contractCategory`、`reviewStage` 为可选兼容字段。
+
+规则分组删除的级联语义由接口固定，CLI 的 dry-run 只展示路径中的 `id`，不会虚构 `cascade` 请求参数。

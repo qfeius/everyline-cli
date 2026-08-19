@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
@@ -162,7 +163,8 @@ func newReviewSubjectExtractCommand(runtime *Runtime, root *rootOptions) *cobra.
 			if err := review.ValidateSubjectIdentity(request); err != nil {
 				return err
 			}
-			input := map[string]any{"businessId": request.BusinessID, "appType": request.AppType, "fileId": request.FileID}
+			// dry-run/print-input 必须展示与真实主体提取请求一致的字符串 fileId。
+			input := map[string]any{"businessId": request.BusinessID, "appType": request.AppType, "fileId": strconv.FormatInt(request.FileID, 10)}
 			if request.FileHash != "" {
 				input["fileHash"] = request.FileHash
 			}

@@ -41,7 +41,7 @@ func ExitCode(err error) int {
 	if errors.As(err, &networkError) {
 		return ExitNetwork
 	}
-	if errors.Is(err, auth.ErrCredentialsMissing) || errors.Is(err, auth.ErrAuthentication) || errors.Is(err, config.ErrNoActiveProfile) || errors.Is(err, config.ErrProfileNotFound) {
+	if errors.Is(err, auth.ErrCredentialsMissing) || errors.Is(err, auth.ErrAuthentication) || errors.Is(err, auth.ErrUserAuthentication) || errors.Is(err, config.ErrNoActiveProfile) || errors.Is(err, config.ErrProfileNotFound) {
 		return ExitAuth
 	}
 	return ExitUsage

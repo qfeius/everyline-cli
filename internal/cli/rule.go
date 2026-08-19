@@ -153,7 +153,8 @@ func newRuleGroupDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 			if err != nil {
 				return err
 			}
-			input := map[string]any{"id": resolvedID, "cascade": true}
+			// 分组删除的级联行为由接口固定，dry-run 只展示路径入参，避免输出未定义的 cascade 字段。
+			input := map[string]any{"id": resolvedID}
 			if dryRun || printInput {
 				return render(runtime, root, "json", input)
 			}

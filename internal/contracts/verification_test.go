@@ -58,7 +58,7 @@ func validContractInput(schema string) any {
 	case "review-upload-url.schema.json":
 		return map[string]any{"fileUrl": "https://open.qfei.cn/contract.pdf", "fileName": "contract.pdf"}
 	case "review-subject.schema.json":
-		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1}
+		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1"}
 	case "review-start.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{}}
 	case "review-start-feishu.schema.json":
@@ -135,6 +135,22 @@ func TestStartSchemaAllowsDefaultConfig(t *testing.T) {
 	input := map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestStartSchemaRejectsInternalUsageContext 验证 startReview Schema 不会放行内部计量上下文字段。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；Schema 漂移时通过测试失败暴露。
+func TestStartSchemaRejectsInternalUsageContext(t *testing.T) {
+	input := map[string]any{
+		"businessId":         "biz",
+		"appType":            "THIRD_PARTY",
+		"fileId":             1,
+		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"usageReportContext": map[string]any{},
+	}
+	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("err=%v，startReview 不应接受 usageReportContext", err)
 	}
 }
 
