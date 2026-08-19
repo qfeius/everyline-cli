@@ -169,7 +169,7 @@ func TestAuthLoginHonorsRootTimeout(t *testing.T) {
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestReviewStartDryRun(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"hash","config":{}}`
+	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run", "--output", "json"})
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestReviewStartDryRun(t *testing.T) {
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestReviewStartRejectsUnknownField(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"hash","config":{},"typo":true}`
+	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{},"typo":true}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("err=%v", err)
@@ -194,17 +194,27 @@ func TestReviewStartRejectsUnknownField(t *testing.T) {
 	}
 }
 
-// TestReviewStartFeishuDryRun 验证字段捷径 V3 会校验并输出签名与额度字段且不调用远端。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；失败通过 t.Fatal 报告。
+// TestReviewStartFeishuDryRun 验证字段捷径入口校验并输出后端当前字段，且不调用远端。
 func TestReviewStartFeishuDryRun(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"hash","config":{},"hasQuota":true,"baseSignature":"payload.signature","packID":"pack-1"}`
+	payload := `{"fileId":12,"reviewStrength":0,"selectedPosition":"legal","hasQuota":true,"baseSignature":"payload.signature","packID":"pack-1"}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start-feishu", "--data", payload, "--dry-run", "--output", "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"baseSignature": "payload.signature"`) || !strings.Contains(stdout.String(), `"hasQuota": true`) {
+	if !strings.Contains(stdout.String(), `"reviewStrength": 0`) || !strings.Contains(stdout.String(), `"baseSignature": "payload.signature"`) || !strings.Contains(stdout.String(), `"hasQuota": true`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewRunURLDryRunDefaultsConfig 验证 URL 工作流的身份字段和默认配置在 CLI 层可见。
+func TestReviewRunURLDryRunDefaultsConfig(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`
+	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"config": {}`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
@@ -397,6 +407,62 @@ func TestReviewRunDryRunValidatesLocalFile(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"appType": "THIRD_PARTY"`) {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewRunDryRunAllowsExtensionlessLocalPath 验证 source.name 承担文件格式校验，临时路径可不带扩展名。
+func TestReviewRunDryRunAllowsExtensionlessLocalPath(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	filePath := filepath.Join(t.TempDir(), "upload")
+	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{}}`
+	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"path": "`+filePath+`"`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewRunRendersPartialResultOnFailure 验证远端失败时命令先输出 upload/start/final 快照，再返回任务错误。
+func TestReviewRunRendersPartialResultOnFailure(t *testing.T) {
+	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/open-apis/contract-review/v3/file/contract/upload":
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"fileId":11,"businessId":"biz-1","fileHash":"` + hash + `"}}`))
+		case "/open-apis/contract-review/v3/smartAudit/task/startReview":
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"running"}}`))
+		case "/open-apis/contract-review/v3/smartAudit/task/status":
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"fail","message":"规则失败"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("EVERYLINE_ACCESS_TOKEN", "test-token")
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "local", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(t.TempDir(), "upload")
+	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"businessId":"biz-1","appType":"THIRD_PARTY","wait":true}`
+	err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--interval", "1ms", "--deadline", "1s", "--output", "json"})
+	if !errors.Is(err, review.ErrTaskFailed) {
+		t.Fatalf("err=%v", err)
+	}
+	for _, field := range []string{`"upload"`, `"start"`, `"final"`, `"status": "fail"`} {
+		if !strings.Contains(stdout.String(), field) {
+			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), field)
+		}
 	}
 }
 

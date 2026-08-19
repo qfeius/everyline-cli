@@ -20,21 +20,23 @@ import (
 const (
 	OperationUploadFile      = "uploadContractFileV3"
 	OperationUploadFileURL   = "uploadContractFileByURLV3"
-	OperationFileSnapshot    = "smartAuditFileSnapshot"
 	OperationExtractSubjects = "smartAuditContractSubjects"
 	OperationStartReview     = "smartAuditTaskStartReview"
 	OperationStartFeishu     = "feishuSmartAuditTaskStartReviewV3"
 	OperationTaskStatus      = "smartAuditTaskStatus"
 	OperationTaskInfo        = "smartAuditTaskInfo"
+	OperationFeishuTaskInfo  = "feishuSmartAuditTaskInfo"
 
 	pathUploadFile      = "/open-apis/contract-review/v3/file/contract/upload"
-	pathUploadFileURL   = "/open-apis/contract-review/v3/file/contract/uploadByUrl"
-	pathFileSnapshot    = "/open-apis/contract-review/v3/smartAudit/file/snapshot"
+	pathUploadFileURL   = "/open-apis/contract-review/v1/file/contract/uploadByUrl"
 	pathExtractSubjects = "/open-apis/contract-review/v3/smartAudit/contract/subjects"
 	pathStartReview     = "/open-apis/contract-review/v3/smartAudit/task/startReview"
-	pathStartFeishu     = "/open-apis/contract-review/feishu/v3/smartAudit/task/startReview"
-	pathTaskStatus      = "/open-apis/contract-review/v3/smartAudit/task/status"
-	pathTaskInfo        = "/open-apis/contract-review/v3/smartAudit/task/info"
+	// pathStartFeishu 是后端 /open-api/feishu/v1/smartAudit/init 在开放平台网关的路径映射。
+	pathStartFeishu = "/open-apis/contract-review/feishu/v1/smartAudit/init"
+	pathTaskStatus  = "/open-apis/contract-review/v3/smartAudit/task/status"
+	pathTaskInfo    = "/open-apis/contract-review/v3/smartAudit/task/info"
+	// pathFeishuTaskInfo 是后端 /open-api/v1/smartAudit/info 在开放平台网关的路径映射。
+	pathFeishuTaskInfo = "/open-apis/contract-review/v1/smartAudit/info"
 
 	MaxUploadBytes = 2 * 1024 * 1024
 )
@@ -50,14 +52,19 @@ type Client interface {
 type API interface {
 	UploadFile(context.Context, string, string, string, string) (Document, error)
 	UploadURL(context.Context, string, string) (Document, error)
-	Snapshot(context.Context, int64, string, string) (Document, error)
 	ExtractSubjects(context.Context, StartRequest) (Document, error)
 	Start(context.Context, StartRequest) (Document, error)
+	StartFeishu(context.Context, FeishuStartRequest) (Document, error)
 	Status(context.Context, TaskQuery) (Document, error)
 	Info(context.Context, TaskQuery) (Document, error)
 }
 
-// Service 将每个 V3 operation ID 映射到唯一 method/path/body 契约。
+// FeishuAPI 描述字段捷径任务生命周期所需的合并状态与详情查询能力。
+type FeishuAPI interface {
+	FeishuInfo(context.Context, FeishuTaskQuery) (Document, error)
+}
+
+// Service 将每个审查 operation ID 映射到唯一 method/path/body 契约。
 type Service struct {
 	client  Client
 	timeout time.Duration
@@ -86,6 +93,10 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 	if err := ValidateAppType(appType); err != nil {
 		return nil, err
 	}
+	if err := ValidateUploadBusinessContext(appType, businessID); err != nil {
+		return nil, err
+	}
+	businessID = strings.TrimSpace(businessID)
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("读取上传文件: %w", err)
@@ -151,45 +162,21 @@ func (service *Service) UploadURL(ctx context.Context, fileURL string, name stri
 	return service.doJSON(ctx, OperationUploadFileURL, http.MethodPost, pathUploadFileURL, nil, body, input)
 }
 
-// Snapshot 获取服务端权威文件指纹，供发起审查前校验一致性。
-// 入参：ctx context.Context；fileID int64 为平台文件 ID；appType string 为可选接入类型；businessID string 为必填业务上下文。
-// 返回值：Document 为文件快照；error 为输入或 API 失败。
-func (service *Service) Snapshot(ctx context.Context, fileID int64, appType string, businessID string) (Document, error) {
-	if fileID <= 0 {
-		return nil, fmt.Errorf("file-id 必须大于 0")
-	}
-	businessID = strings.TrimSpace(businessID)
-	if businessID == "" {
-		return nil, fmt.Errorf("business-id 不能为空")
-	}
-	query := url.Values{"fileId": []string{strconv.FormatInt(fileID, 10)}}
-	if appType != "" {
-		if err := ValidateAppType(appType); err != nil {
-			return nil, err
-		}
-		query.Set("appType", appType)
-	}
-	query.Set("businessId", businessID)
-	input := map[string]any{"fileId": fileID}
-	if appType != "" {
-		input["appType"] = appType
-	}
-	input["businessId"] = businessID
-	return service.doJSON(ctx, OperationFileSnapshot, http.MethodGet, pathFileSnapshot, query, nil, input)
-}
-
-// ExtractSubjects 无副作用提取合同主体，复用 start 请求中的文件身份四元组。
-// 入参：ctx context.Context；request StartRequest 提供 businessId/appType/fileId/fileHash。
+// ExtractSubjects 无副作用提取合同主体，复用 start 请求中的文件身份字段。
+// 入参：ctx context.Context；request StartRequest 提供 businessId/appType/fileId，fileHash 可选。
 // 返回值：Document 为主体候选；error 为输入或 API 失败。
 func (service *Service) ExtractSubjects(ctx context.Context, request StartRequest) (Document, error) {
-	if err := ValidateReviewIdentity(request); err != nil {
+	request = request.Normalize()
+	if err := ValidateSubjectIdentity(request); err != nil {
 		return nil, err
 	}
 	input := map[string]any{
 		"businessId": request.BusinessID,
 		"appType":    request.AppType,
 		"fileId":     request.FileID,
-		"fileHash":   request.FileHash,
+	}
+	if strings.TrimSpace(request.FileHash) != "" {
+		input["fileHash"] = request.FileHash
 	}
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -202,6 +189,7 @@ func (service *Service) ExtractSubjects(ctx context.Context, request StartReques
 // 入参：ctx context.Context；request StartRequest 为已定义字段的发起请求。
 // 返回值：Document 为任务快照；error 为校验或 API 失败。
 func (service *Service) Start(ctx context.Context, request StartRequest) (Document, error) {
+	request = request.Normalize()
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
@@ -212,24 +200,25 @@ func (service *Service) Start(ctx context.Context, request StartRequest) (Docume
 	return service.doJSON(ctx, OperationStartReview, http.MethodPost, pathStartReview, nil, body, request)
 }
 
-// StartFeishu 发起字段捷径 V3 审查，完整透传签名、包 ID 和额度判定字段。
-// 入参：ctx context.Context；request FeishuStartRequest 为已签名的快捷入口请求。
-// 返回值：Document 为任务快照；error 为校验或 API 失败。
+// StartFeishu 发起字段捷径审查，透传当前后端 /open-api/feishu/v1/smartAudit/init 契约。
+// 入参：ctx context.Context；request FeishuStartRequest 为快捷入口请求。
+// 返回值：Document 为任务结果；error 为校验或 API 失败。
 func (service *Service) StartFeishu(ctx context.Context, request FeishuStartRequest) (Document, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
-		return nil, fmt.Errorf("编码飞书快捷发起审查请求: %w", err)
+		return nil, fmt.Errorf("编码字段捷径发起审查请求: %w", err)
 	}
 	return service.doJSON(ctx, OperationStartFeishu, http.MethodPost, pathStartFeishu, nil, body, request)
 }
 
 // Status 查询轻量任务快照，供轮询器使用。
-// 入参：ctx context.Context；query TaskQuery 为 taskId 和必填业务上下文。
+// 入参：ctx context.Context；query TaskQuery 为 taskId 和可选业务上下文。
 // 返回值：Document 为状态快照；error 为输入或 API 失败。
 func (service *Service) Status(ctx context.Context, query TaskQuery) (Document, error) {
+	query = normalizeTaskQuery(query)
 	values, err := taskQueryValues(query)
 	if err != nil {
 		return nil, err
@@ -238,14 +227,27 @@ func (service *Service) Status(ctx context.Context, query TaskQuery) (Document, 
 }
 
 // Info 查询终态或调试用任务详情，并保留所有扩展展示字段。
-// 入参：ctx context.Context；query TaskQuery 为 taskId 和必填业务上下文。
+// 入参：ctx context.Context；query TaskQuery 为 taskId 和可选业务上下文。
 // 返回值：Document 为完整详情；error 为输入或 API 失败。
 func (service *Service) Info(ctx context.Context, query TaskQuery) (Document, error) {
+	query = normalizeTaskQuery(query)
 	values, err := taskQueryValues(query)
 	if err != nil {
 		return nil, err
 	}
 	return service.doJSON(ctx, OperationTaskInfo, http.MethodGet, pathTaskInfo, values, nil, query)
+}
+
+// FeishuInfo 查询字段捷径任务的状态与渐进式审查结果。
+// 入参：ctx context.Context 控制取消；query FeishuTaskQuery 提供 smartAuditId 和可选立场。
+// 返回值：Document 为后端原始任务详情；error 为输入或 API 失败。
+func (service *Service) FeishuInfo(ctx context.Context, query FeishuTaskQuery) (Document, error) {
+	query.ReviewPosition = strings.TrimSpace(query.ReviewPosition)
+	values, err := feishuTaskQueryValues(query)
+	if err != nil {
+		return nil, err
+	}
+	return service.doJSON(ctx, OperationFeishuTaskInfo, http.MethodGet, pathFeishuTaskInfo, values, nil, query)
 }
 
 // doJSON 执行 JSON 或 GET 操作，并解开已验证的业务 data。
@@ -273,15 +275,12 @@ func (service *Service) doJSON(ctx context.Context, operationID string, method s
 	return DecodeDocument(response.Data)
 }
 
-// ValidateUploadFile 校验本地合同扩展名、存在性、普通文件类型和 2 MiB 上限。
+// ValidateUploadFile 校验本地文件路径、存在性、普通文件类型和 2 MiB 上限。
 // 入参：filePath string 为本地文件路径。
 // 返回值：error，文件可上传时为 nil。
 func ValidateUploadFile(filePath string) error {
 	if strings.TrimSpace(filePath) == "" {
 		return fmt.Errorf("file 不能为空")
-	}
-	if err := ValidateFileName(filepath.Base(filePath)); err != nil {
-		return err
 	}
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -314,22 +313,53 @@ func ValidateFileName(name string) error {
 // 入参：query TaskQuery 为任务和业务上下文。
 // 返回值：url.Values 为请求参数；error 为校验失败。
 func taskQueryValues(query TaskQuery) (url.Values, error) {
+	query = normalizeTaskQuery(query)
 	if query.TaskID <= 0 {
 		return nil, fmt.Errorf("task-id 必须大于 0")
 	}
 	query.BusinessID = strings.TrimSpace(query.BusinessID)
-	if query.BusinessID == "" {
-		return nil, fmt.Errorf("business-id 不能为空")
-	}
 	values := url.Values{"taskId": []string{strconv.FormatInt(query.TaskID, 10)}}
-	values.Set("businessId", query.BusinessID)
+	if query.BusinessID != "" {
+		values.Set("businessId", query.BusinessID)
+	}
 	if query.AppType != "" {
 		if err := ValidateAppType(query.AppType); err != nil {
 			return nil, err
 		}
 		values.Set("appType", query.AppType)
 	}
+	if query.VisibilityScope != "" {
+		if query.VisibilityScope != VisibilityScopeContractResult {
+			return nil, fmt.Errorf("visibility-scope 必须是 %s", VisibilityScopeContractResult)
+		}
+		if query.BusinessID == "" || query.AppType == "" {
+			return nil, fmt.Errorf("visibility-scope=%s 必须同时提供 business-id 和 app-type", VisibilityScopeContractResult)
+		}
+		values.Set("visibilityScope", query.VisibilityScope)
+	}
 	return values, nil
+}
+
+// feishuTaskQueryValues 校验字段捷径任务 ID 并构造后端 smartAudit/info query。
+// 入参：query FeishuTaskQuery 为字段捷径任务查询上下文。
+// 返回值：url.Values 为请求参数；error 为非法任务 ID。
+func feishuTaskQueryValues(query FeishuTaskQuery) (url.Values, error) {
+	if query.SmartAuditID <= 0 {
+		return nil, fmt.Errorf("smart-audit-id 必须大于 0")
+	}
+	values := url.Values{"smartAuditId": []string{strconv.FormatInt(query.SmartAuditID, 10)}}
+	if position := strings.TrimSpace(query.ReviewPosition); position != "" {
+		values.Set("reviewPosition", position)
+	}
+	return values, nil
+}
+
+// normalizeTaskQuery 统一清理可选查询上下文，保证 URL query 与契约输入使用同一组值。
+func normalizeTaskQuery(query TaskQuery) TaskQuery {
+	query.BusinessID = strings.TrimSpace(query.BusinessID)
+	query.AppType = strings.TrimSpace(query.AppType)
+	query.VisibilityScope = strings.TrimSpace(query.VisibilityScope)
+	return query
 }
 
 // uploadFileContractInput 构造本地上传对应的逻辑 Schema 输入，不暴露 multipart 二进制内容。

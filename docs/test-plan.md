@@ -13,8 +13,9 @@ go build ./cmd/everyline-cli
 - Profile 原子落盘、默认选择和权限。
 - token 请求字段、`code=0`、过期时间与缓存脱敏。
 - HTTP method/path/query/header/body、普通接口 `code=200` 和结构化 APIError。
-- 本地上传扩展名、2 MiB 边界与 multipart 字段。
-- 工作流的上传、快照、发起、多次轮询和详情顺序。
+- 本地上传业务文件名扩展名、无扩展名路径、2 MiB 边界与 multipart 字段。
+- 普通 V3 工作流的统一 deadline、上传、发起、多次轮询、详情顺序和失败阶段结果输出。
+- 字段捷径 smartAuditId/taskStatus 数值状态映射、详情查询和终态轮询。
 - CLI 严格 JSON 输入、dry-run、stdout/stderr 与退出码。
 
 ## 真实环境冒烟
@@ -25,4 +26,3 @@ go build ./cmd/everyline-cli
 2. 对小于等于 2 MiB 的 `.doc/.docx/.pdf` 各上传一次。
 3. 使用测试清单发起审查，并以 2 秒间隔等待终态。
 4. 确认 JSON stdout 可直接由 `jq` 解析，verbose 进度仅出现在 stderr。
-

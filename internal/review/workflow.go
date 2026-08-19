@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -43,7 +44,7 @@ type ReviewWorkflow interface {
 	Run(context.Context, RunSpec) (RunResult, error)
 }
 
-// Workflow 隐藏上传、快照、主体提取、发起、轮询和详情编排。
+// Workflow 隐藏上传、主体提取、发起、轮询和详情编排。
 type Workflow struct {
 	api     API
 	clock   Clock
@@ -66,10 +67,13 @@ func NewWorkflow(api API, clock Clock, options WorkflowOptions) *Workflow {
 	return &Workflow{api: api, clock: clock, options: options}
 }
 
-// Run 执行上传、必要时快照/主体提取、发起审查，并按 spec.wait 获取终态详情。
+// Run 执行上传、主体提取、发起审查，并按 spec.wait 获取终态详情。
 // 入参：ctx context.Context 控制取消；spec RunSpec 为稳定工作流输入。
 // 返回值：RunResult 汇总阶段结果；error 为校验、远端或轮询失败。
 func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, error) {
+	// 统一为整条工作流创建截止上下文，确保上传、提取、发起和详情查询共享同一份时间预算。
+	workflowContext, cancel := context.WithTimeout(ctx, workflow.options.Deadline)
+	defer cancel()
 	spec = spec.Normalize()
 	if err := spec.Validate(); err != nil {
 		return RunResult{}, err
@@ -77,32 +81,37 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 	var upload Document
 	var err error
 	if spec.Source.Type == "file" {
-		upload, err = workflow.api.UploadFile(ctx, spec.Source.Path, spec.Source.Name, spec.AppType, spec.BusinessID)
+		upload, err = workflow.api.UploadFile(workflowContext, spec.Source.Path, spec.Source.Name, spec.AppType, spec.BusinessID)
 	} else {
-		upload, err = workflow.api.UploadURL(ctx, spec.Source.FileURL, spec.Source.Name)
+		upload, err = workflow.api.UploadURL(workflowContext, spec.Source.FileURL, spec.Source.Name)
 	}
 	if err != nil {
 		return RunResult{}, err
 	}
 
+	result := RunResult{Upload: upload}
 	fileID, ok := Int64Value(upload, "fileId")
 	if !ok || fileID <= 0 {
-		return RunResult{}, fmt.Errorf("上传响应缺少有效 fileId")
+		return result, fmt.Errorf("上传响应缺少有效 fileId")
 	}
 	businessID, _ := StringValue(upload, "businessId")
+	businessID = strings.TrimSpace(businessID)
 	if businessID == "" {
-		businessID = spec.BusinessID
+		businessID = strings.TrimSpace(spec.BusinessID)
 	}
 	fileHash, _ := StringValue(upload, "fileHash")
+	fileHash = normalizeSHA256(fileHash)
 	if fileHash == "" {
-		snapshot, snapshotErr := workflow.api.Snapshot(ctx, fileID, spec.AppType, businessID)
-		if snapshotErr != nil {
-			return RunResult{}, snapshotErr
-		}
-		fileHash, _ = StringValue(snapshot, "fileHash")
+		fileHash = normalizeSHA256(spec.FileHash)
 	}
 	if businessID == "" || fileHash == "" {
-		return RunResult{}, fmt.Errorf("上传/快照响应缺少 businessId 或 fileHash")
+		if spec.Source.Type == "url" {
+			return result, fmt.Errorf("URL 来源需要在工作流输入中提供 businessId 和 fileHash（文件内容的 SHA-256）")
+		}
+		return result, fmt.Errorf("上传响应缺少 businessId 或 fileHash")
+	}
+	if err := ValidateFileHash(fileHash); err != nil {
+		return result, fmt.Errorf("上传响应中的 fileHash 无效: %w", err)
 	}
 	startRequest := StartRequest{
 		BusinessID:   businessID,
@@ -112,14 +121,13 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 		Config:       spec.Config,
 		TriggerScene: "manual",
 	}
-	result := RunResult{Upload: upload}
 	if spec.ExtractSubjects {
-		result.Subjects, err = workflow.api.ExtractSubjects(ctx, startRequest)
+		result.Subjects, err = workflow.api.ExtractSubjects(workflowContext, startRequest)
 		if err != nil {
 			return result, err
 		}
 	}
-	result.Start, err = workflow.api.Start(ctx, startRequest)
+	result.Start, err = workflow.api.Start(workflowContext, startRequest)
 	if err != nil {
 		return result, err
 	}
@@ -130,14 +138,31 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 	if !ok || taskID <= 0 {
 		return result, fmt.Errorf("发起审查响应缺少有效 taskId")
 	}
-	query := TaskQuery{TaskID: taskID, BusinessID: businessID, AppType: spec.AppType}
+	query := TaskQuery{
+		TaskID:          taskID,
+		BusinessID:      businessID,
+		AppType:         spec.AppType,
+		VisibilityScope: workflowVisibilityScope(spec.AppType),
+	}
 	// 先保存轮询终态；失败时调用方仍可读取诊断字段，成功时再用完整详情替换。
-	result.Final, err = workflow.Wait(ctx, query)
+	result.Final, err = workflow.Wait(workflowContext, query)
 	if err != nil {
 		return result, err
 	}
-	result.Final, err = workflow.api.Info(ctx, query)
-	return result, err
+	info, err := workflow.api.Info(workflowContext, query)
+	if err != nil {
+		return result, err
+	}
+	result.Final = info
+	return result, nil
+}
+
+// workflowVisibilityScope 让 CLM/CR 的一键链路使用业务对象视角读取可复用任务。
+func workflowVisibilityScope(appType string) string {
+	if appType == AppTypeCLM || appType == AppTypeCR {
+		return VisibilityScopeContractResult
+	}
+	return ""
 }
 
 // Wait 持续查询 status，直到 success/fail 或 deadline/cancel。
@@ -155,6 +180,9 @@ func (workflow *Workflow) Wait(ctx context.Context, query TaskQuery) (Document, 
 		if status == "success" {
 			return snapshot, nil
 		}
+		if status == "" {
+			return snapshot, fmt.Errorf("任务不存在或当前用户无权访问")
+		}
 		if status == "fail" {
 			failureMessage, _ := StringValue(snapshot, "message")
 			if failureMessage != "" {
@@ -163,10 +191,49 @@ func (workflow *Workflow) Wait(ctx context.Context, query TaskQuery) (Document, 
 			return snapshot, ErrTaskFailed
 		}
 		if status != "running" {
-			return nil, fmt.Errorf("未知任务状态: %q", status)
+			return snapshot, fmt.Errorf("未知任务状态: %q", status)
 		}
 		if err := workflow.clock.After(waitContext, workflow.options.Interval); err != nil {
-			return nil, fmt.Errorf("等待任务终态: %w", err)
+			return snapshot, fmt.Errorf("等待任务终态: %w", err)
+		}
+	}
+}
+
+// WaitFeishu 轮询字段捷径的合并详情接口，直到数值状态进入终态。
+// 入参：ctx context.Context 控制取消；query FeishuTaskQuery 提供字段捷径任务身份。
+// 返回值：Document 为最后一次详情快照；error 为失败、跳过、超时、取消或 API 失败。
+func (workflow *Workflow) WaitFeishu(ctx context.Context, query FeishuTaskQuery) (Document, error) {
+	api, ok := workflow.api.(FeishuAPI)
+	if !ok {
+		return nil, fmt.Errorf("当前审查服务未提供字段捷径任务查询")
+	}
+	waitContext, cancel := context.WithTimeout(ctx, workflow.options.Deadline)
+	defer cancel()
+	for {
+		snapshot, err := api.FeishuInfo(waitContext, query)
+		if err != nil {
+			return nil, err
+		}
+		switch status := FeishuTaskStatus(snapshot); status {
+		case "success":
+			return snapshot, nil
+		case "fail":
+			failureMessage, _ := StringValue(snapshot, "msg")
+			if failureMessage == "" {
+				failureMessage, _ = StringValue(snapshot, "message")
+			}
+			if failureMessage != "" {
+				return snapshot, fmt.Errorf("%w: %s", ErrTaskFailed, failureMessage)
+			}
+			return snapshot, ErrTaskFailed
+		case "skipped":
+			return snapshot, fmt.Errorf("字段捷径审查任务已跳过")
+		case "prepare", "running":
+			if err := workflow.clock.After(waitContext, workflow.options.Interval); err != nil {
+				return snapshot, fmt.Errorf("等待字段捷径任务终态: %w", err)
+			}
+		default:
+			return snapshot, fmt.Errorf("未知字段捷径任务状态: %q", status)
 		}
 	}
 }

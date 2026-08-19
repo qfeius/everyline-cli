@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-feishu-task-query.schema.json",
+  "title": "FeishuSmartAuditTaskQuery",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["smartAuditId"],
+  "properties": {
+    "smartAuditId": {"type": "integer", "minimum": 1},
+    "reviewPosition": {"type": "string", "minLength": 1}
+  }
+}

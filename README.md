@@ -1,6 +1,6 @@
 # everyline-cli
 
-智审开放平台 V3 的 Go 命令行客户端。覆盖技术方案中的 27 个远端 operation 映射：Profile/tenant token、完整合同审查工作流、飞书字段捷径发起、审查清单以及规则分组/规则管理；其中 23 项已开放真实调用，4 项缺字段级详情的批量写操作失败关闭。
+智审开放平台 V3 的 Go 命令行客户端。覆盖接口文档中的 27 个远端 operation 映射：Profile/tenant token、合同审查工作流、字段捷径发起与生命周期、审查清单以及规则分组/规则管理；其中 23 项已开放真实调用，4 项缺字段级详情的批量写操作失败关闭。文件快照接口按当前 CLI 范围暂不纳入同步。
 
 ## 构建
 
@@ -25,6 +25,10 @@ everyline-cli auth login
 
 everyline-cli review run --input review-run.json --output json
 ```
+
+URL 来源的一键审查输入还需提供 `businessId` 与对应文件内容的 SHA-256 `fileHash`，因为标准 URL 上传接口的响应只返回 `fileId`。
+
+`appType=CLM` 时，本地文件上传也必须提供 `businessId`；CLI 会在上传前校验这一条件。
 
 也可以使用内置环境地址创建 `test`、`blue` 或线上 `prod` Profile（`app-id` 仍需替换为该环境的应用 ID）：
 

@@ -29,7 +29,7 @@ func TestVerificationStatus(t *testing.T) {
 	}
 }
 
-// TestCatalogValidatesRuntimeRequests 验证 27 项目录可校验固定路径和路径参数，并拒绝方法漂移。
+// TestCatalogValidatesRuntimeRequests 验证目录可校验固定路径和路径参数，并拒绝方法漂移。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestCatalogValidatesRuntimeRequests(t *testing.T) {
@@ -44,7 +44,7 @@ func TestCatalogValidatesRuntimeRequests(t *testing.T) {
 	}
 }
 
-// validContractInput 为目录中的每类 Schema 提供最小合法输入，确保 27 项都执行真实 Schema 编译与校验。
+// validContractInput 为目录中的每类 Schema 提供最小合法输入，确保目录项都执行真实 Schema 编译与校验。
 // 入参：schema string 为 catalog 绑定的 Schema 文件名。
 // 返回值：any，为可通过对应 Schema 的逻辑请求输入；未知 Schema 返回 nil 以使测试失败关闭。
 func validContractInput(schema string) any {
@@ -57,16 +57,16 @@ func validContractInput(schema string) any {
 		return map[string]any{"file": "contract.pdf", "name": "contract.pdf", "appType": "THIRD_PARTY"}
 	case "review-upload-url.schema.json":
 		return map[string]any{"fileUrl": "https://open.qfei.cn/contract.pdf", "fileName": "contract.pdf"}
-	case "review-file-snapshot.schema.json":
-		return map[string]any{"fileId": 1, "businessId": "biz"}
 	case "review-subject.schema.json":
-		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "hash"}
+		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1}
 	case "review-start.schema.json":
-		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "hash", "config": map[string]any{}}
+		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{}}
 	case "review-start-feishu.schema.json":
-		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "hash", "config": map[string]any{}, "hasQuota": true, "baseSignature": "signature", "packID": "pack"}
+		return map[string]any{"fileId": 1, "selectedPosition": "legal", "hasQuota": true, "baseSignature": "payload.signature", "packID": "pack-1"}
 	case "review-task-query.schema.json":
 		return map[string]any{"taskId": 1, "businessId": "biz"}
+	case "review-feishu-task-query.schema.json":
+		return map[string]any{"smartAuditId": 1}
 	case "checklist.schema.json":
 		return checklist
 	case "checklist-batch-create.schema.json":
@@ -101,5 +101,63 @@ func TestRequestSchemaRejectsDrift(t *testing.T) {
 	err := ValidateRequest("batchDeleteReviewChecklists", "DELETE", "/open-apis/review-rules/review-checklists/batch", map[string]any{"ids": []string{"same", "same"}})
 	if !errors.Is(err, ErrContractMismatch) {
 		t.Fatalf("err=%v，期望 ErrContractMismatch", err)
+	}
+}
+
+// TestUploadSchemaRequiresBusinessIDForCLM 验证上传契约把 CLM 的业务身份要求下沉到通用校验层。
+func TestUploadSchemaRequiresBusinessIDForCLM(t *testing.T) {
+	err := ValidateRequest(
+		"uploadContractFileV3",
+		"POST",
+		"/open-apis/contract-review/v3/file/contract/upload",
+		map[string]any{"file": "contract.pdf", "name": "contract.pdf", "appType": "CLM"},
+	)
+	if !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("err=%v，CLM 缺少 businessId 应被拒绝", err)
+	}
+}
+
+// TestTaskQuerySchemaAllowsOptionalContext 验证任务查询只依赖 taskId，符合 status/info 后端参数定义。
+func TestTaskQuerySchemaAllowsOptionalContext(t *testing.T) {
+	if err := ValidateRequest("smartAuditTaskStatus", "GET", "/open-apis/contract-review/v3/smartAudit/task/status", map[string]any{"taskId": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRequest("smartAuditTaskStatus", "GET", "/open-apis/contract-review/v3/smartAudit/task/status", map[string]any{"taskId": 1, "visibilityScope": "all"}); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("err=%v，期望非法 visibilityScope 被拒绝", err)
+	}
+	if err := ValidateRequest("smartAuditTaskStatus", "GET", "/open-apis/contract-review/v3/smartAudit/task/status", map[string]any{"taskId": 1, "visibilityScope": "contractResult"}); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("err=%v，contractResult 缺少业务上下文时应被拒绝", err)
+	}
+}
+
+// TestStartSchemaAllowsDefaultConfig 验证发起接口可省略配置，CLI 会在发送前补为空对象。
+func TestStartSchemaAllowsDefaultConfig(t *testing.T) {
+	input := map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestReviewRunSchemaIsExecutable 验证本地复合工作流也通过同一套嵌入式 JSON Schema 执行运行时校验。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestReviewRunSchemaIsExecutable(t *testing.T) {
+	valid := map[string]any{
+		"source":     map[string]any{"type": "url", "fileUrl": "https://files.example.com/contract.pdf", "name": "合同.pdf"},
+		"businessId": "biz-url",
+		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"appType":    "THIRD_PARTY",
+		"config":     map[string]any{},
+		"wait":       true,
+	}
+	if err := ValidateSchema("review-run.schema.json", valid); err != nil {
+		t.Fatal(err)
+	}
+	invalid := map[string]any{
+		"source":  map[string]any{"type": "file", "path": "contract.pdf", "name": "合同.pdf"},
+		"appType": "CLM",
+	}
+	if err := ValidateSchema("review-run.schema.json", invalid); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("err=%v，CLM 文件输入缺少 businessId 应由 review-run Schema 拒绝", err)
 	}
 }
