@@ -12,13 +12,13 @@ type Spec struct {
 var catalog = []Spec{
 	{"tenantAccessTokenInternal", "auth login", "POST", "profile.token_url", "auth-login.schema.json"},
 	{"uploadContractFileV3", "review file upload", "POST", "/open-apis/contract-review/v3/file/contract/upload", "review-upload.schema.json"},
-	{"uploadContractFileByURLV3", "review file upload-url", "POST", "/open-apis/contract-review/v3/file/contract/uploadByUrl", "review-upload-url.schema.json"},
-	{"smartAuditFileSnapshot", "review file snapshot", "GET", "/open-apis/contract-review/v3/smartAudit/file/snapshot", "review-file-snapshot.schema.json"},
+	{"uploadContractFileByURLV3", "review file upload-url", "POST", "/open-apis/contract-review/v1/file/contract/uploadByUrl", "review-upload-url.schema.json"},
 	{"smartAuditContractSubjects", "review subject extract", "POST", "/open-apis/contract-review/v3/smartAudit/contract/subjects", "review-subject.schema.json"},
 	{"smartAuditTaskStartReview", "review task start", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", "review-start.schema.json"},
-	{"feishuSmartAuditTaskStartReviewV3", "review task start-feishu", "POST", "/open-apis/contract-review/feishu/v3/smartAudit/task/startReview", "review-start-feishu.schema.json"},
+	{"feishuSmartAuditTaskStartReviewV3", "review task start-feishu", "POST", "/open-apis/contract-review/feishu/v1/smartAudit/init", "review-start-feishu.schema.json"},
 	{"smartAuditTaskStatus", "review task status", "GET", "/open-apis/contract-review/v3/smartAudit/task/status", "review-task-query.schema.json"},
 	{"smartAuditTaskInfo", "review task info", "GET", "/open-apis/contract-review/v3/smartAudit/task/info", "review-task-query.schema.json"},
+	{"feishuSmartAuditTaskInfo", "review task info-feishu", "GET", "/open-apis/contract-review/v1/smartAudit/info", "review-feishu-task-query.schema.json"},
 
 	{"createReviewChecklist", "checklist create", "POST", "/open-apis/review-rules/review-checklists", "checklist.schema.json"},
 	{"batchCreateReviewChecklists", "checklist batch-create", "POST", "/open-apis/review-rules/review-checklists/batch", "checklist-batch-create.schema.json"},
@@ -42,7 +42,7 @@ var catalog = []Spec{
 	{"batchDeleteReviewRules", "rule batch-delete", "DELETE", "/open-apis/review-rules/review-rule-groups/{groupId}/rules/batch", "resource-ids.schema.json"},
 }
 
-// All 返回完整的 27 项契约副本，调用方不能修改包内清单。
+// All 返回当前 CLI 同步的 27 项契约副本，调用方不能修改包内清单。
 // 入参：无。
 // 返回值：[]Spec，按技术方案接口序号稳定排序。
 func All() []Spec {

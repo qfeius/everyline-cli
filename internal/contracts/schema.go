@@ -24,24 +24,38 @@ var (
 // 入参：spec Spec 为目录项；input any 为 body、query 或路径资源 ID 组成的逻辑输入。
 // 返回值：error，Schema 缺失、编译失败或输入不符合契约时包装 ErrContractMismatch。
 func validateInput(spec Spec, input any) error {
+	return validateSchema(spec.OperationID, spec.Schema, input)
+}
+
+// ValidateSchema 直接执行指定 JSON Schema，供未映射远端 operation 的本地复合输入复用同一校验入口。
+// 入参：schemaName string 为 schemas 目录中的文件名；input any 为待校验的 JSON 兼容值。
+// 返回值：error，Schema 缺失、编译失败或输入不符合契约时包装 ErrContractMismatch。
+func ValidateSchema(schemaName string, input any) error {
+	return validateSchema(schemaName, schemaName, input)
+}
+
+// validateSchema 统一执行嵌入式 JSON Schema，避免 operation 校验和本地工作流各自维护编译逻辑。
+// 入参：subject string 为错误信息中的输入名称；schemaName string 为 Schema 文件名；input any 为待校验值。
+// 返回值：error，Schema 校验成功时为 nil，否则包装 ErrContractMismatch。
+func validateSchema(subject string, schemaName string, input any) error {
 	compileSchemasOnce.Do(compileSchemas)
 	if compileSchemasError != nil {
 		return fmt.Errorf("%w: 加载 JSON Schema: %v", ErrContractMismatch, compileSchemasError)
 	}
-	schema, exists := compiledSchemas[spec.Schema]
+	schema, exists := compiledSchemas[schemaName]
 	if !exists {
-		return fmt.Errorf("%w: %s 未绑定可执行 Schema %s", ErrContractMismatch, spec.OperationID, spec.Schema)
+		return fmt.Errorf("%w: %s 未绑定可执行 Schema %s", ErrContractMismatch, subject, schemaName)
 	}
 	encoded, err := json.Marshal(input)
 	if err != nil {
-		return fmt.Errorf("%w: 编码 %s 契约输入: %v", ErrContractMismatch, spec.OperationID, err)
+		return fmt.Errorf("%w: 编码 %s 契约输入: %v", ErrContractMismatch, subject, err)
 	}
 	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(encoded))
 	if err != nil {
-		return fmt.Errorf("%w: 解析 %s 契约输入: %v", ErrContractMismatch, spec.OperationID, err)
+		return fmt.Errorf("%w: 解析 %s 契约输入: %v", ErrContractMismatch, subject, err)
 	}
 	if err := schema.Validate(instance); err != nil {
-		return fmt.Errorf("%w: %s 不符合 %s: %v", ErrContractMismatch, spec.OperationID, spec.Schema, err)
+		return fmt.Errorf("%w: %s 不符合 %s: %v", ErrContractMismatch, subject, schemaName, err)
 	}
 	return nil
 }

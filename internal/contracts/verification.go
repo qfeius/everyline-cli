@@ -9,7 +9,7 @@ import (
 // ErrContractUnverified 表示技术方案尚未提供字段级详情，CLI 不得猜测写请求契约。
 var ErrContractUnverified = errors.New("接口契约尚未核验")
 
-// ErrContractMismatch 表示业务服务生成的 method/path 或逻辑输入与 27 项映射目录不一致。
+// ErrContractMismatch 表示业务服务生成的 method/path 或逻辑输入与映射目录不一致。
 var ErrContractMismatch = errors.New("请求与接口映射不一致")
 
 var unverifiedOperations = map[string]struct{}{

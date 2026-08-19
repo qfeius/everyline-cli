@@ -4,14 +4,15 @@
   "title": "smartAuditTaskStartReview",
   "type": "object",
   "additionalProperties": false,
-  "required": ["businessId", "appType", "fileId", "fileHash", "config"],
+  "required": ["businessId", "appType", "fileId", "fileHash"],
   "properties": {
     "businessId": {"type": "string", "minLength": 1},
     "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"]},
     "fileId": {"type": "integer", "minimum": 1},
-    "fileHash": {"type": "string", "minLength": 1},
+    "fileHash": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
     "config": {
       "type": "object",
+      "default": {},
       "properties": {
         "selectedCheckListIds": {"type": "array", "items": {"type": "string"}},
         "useSmartGeneratedChecklist": {"type": "boolean"},
@@ -19,13 +20,6 @@
       },
       "additionalProperties": true
     },
-    "aiItemId": {"type": "string"},
-    "remark": {"type": "string"},
-    "biz1": {"type": "string"},
-    "biz2": {"type": "string"},
-    "biz3": {"type": "string"},
-    "biz4": {"type": "string"},
-    "biz5": {"type": "string"},
     "allowInvalidSelectedChecklists": {"type": "boolean", "default": false},
     "triggerScene": {"enum": ["manual", "auto"], "default": "manual"},
     "usageReportContext": {"type": "object"}

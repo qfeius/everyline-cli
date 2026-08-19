@@ -40,7 +40,7 @@ func (client *recordingClient) Do(_ context.Context, request openplatform.Reques
 func TestServiceStartContract(t *testing.T) {
 	client := &recordingClient{data: `{"taskId":88,"status":"running"}`}
 	service := NewService(client, 5*time.Second)
-	request := StartRequest{BusinessID: "biz-1", AppType: AppTypeThirdParty, FileID: 11, FileHash: "sha256", Config: map[string]any{}, TriggerScene: "manual"}
+	request := StartRequest{BusinessID: "biz-1", AppType: AppTypeThirdParty, FileID: 11, FileHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TriggerScene: "manual"}
 	if _, err := service.Start(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -51,21 +51,17 @@ func TestServiceStartContract(t *testing.T) {
 	if err := json.Unmarshal(client.request.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["businessId"] != "biz-1" || body["appType"] != AppTypeThirdParty || body["fileHash"] != "sha256" {
+	if body["businessId"] != "biz-1" || body["appType"] != AppTypeThirdParty || body["fileHash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("body=%#v", body)
 	}
 }
 
-// TestServiceStartFeishuContract 验证飞书 V3 路径和签名额度字段完整透传。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；失败通过 t.Fatal 报告。
+// TestServiceStartFeishuContract 验证字段捷径入口使用当前后端的请求字段和路径。
 func TestServiceStartFeishuContract(t *testing.T) {
-	client := &recordingClient{data: `{"taskId":89,"status":"running"}`}
-	service := NewService(client, 5*time.Second)
-	request := FeishuStartRequest{
-		StartRequest: StartRequest{BusinessID: "biz-1", AppType: AppTypeThirdParty, FileID: 11, FileHash: "sha256", Config: map[string]any{}},
-		HasQuota:     true, BaseSignature: "payload.signature", PackID: "pack-1",
-	}
+	client := &recordingClient{data: `{"smartAuditId":88,"taskStatus":"running"}`}
+	service := NewService(client, time.Second)
+	reviewStrength := 0
+	request := FeishuStartRequest{FileID: 11, ReviewStrength: &reviewStrength, SelectedPosition: "legal", HasQuota: true, BaseSignature: "payload.signature", PackID: "pack-1"}
 	if _, err := service.StartFeishu(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +72,7 @@ func TestServiceStartFeishuContract(t *testing.T) {
 	if err := json.Unmarshal(client.request.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["hasQuota"] != true || body["baseSignature"] != "payload.signature" || body["packID"] != "pack-1" {
+	if body["fileId"] != float64(11) || body["reviewStrength"] != float64(0) || body["selectedPosition"] != "legal" || body["hasQuota"] != true {
 		t.Fatalf("body=%#v", body)
 	}
 }
@@ -100,16 +96,9 @@ func TestServiceOperationMappings(t *testing.T) {
 			},
 		},
 		{
-			name: "snapshot", operationID: OperationFileSnapshot, method: "GET", path: pathFileSnapshot,
-			invoke: func(service *Service) error {
-				_, err := service.Snapshot(context.Background(), 12, AppTypeThirdParty, "biz-1")
-				return err
-			},
-		},
-		{
 			name: "subjects", operationID: OperationExtractSubjects, method: "POST", path: pathExtractSubjects,
 			invoke: func(service *Service) error {
-				_, err := service.ExtractSubjects(context.Background(), StartRequest{BusinessID: "biz-1", AppType: AppTypeThirdParty, FileID: 12, FileHash: "hash"})
+				_, err := service.ExtractSubjects(context.Background(), StartRequest{BusinessID: "biz-1", AppType: AppTypeThirdParty, FileID: 12})
 				return err
 			},
 		},
@@ -141,24 +130,52 @@ func TestServiceOperationMappings(t *testing.T) {
 	}
 }
 
-// TestSnapshotRequiresBusinessID 验证文件快照请求不会把缺失业务 ID 的请求发送到远端。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；失败通过 t.Fatal 报告。
-func TestSnapshotRequiresBusinessID(t *testing.T) {
-	client := &recordingClient{data: `{"ok":true}`}
-	_, err := NewService(client, time.Second).Snapshot(context.Background(), 12, AppTypeThirdParty, " ")
-	if err == nil || !strings.Contains(err.Error(), "business-id 不能为空") {
-		t.Fatalf("err=%v", err)
+// TestServiceTaskQueryExtensions 验证 status 查询会透传后端新增的 visibilityScope。
+func TestServiceTaskQueryExtensions(t *testing.T) {
+	client := &recordingClient{data: `{"status":"running"}`}
+	service := NewService(client, time.Second)
+	if _, err := service.Status(context.Background(), TaskQuery{TaskID: 88, BusinessID: "  biz-1  ", AppType: " CLM ", VisibilityScope: " contractResult "}); err != nil {
+		t.Fatal(err)
 	}
-	if client.request.OperationID != "" {
-		t.Fatalf("缺少 business-id 不应调用 HTTP client: %#v", client.request)
+	if got := client.request.Query.Get("businessId"); got != "biz-1" {
+		t.Fatalf("businessId=%q", got)
+	}
+	if got := client.request.Query.Get("visibilityScope"); got != "contractResult" {
+		t.Fatalf("visibilityScope=%q", got)
+	}
+	if got := client.request.Query.Get("appType"); got != "CLM" {
+		t.Fatalf("appType=%q", got)
 	}
 }
 
-// TestTaskQueriesRequireBusinessID 验证状态和详情查询不会把缺失业务 ID 的请求发送到远端。
+// TestServiceFeishuInfoContract 验证字段捷径查询使用 smartAuditId/reviewPosition 和独立的 v1 路由。
+func TestServiceFeishuInfoContract(t *testing.T) {
+	client := &recordingClient{data: `{"smartAuditId":88,"taskStatus":0,"taskStatusName":"RUNNING","result":[]}`}
+	service := NewService(client, time.Second)
+	if _, err := service.FeishuInfo(context.Background(), FeishuTaskQuery{SmartAuditID: 88, ReviewPosition: "legal"}); err != nil {
+		t.Fatal(err)
+	}
+	if client.request.OperationID != OperationFeishuTaskInfo || client.request.Method != "GET" || client.request.Path != pathFeishuTaskInfo {
+		t.Fatalf("request=%#v", client.request)
+	}
+	if client.request.Query.Get("smartAuditId") != "88" || client.request.Query.Get("reviewPosition") != "legal" {
+		t.Fatalf("query=%#v", client.request.Query)
+	}
+}
+
+// TestFeishuTaskStatusMapsBackendCodes 验证后端 AsyncTaskStatus 数值与工作流语义状态的映射。
+func TestFeishuTaskStatusMapsBackendCodes(t *testing.T) {
+	for code, expected := range map[int]string{4: "prepare", 0: "running", 1: "success", 2: "fail", 3: "skipped"} {
+		if status := FeishuTaskStatus(Document{"taskStatus": code}); status != expected {
+			t.Fatalf("code=%d status=%q，期望 %q", code, status, expected)
+		}
+	}
+}
+
+// TestTaskQueriesAllowMissingBusinessID 验证后端允许仅用 taskId 查询状态和详情。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
-func TestTaskQueriesRequireBusinessID(t *testing.T) {
+func TestTaskQueriesAllowMissingBusinessID(t *testing.T) {
 	for _, invoke := range []func(*Service) error{
 		func(service *Service) error {
 			_, err := service.Status(context.Background(), TaskQuery{TaskID: 88})
@@ -171,12 +188,57 @@ func TestTaskQueriesRequireBusinessID(t *testing.T) {
 	} {
 		client := &recordingClient{data: `{"ok":true}`}
 		err := invoke(NewService(client, time.Second))
-		if err == nil || !strings.Contains(err.Error(), "business-id 不能为空") {
+		if err != nil {
 			t.Fatalf("err=%v", err)
 		}
-		if client.request.OperationID != "" {
-			t.Fatalf("缺少 business-id 不应调用 HTTP client: %#v", client.request)
+		if client.request.Query.Get("taskId") != "88" || client.request.Query.Get("businessId") != "" {
+			t.Fatalf("query=%#v", client.request.Query)
 		}
+	}
+}
+
+// TestTaskQueryRejectsUnknownVisibilityScope 验证可见性范围只接受后端当前枚举值。
+func TestTaskQueryRejectsUnknownVisibilityScope(t *testing.T) {
+	client := &recordingClient{data: `{"ok":true}`}
+	_, err := NewService(client, time.Second).Status(context.Background(), TaskQuery{TaskID: 88, VisibilityScope: "all"})
+	if err == nil || !strings.Contains(err.Error(), "visibility-scope") {
+		t.Fatalf("err=%v", err)
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("非法 visibilityScope 不应调用 HTTP client: %#v", client.request)
+	}
+}
+
+// TestTaskQueryRequiresContextForContractResult 验证业务对象可见性范围不会在缺少上下文时发出无效查询。
+func TestTaskQueryRequiresContextForContractResult(t *testing.T) {
+	client := &recordingClient{data: `{"ok":true}`}
+	_, err := NewService(client, time.Second).Status(context.Background(), TaskQuery{TaskID: 88, VisibilityScope: VisibilityScopeContractResult})
+	if err == nil || !strings.Contains(err.Error(), "必须同时提供 business-id 和 app-type") {
+		t.Fatalf("err=%v", err)
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("上下文不完整时不应调用 HTTP client: %#v", client.request)
+	}
+}
+
+// TestFeishuStartRejectsMalformedReviewRules 验证字段捷径规则字符串在本地先满足数组 JSON 约定。
+func TestFeishuStartRejectsMalformedReviewRules(t *testing.T) {
+	client := &recordingClient{data: `{"ok":true}`}
+	request := FeishuStartRequest{
+		FileID: 11, SelectedPosition: "legal", ReviewRules: "{bad-json}", HasQuota: true,
+		BaseSignature: "payload.signature", PackID: "pack-1",
+	}
+	_, err := NewService(client, time.Second).StartFeishu(context.Background(), request)
+	if err == nil || !strings.Contains(err.Error(), "reviewRules 必须是规则数组 JSON") {
+		t.Fatalf("err=%v", err)
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("非法 reviewRules 不应调用 HTTP client: %#v", client.request)
+	}
+	request.ReviewRules = `[{"name":"规则"}]`
+	_, err = NewService(client, time.Second).StartFeishu(context.Background(), request)
+	if err == nil || !strings.Contains(err.Error(), "reviewRules 第 1 项") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -221,6 +283,22 @@ func TestServiceUploadMultipartContract(t *testing.T) {
 	}
 }
 
+// TestServiceUploadCLMRequiresBusinessID 验证 CLM 上传在本地就拒绝缺少业务对象 ID 的请求。
+func TestServiceUploadCLMRequiresBusinessID(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "contract.pdf")
+	if err := os.WriteFile(filePath, []byte("pdf-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingClient{data: `{"fileId":"12","businessId":"biz-1","fileHash":"hash"}`}
+	service := NewService(client, time.Second)
+	if _, err := service.UploadFile(context.Background(), filePath, "合同.pdf", AppTypeCLM, " "); err == nil || !strings.Contains(err.Error(), "CLM 上传必须提供 businessId") {
+		t.Fatalf("err=%v", err)
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("缺少 businessId 时不应发送请求: %#v", client.request)
+	}
+}
+
 // TestValidateUploadFileBoundary 验证 2 MiB 等于上限时允许，超过一个字节时拒绝。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -239,5 +317,16 @@ func TestValidateUploadFileBoundary(t *testing.T) {
 	}
 	if err := ValidateUploadFile(oversizedPath); err == nil {
 		t.Fatal("超过上限应拒绝")
+	}
+}
+
+// TestValidateUploadFileAllowsExtensionlessPath 验证文件路径扩展名不参与校验，业务文件名仍由 UploadFile 单独验证。
+func TestValidateUploadFileAllowsExtensionlessPath(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "upload")
+	if err := os.WriteFile(filePath, []byte("pdf-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateUploadFile(filePath); err != nil {
+		t.Fatalf("无扩展名临时路径应允许上传: %v", err)
 	}
 }

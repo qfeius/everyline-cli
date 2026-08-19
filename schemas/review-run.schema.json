@@ -4,7 +4,7 @@
   "title": "reviewRun",
   "type": "object",
   "additionalProperties": false,
-  "required": ["source", "config"],
+  "required": ["source"],
   "properties": {
     "source": {
       "oneOf": [
@@ -30,10 +30,37 @@
         }
       ]
     },
-    "businessId": {"type": "string"},
+    "businessId": {"type": "string", "minLength": 1},
+    "fileHash": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
     "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"], "default": "THIRD_PARTY"},
-    "config": {"type": "object"},
+    "config": {"type": "object", "default": {}},
     "extractSubjects": {"type": "boolean", "default": false},
     "wait": {"type": "boolean"}
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "properties": {"type": {"const": "url"}},
+            "required": ["type"]
+          }
+        }
+      },
+      "then": {"required": ["businessId", "fileHash"]}
+    },
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "properties": {"type": {"const": "file"}},
+            "required": ["type"]
+          },
+          "appType": {"const": "CLM"}
+        },
+        "required": ["source", "appType"]
+      },
+      "then": {"required": ["businessId"]}
+    }
+  ]
 }

@@ -4,7 +4,7 @@
   "title": "smartAuditContractSubjects",
   "type": "object",
   "additionalProperties": false,
-  "required": ["businessId", "appType", "fileId", "fileHash"],
+  "required": ["businessId", "appType", "fileId"],
   "properties": {
     "businessId": {"type": "string", "minLength": 1},
     "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"]},
@@ -12,4 +12,3 @@
     "fileHash": {"type": "string", "minLength": 1}
   }
 }
-

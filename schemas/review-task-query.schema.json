@@ -4,10 +4,20 @@
   "title": "smartAuditTaskQuery",
   "type": "object",
   "additionalProperties": false,
-  "required": ["taskId", "businessId"],
+  "required": ["taskId"],
   "properties": {
     "taskId": {"type": "integer", "minimum": 1},
     "businessId": {"type": "string", "minLength": 1},
-    "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"]}
-  }
+    "appType": {"enum": ["CLM", "CR", "THIRD_PARTY"]},
+    "visibilityScope": {"enum": ["contractResult"]}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"visibilityScope": {"const": "contractResult"}},
+        "required": ["visibilityScope"]
+      },
+      "then": {"required": ["businessId", "appType"]}
+    }
+  ]
 }

@@ -12,7 +12,7 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 )
 
-// TestCatalogCompleteness 验证 27 个 operation 的 ID、CLI、method/path、Schema 和文档同步存在。
+// TestCatalogCompleteness 验证当前 operation 的 ID、CLI、method/path、Schema 和文档同步存在。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestCatalogCompleteness(t *testing.T) {
