@@ -19,6 +19,7 @@ import (
 var (
 	ErrCredentialsMissing = errors.New("缺少应用密钥或有效 token")
 	ErrAuthentication     = errors.New("鉴权失败")
+	ErrUserAuthentication = errors.New("用户认证未完成，请先通过 everyline 自有认证页面获取用户 token")
 )
 
 const OperationTenantAccessTokenInternal = "tenantAccessTokenInternal"
@@ -67,6 +68,32 @@ func NewProvider(store TokenStore, httpClient *http.Client, now func() time.Time
 // 入参：ctx context.Context 控制请求取消；profile config.Profile 指定凭证和 token 地址。
 // 返回值：Token 为可用凭证；error 在缺少凭证或远端失败时非 nil。
 func (provider *Provider) Token(ctx context.Context, profile config.Profile) (Token, error) {
+	return provider.TokenForIdentity(ctx, profile, config.IdentityApp)
+}
+
+// TokenForIdentity 按 user/app 身份读取环境变量、隔离缓存或执行对应登录流程。
+// 入参：ctx context.Context 控制远端请求；profile config.Profile 指定环境；identity config.IdentityKind 为业务身份。
+// 返回值：Token 为可用访问凭证；error 在凭证缺失或刷新失败时非 nil。
+func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.Profile, identity config.IdentityKind) (Token, error) {
+	parsedIdentity, err := config.ParseIdentityKind(string(identity))
+	if err != nil {
+		return Token{}, err
+	}
+	identity = parsedIdentity
+	if identity == config.IdentityUser {
+		if accessToken := strings.TrimSpace(os.Getenv("EVERYLINE_USER_ACCESS_TOKEN")); accessToken != "" {
+			return Token{AccessToken: accessToken, ExpiresAt: provider.now().Add(24 * time.Hour)}, nil
+		}
+		if identityStore, ok := provider.store.(interface {
+			LoadForIdentity(string, config.IdentityKind) (Token, error)
+		}); ok {
+			if cached, err := identityStore.LoadForIdentity(profile.Name, identity); err == nil && cached.ValidAt(provider.now(), time.Minute) {
+				return cached, nil
+			}
+		}
+		return Token{}, ErrUserAuthentication
+	}
+
 	if accessToken := strings.TrimSpace(os.Getenv("EVERYLINE_ACCESS_TOKEN")); accessToken != "" {
 		return Token{AccessToken: accessToken, ExpiresAt: provider.now().Add(24 * time.Hour)}, nil
 	}
@@ -78,6 +105,33 @@ func (provider *Provider) Token(ctx context.Context, profile config.Profile) (To
 		return Token{}, ErrCredentialsMissing
 	}
 	return provider.Login(ctx, profile, secret)
+}
+
+// LoginForIdentity 保存指定身份的 token；app 继续沿用 tenant token 流程，user 由自有认证页面注入。
+// 入参：ctx context.Context 控制请求；profile config.Profile 指定环境；identity config.IdentityKind 为业务身份；accessToken string 为用户页返回的 token。
+// 返回值：Token 为已缓存凭证；error 在身份、输入或落盘失败时非 nil。
+func (provider *Provider) LoginForIdentity(ctx context.Context, profile config.Profile, identity config.IdentityKind, accessToken string) (Token, error) {
+	if identity == config.IdentityApp {
+		return provider.Login(ctx, profile, accessToken)
+	}
+	if identity != config.IdentityUser {
+		return Token{}, fmt.Errorf("未知身份 %q", identity)
+	}
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return Token{}, ErrUserAuthentication
+	}
+	token := Token{AccessToken: accessToken, ExpiresAt: provider.now().Add(24 * time.Hour)}
+	identityStore, ok := provider.store.(interface {
+		SaveForIdentity(string, config.IdentityKind, Token) error
+	})
+	if !ok {
+		return Token{}, fmt.Errorf("token store 不支持 user 身份")
+	}
+	if err := identityStore.SaveForIdentity(profile.Name, identity, token); err != nil {
+		return Token{}, err
+	}
+	return token, nil
 }
 
 // Login 使用 appId/appSecret 获取 tenant token，并仅缓存 token 而不保存 app secret。

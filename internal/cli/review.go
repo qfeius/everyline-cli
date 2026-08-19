@@ -503,8 +503,12 @@ func buildReviewService(runtime *Runtime, root *rootOptions) (*review.Service, c
 	if err != nil {
 		return nil, config.Profile{}, err
 	}
+	identity, err := selectedIdentity(profile, root.Identity)
+	if err != nil {
+		return nil, config.Profile{}, err
+	}
 	provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now)
-	client := openplatform.NewClient(profile, provider, runtime.HTTP)
+	client := openplatform.NewClientForIdentity(profile, provider, runtime.HTTP, identity)
 	return review.NewService(client, root.Timeout), profile, nil
 }
 

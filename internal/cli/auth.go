@@ -8,62 +8,98 @@ import (
 	"time"
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
+	"git.qtech.cn/ai/everyline-cli/internal/config"
 
 	"github.com/spf13/cobra"
 )
 
-// newAuthCommand 创建 tenant token 登录、状态和注销命令组。
+// newAuthCommand 创建 app/user 身份登录、状态、切换和注销命令组。
 // 入参：runtime *Runtime 为凭证存储和 HTTP 依赖；root *rootOptions 为 Profile/输出 flags。
-// 返回值：*cobra.Command，包含 login/status/logout。
+// 返回值：*cobra.Command，包含 login/status/use/logout。
 func newAuthCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "auth", Short: "管理 tenant 访问凭证"}
+	command := &cobra.Command{Use: "auth", Short: "管理 app/user 身份凭证"}
 	command.AddCommand(
 		newAuthLoginCommand(runtime, root),
 		newAuthStatusCommand(runtime, root),
+		newAuthUseCommand(runtime, root),
 		newAuthLogoutCommand(runtime, root),
 	)
 	return command
 }
 
-// newAuthLoginCommand 创建 auth login，只从环境变量或 stdin 接收 app secret。
+// newAuthLoginCommand 创建 auth login；app 使用 app secret，user 使用自有认证页面交接的 token。
 // 入参：runtime *Runtime 为 I/O、HTTP 和 token store；root *rootOptions 为 Profile/输出 flags。
-// 返回值：*cobra.Command，可获取并缓存 tenant token。
+// 返回值：*cobra.Command，可获取并缓存 app 或 user token。
 func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var secretFromStdin bool
+	var accessTokenFromStdin bool
 	command := &cobra.Command{
 		Use:   "login",
-		Short: "获取并安全缓存 tenant token",
+		Short: "获取并安全缓存 app/user token",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			profile, err := selectedProfile(runtime, root)
 			if err != nil {
 				return err
 			}
-			secret := auth.SecretFromEnvironment(profile.Name)
-			if secretFromStdin {
-				secret, err = readSecret(runtime.Input)
-				if err != nil {
-					return fmt.Errorf("%w: %v", auth.ErrCredentialsMissing, err)
-				}
+			identity, err := selectedIdentity(profile, root.Identity)
+			if err != nil {
+				return err
 			}
-			if secret == "" {
-				return auth.ErrCredentialsMissing
+			if secretFromStdin && accessTokenFromStdin {
+				return fmt.Errorf("--app-secret-stdin 与 --access-token-stdin 只能选择一个")
+			}
+			if identity == config.IdentityUser && secretFromStdin {
+				return fmt.Errorf("user 身份请使用 --access-token-stdin")
+			}
+			if identity == config.IdentityApp && accessTokenFromStdin {
+				return fmt.Errorf("app 身份请使用 --app-secret-stdin")
+			}
+			credential := ""
+			if identity == config.IdentityUser {
+				credential = strings.TrimSpace(os.Getenv("EVERYLINE_USER_ACCESS_TOKEN"))
+				if accessTokenFromStdin {
+					credential, err = readAccessToken(runtime.Input)
+					if err != nil {
+						return fmt.Errorf("%w: %v", auth.ErrUserAuthentication, err)
+					}
+				}
+				if credential == "" {
+					page := profile.AuthURLFor(identity)
+					if page != "" {
+						return fmt.Errorf("%w；请先打开认证页面：%s，完成后使用 --access-token-stdin 交接 token", auth.ErrUserAuthentication, page)
+					}
+					return auth.ErrUserAuthentication
+				}
+			} else {
+				credential = auth.SecretFromEnvironment(profile.Name)
+				if secretFromStdin {
+					credential, err = readSecret(runtime.Input)
+					if err != nil {
+						return fmt.Errorf("%w: %v", auth.ErrCredentialsMissing, err)
+					}
+				}
+				if credential == "" {
+					return auth.ErrCredentialsMissing
+				}
 			}
 			provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now)
 			loginContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
 			defer cancel()
-			token, err := provider.Login(loginContext, profile, secret)
+			token, err := provider.LoginForIdentity(loginContext, profile, identity, credential)
 			if err != nil {
 				return err
 			}
 			return render(runtime, root, profile.DefaultOutput, map[string]any{
 				"profile":       profile.Name,
+				"identity":      identity,
 				"authenticated": true,
 				"expiresAt":     token.ExpiresAt,
 			})
 		},
 	}
 	command.Flags().BoolVar(&secretFromStdin, "app-secret-stdin", false, "从 stdin 读取 app secret")
+	command.Flags().BoolVar(&accessTokenFromStdin, "access-token-stdin", false, "从 everyline 自有认证页面交接用户 access token")
 	return command
 }
 
@@ -80,14 +116,33 @@ func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if strings.TrimSpace(os.Getenv("EVERYLINE_ACCESS_TOKEN")) != "" {
+			identity, err := selectedIdentity(profile, root.Identity)
+			if err != nil {
+				return err
+			}
+			environmentToken := "EVERYLINE_ACCESS_TOKEN"
+			if identity == config.IdentityUser {
+				environmentToken = "EVERYLINE_USER_ACCESS_TOKEN"
+			}
+			if strings.TrimSpace(os.Getenv(environmentToken)) != "" {
 				return render(runtime, root, profile.DefaultOutput, map[string]any{
-					"profile": profile.Name, "authenticated": true, "source": "environment",
+					"profile": profile.Name, "identity": identity, "authenticated": true, "source": "environment",
 				})
 			}
-			token, loadErr := runtime.Tokens.Load(profile.Name)
+			var token auth.Token
+			var loadErr error
+			if identityStore, ok := runtime.Tokens.(interface {
+				LoadForIdentity(string, config.IdentityKind) (auth.Token, error)
+			}); ok {
+				token, loadErr = identityStore.LoadForIdentity(profile.Name, identity)
+			} else {
+				token, loadErr = runtime.Tokens.Load(profile.Name)
+			}
 			authenticated := loadErr == nil && token.ValidAt(runtime.Now(), 0)
-			status := map[string]any{"profile": profile.Name, "authenticated": authenticated, "source": "cache"}
+			status := map[string]any{"profile": profile.Name, "identity": identity, "authenticated": authenticated, "source": "cache"}
+			if identity == config.IdentityUser && !authenticated && profile.AuthURLFor(identity) != "" {
+				status["authURL"] = profile.AuthURLFor(identity)
+			}
 			if loadErr == nil {
 				status["expiresAt"] = token.ExpiresAt
 				remaining := time.Until(token.ExpiresAt)
@@ -97,6 +152,41 @@ func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				status["expiresInSeconds"] = maxInt64(0, int64(remaining.Seconds()))
 			}
 			return render(runtime, root, profile.DefaultOutput, status)
+		},
+	}
+}
+
+// newAuthUseCommand 创建 auth use，持久化当前 Profile 的默认业务身份。
+// 入参：runtime *Runtime 为 Profile 存储依赖；root *rootOptions 为 profile/身份 flags。
+// 返回值：*cobra.Command，可将后续业务命令默认切换为 app 或 user。
+func newAuthUseCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "use [profile]",
+		Short: "选择 Profile 的默认身份",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			if root.Identity == "" {
+				return fmt.Errorf("auth use 必须指定 --as app 或 --as user")
+			}
+			identity, err := config.ParseIdentityKind(root.Identity)
+			if err != nil {
+				return err
+			}
+			profileName := root.Profile
+			if len(args) == 1 {
+				profileName = args[0]
+			}
+			if profileName == "" {
+				profile, currentErr := runtime.Profiles.Current()
+				if currentErr != nil {
+					return currentErr
+				}
+				profileName = profile.Name
+			}
+			if err := runtime.Profiles.SetDefaultIdentity(profileName, identity); err != nil {
+				return err
+			}
+			return render(runtime, root, "table", map[string]any{"profile": profileName, "identity": identity})
 		},
 	}
 }
@@ -114,10 +204,23 @@ func newAuthLogoutCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := runtime.Tokens.Delete(profile.Name); err != nil {
+			identity, err := selectedIdentity(profile, root.Identity)
+			if err != nil {
 				return err
 			}
-			return render(runtime, root, profile.DefaultOutput, map[string]any{"profile": profile.Name, "authenticated": false})
+			if identityStore, ok := runtime.Tokens.(interface {
+				DeleteForIdentity(string, config.IdentityKind) error
+			}); ok {
+				err = identityStore.DeleteForIdentity(profile.Name, identity)
+			} else if identity == config.IdentityApp {
+				err = runtime.Tokens.Delete(profile.Name)
+			} else {
+				err = fmt.Errorf("token store 不支持 user 身份")
+			}
+			if err != nil {
+				return err
+			}
+			return render(runtime, root, profile.DefaultOutput, map[string]any{"profile": profile.Name, "identity": identity, "authenticated": false})
 		},
 	}
 }

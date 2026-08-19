@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/filelock"
 )
 
@@ -71,6 +72,65 @@ func (store *FileTokenStore) Delete(profileName string) error {
 		delete(tokens, profileName)
 		return store.saveUnlocked(tokens)
 	})
+}
+
+// LoadForIdentity 读取指定 Profile 和身份的 token；app 身份复用旧版 key 以保持兼容。
+// 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为业务身份。
+// 返回值：Token 为缓存凭证；error 在不存在或读取失败时非 nil。
+func (store *FileTokenStore) LoadForIdentity(profileName string, identity config.IdentityKind) (Token, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	tokens, err := store.loadUnlocked()
+	if err != nil {
+		return Token{}, err
+	}
+	token, exists := tokens[tokenStorageKey(profileName, identity)]
+	if !exists {
+		return Token{}, os.ErrNotExist
+	}
+	return token, nil
+}
+
+// SaveForIdentity 保存指定 Profile 和身份的 token，不覆盖另一身份的缓存。
+// 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为业务身份；token Token 为凭证。
+// 返回值：error，落盘失败时非 nil。
+func (store *FileTokenStore) SaveForIdentity(profileName string, identity config.IdentityKind, token Token) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return filelock.With(store.path+".lock", func() error {
+		tokens, err := store.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		tokens[tokenStorageKey(profileName, identity)] = token
+		return store.saveUnlocked(tokens)
+	})
+}
+
+// DeleteForIdentity 清理指定 Profile 和身份的 token，其他身份保持不变。
+// 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为业务身份。
+// 返回值：error，读取或落盘失败时非 nil。
+func (store *FileTokenStore) DeleteForIdentity(profileName string, identity config.IdentityKind) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return filelock.With(store.path+".lock", func() error {
+		tokens, err := store.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		delete(tokens, tokenStorageKey(profileName, identity))
+		return store.saveUnlocked(tokens)
+	})
+}
+
+// tokenStorageKey 为 user 身份生成隔离 key；旧 app token 仍使用 profile 名称。
+// 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为业务身份。
+// 返回值：string，为 tokens.json 中的稳定 key。
+func tokenStorageKey(profileName string, identity config.IdentityKind) string {
+	if identity == config.IdentityUser {
+		return profileName + "::user"
+	}
+	return profileName
 }
 
 // loadUnlocked 读取整个 token 映射；不存在时返回空映射。

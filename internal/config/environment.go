@@ -8,6 +8,7 @@ import (
 // EnvironmentPreset 保存一个预设环境的公开连接地址，不包含 app ID 或 app secret。
 type EnvironmentPreset struct {
 	BaseURL  string
+	AuthURL  string
 	TokenURL string
 }
 
@@ -15,18 +16,22 @@ type EnvironmentPreset struct {
 var environmentPresets = map[string]EnvironmentPreset{
 	"dev": {
 		BaseURL:  "https://dev-open.qtech.cn",
+		AuthURL:  "https://dev-contract-agent.qtech.cn",
 		TokenURL: "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 	},
 	"test": {
 		BaseURL:  "https://test-open.qtech.cn",
+		AuthURL:  "https://test-contract-agent.qtech.cn",
 		TokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 	},
 	"blue": {
 		BaseURL:  "https://blue-open.qtech.cn",
+		AuthURL:  "https://blue-contract-agent.qtech.cn",
 		TokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 	},
 	"prod": {
 		BaseURL:  "https://open.qfei.cn",
+		AuthURL:  "https://contract-agent.qfei.cn",
 		TokenURL: "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal",
 	},
 }
