@@ -13,12 +13,13 @@ import (
 
 // rootOptions 保存所有子命令共享的稳定 flags。
 type rootOptions struct {
-	Profile string
-	Output  string
-	Raw     bool
-	Timeout time.Duration
-	Verbose bool
-	NoColor bool
+	Profile  string
+	Identity string
+	Output   string
+	Raw      bool
+	Timeout  time.Duration
+	Verbose  bool
+	NoColor  bool
 }
 
 // NewRootCommand 创建完整 Cobra 命令树，并注入运行时依赖。
@@ -36,6 +37,7 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	command.SetOut(runtime.Output)
 	command.SetErr(runtime.Error)
 	command.PersistentFlags().StringVar(&options.Profile, "profile", "", "使用指定 Profile")
+	command.PersistentFlags().StringVar(&options.Identity, "as", "", "使用身份：app|user；默认读取 Profile")
 	command.PersistentFlags().StringVarP(&options.Output, "output", "o", "", "输出格式：json|yaml|table")
 	command.PersistentFlags().BoolVar(&options.Raw, "raw", false, "输出紧凑原始 JSON")
 	command.PersistentFlags().DurationVar(&options.Timeout, "timeout", 30*time.Second, "普通远端请求超时")
@@ -51,6 +53,19 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	)
 	command.InitDefaultCompletionCmd()
 	return command
+}
+
+// selectedIdentity 按显式 --as、Profile 默认身份和兼容默认值解析业务身份。
+// 入参：profile config.Profile 为当前 Profile；requested string 为 --as 参数。
+// 返回值：config.IdentityKind 为最终身份；error 为未知身份。
+func selectedIdentity(profile config.Profile, requested string) (config.IdentityKind, error) {
+	if requested != "" {
+		return config.ParseIdentityKind(requested)
+	}
+	if profile.DefaultIdentity != "" {
+		return config.ParseIdentityKind(string(profile.DefaultIdentity))
+	}
+	return config.IdentityApp, nil
 }
 
 // Execute 运行命令并返回错误，便于 main 统一输出和映射退出码。

@@ -26,6 +26,23 @@ func (staticTokenProvider) Token(context.Context, config.Profile) (auth.Token, e
 	return auth.Token{AccessToken: "token-test", ExpiresAt: time.Now().Add(time.Hour)}, nil
 }
 
+// identityTokenProvider 为 user/app 分流测试提供身份可见的固定 token。
+type identityTokenProvider struct{}
+
+// Token 返回兼容旧接口的 app 测试凭证。
+// 入参：context.Context 和 config.Profile 仅满足旧 TokenProvider 接口。
+// 返回值：auth.Token 为 app 测试凭证；error 始终为 nil。
+func (identityTokenProvider) Token(context.Context, config.Profile) (auth.Token, error) {
+	return auth.Token{AccessToken: "app-token", ExpiresAt: time.Now().Add(time.Hour)}, nil
+}
+
+// TokenForIdentity 返回带身份区分的测试凭证，验证 Client 不会把 user 请求降级到 app token。
+// 入参：context.Context 为请求上下文；config.Profile 为当前环境；identity 为业务身份。
+// 返回值：auth.Token 为对应身份凭证；error 始终为 nil。
+func (identityTokenProvider) TokenForIdentity(context.Context, config.Profile, config.IdentityKind) (auth.Token, error) {
+	return auth.Token{AccessToken: "user-token", ExpiresAt: time.Now().Add(time.Hour)}, nil
+}
+
 // blockingTokenProvider 模拟等待取消的远端 token 刷新。
 type blockingTokenProvider struct{}
 
@@ -76,6 +93,34 @@ func TestClientSuccessContract(t *testing.T) {
 	}
 	if data["status"] != "running" || response.RequestID != "req-1" {
 		t.Fatalf("response=%#v requestID=%s", data, response.RequestID)
+	}
+}
+
+// TestClientUserIdentityRoute 验证 user 身份选择 UserBaseURL、UserPath 和 user token。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestClientUserIdentityRoute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/open-apis/user/review-checklists" {
+			t.Errorf("user path=%s", request.URL.Path)
+		}
+		if request.Header.Get("Authorization") != "Bearer user-token" {
+			t.Errorf("user authorization=%q", request.Header.Get("Authorization"))
+		}
+		_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[]}`))
+	}))
+	defer server.Close()
+	client := NewClientForIdentity(config.Profile{BaseURL: "https://app.example.com", UserBaseURL: server.URL}, identityTokenProvider{}, server.Client(), config.IdentityUser)
+	_, err := client.Do(context.Background(), Request{
+		OperationID:   "listReviewChecklists",
+		Method:        http.MethodGet,
+		Path:          "/open-apis/review-rules/review-checklists",
+		UserPath:      "/open-apis/user/review-checklists",
+		ContractInput: map[string]any{},
+		SuccessCode:   200,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

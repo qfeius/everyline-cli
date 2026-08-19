@@ -8,22 +8,27 @@ import "testing"
 func TestResolveEnvironment(t *testing.T) {
 	tests := map[string]struct {
 		baseURL  string
+		authURL  string
 		tokenURL string
 	}{
 		"dev": {
 			baseURL:  "https://dev-open.qtech.cn",
+			authURL:  "https://dev-contract-agent.qtech.cn",
 			tokenURL: "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 		},
 		"test": {
 			baseURL:  "https://test-open.qtech.cn",
+			authURL:  "https://test-contract-agent.qtech.cn",
 			tokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 		},
 		"blue": {
 			baseURL:  "https://blue-open.qtech.cn",
+			authURL:  "https://blue-contract-agent.qtech.cn",
 			tokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 		},
 		"prod": {
 			baseURL:  "https://open.qfei.cn",
+			authURL:  "https://contract-agent.qfei.cn",
 			tokenURL: "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal",
 		},
 	}
@@ -32,7 +37,7 @@ func TestResolveEnvironment(t *testing.T) {
 		if err != nil {
 			t.Fatalf("environment=%s err=%v", name, err)
 		}
-		if preset.BaseURL != expected.baseURL || preset.TokenURL != expected.tokenURL {
+		if preset.BaseURL != expected.baseURL || preset.AuthURL != expected.authURL || preset.TokenURL != expected.tokenURL {
 			t.Fatalf("environment=%s preset=%#v", name, preset)
 		}
 	}

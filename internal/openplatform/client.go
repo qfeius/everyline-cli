@@ -24,9 +24,12 @@ const maxResponseBytes = 32 << 20
 
 // Request 描述 HTTP Adapter 内部的一个远端操作。
 type Request struct {
-	OperationID   string
-	Method        string
-	Path          string
+	OperationID string
+	Method      string
+	Path        string
+	// UserPath 为 user 身份的专用路由；为空时复用 Path，便于逐步迁移已有接口。
+	UserPath      string
+	Identity      config.IdentityKind
 	ContractInput any
 	Query         url.Values
 	Header        http.Header
@@ -52,22 +55,40 @@ type Client struct {
 	tokens     TokenProvider
 	httpClient *http.Client
 	sleep      func(context.Context, time.Duration) error
+	identity   config.IdentityKind
 }
 
 // NewClient 创建生产 HTTP Adapter。
 // 入参：profile config.Profile 为环境配置；tokens TokenProvider 为鉴权来源；httpClient *http.Client 为可注入传输层。
 // 返回值：*Client，可执行受控的 /open-apis/ 请求。
 func NewClient(profile config.Profile, tokens TokenProvider, httpClient *http.Client) *Client {
+	return NewClientForIdentity(profile, tokens, httpClient, config.IdentityApp)
+}
+
+// NewClientForIdentity 创建绑定业务身份的 HTTP Adapter。
+// 入参：profile config.Profile 为环境配置；tokens TokenProvider 为鉴权来源；httpClient *http.Client 为传输层；identity config.IdentityKind 为请求身份。
+// 返回值：*Client，可执行受控的 /open-apis/ 请求。
+func NewClientForIdentity(profile config.Profile, tokens TokenProvider, httpClient *http.Client, identity config.IdentityKind) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{}
 	}
-	return &Client{profile: profile, tokens: tokens, httpClient: httpClient, sleep: sleepContext}
+	if identity == "" {
+		identity = config.IdentityApp
+	}
+	return &Client{profile: profile, tokens: tokens, httpClient: httpClient, sleep: sleepContext, identity: identity}
 }
 
 // Do 执行远端请求，先校验路由与 Schema，再验证 HTTP 状态和接口专属业务成功码。
 // 入参：ctx context.Context 控制取消；operation Request 描述方法、路径、逻辑契约输入、body 和成功码。
 // 返回值：Response 为成功业务数据；error 为鉴权、网络或 API 错误。
 func (client *Client) Do(ctx context.Context, operation Request) (Response, error) {
+	identity := operation.Identity
+	if identity == "" {
+		identity = client.identity
+	}
+	if identity == "" {
+		identity = config.IdentityApp
+	}
 	if operation.SuccessCode == 0 {
 		operation.SuccessCode = 200
 	}
@@ -77,17 +98,23 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 	if !strings.HasPrefix(operation.Path, "/open-apis/") || strings.Contains(operation.Path, "://") {
 		return Response{}, fmt.Errorf("拒绝非 /open-apis/ 相对路径: %s", operation.Path)
 	}
+	contractPath := operation.Path
 	contractInput, err := requestContractInput(operation)
 	if err != nil {
 		return Response{}, err
 	}
-	if err := contracts.ValidateRequest(operation.OperationID, operation.Method, operation.Path, contractInput); err != nil {
+	if err := contracts.ValidateRequest(operation.OperationID, operation.Method, contractPath, contractInput); err != nil {
 		return Response{}, err
+	}
+	operation.Path = routePath(operation, identity)
+	operation.Identity = identity
+	if !strings.HasPrefix(operation.Path, "/open-apis/") || strings.Contains(operation.Path, "://") {
+		return Response{}, fmt.Errorf("拒绝非 /open-apis/ 相对路径: %s", operation.Path)
 	}
 	// token 获取、所有请求尝试与退避共享一个截止时间，--timeout 表示整次操作预算。
 	operationContext, cancelOperation := context.WithTimeout(ctx, operation.Timeout)
 	defer cancelOperation()
-	token, err := client.tokens.Token(operationContext, client.profile)
+	token, err := client.tokenForIdentity(operationContext, identity)
 	if err != nil {
 		return Response{}, err
 	}
@@ -134,7 +161,7 @@ func requestContractInput(operation Request) (any, error) {
 // 入参：ctx context.Context 控制取消；operation Request 为远端操作；accessToken string 为 Bearer token。
 // 返回值：Response 为业务数据；bool 表示错误是否可重试；error 为本次失败原因。
 func (client *Client) doOnce(ctx context.Context, operation Request, accessToken string) (Response, bool, error) {
-	requestURL := strings.TrimRight(client.profile.BaseURL, "/") + operation.Path
+	requestURL := strings.TrimRight(client.profile.BaseURLFor(operation.Identity), "/") + operation.Path
 	if len(operation.Query) > 0 {
 		requestURL += "?" + operation.Query.Encode()
 	}
@@ -199,6 +226,32 @@ func (client *Client) doOnce(ctx context.Context, operation Request, accessToken
 		envelope.Data = json.RawMessage("null")
 	}
 	return Response{Data: envelope.Data, RequestID: requestID}, false, nil
+}
+
+// tokenForIdentity 兼容旧 TokenProvider，同时优先调用支持 user/app 分流的新接口。
+// 入参：ctx context.Context 控制 token 请求；identity config.IdentityKind 为业务身份。
+// 返回值：auth.Token 为 Bearer 凭证；error 为鉴权失败。
+func (client *Client) tokenForIdentity(ctx context.Context, identity config.IdentityKind) (auth.Token, error) {
+	if provider, ok := client.tokens.(interface {
+		TokenForIdentity(context.Context, config.Profile, config.IdentityKind) (auth.Token, error)
+	}); ok {
+		return provider.TokenForIdentity(ctx, client.profile, identity)
+	}
+	if identity == config.IdentityUser {
+		// 旧版 TokenProvider 只有 app 接口，user 请求不能静默降级为 tenant token。
+		return auth.Token{}, auth.ErrUserAuthentication
+	}
+	return client.tokens.Token(ctx, client.profile)
+}
+
+// routePath 根据身份选择 Service 提供的 user 路由；当前未声明专用路由时复用已验证的 app 路径。
+// 入参：operation Request 为请求定义；identity config.IdentityKind 为业务身份。
+// 返回值：string，为最终发送的相对路径。
+func routePath(operation Request, identity config.IdentityKind) string {
+	if identity == config.IdentityUser && strings.TrimSpace(operation.UserPath) != "" {
+		return operation.UserPath
+	}
+	return operation.Path
 }
 
 // rawCode 将数字或字符串业务码统一成字符串，避免错误模型丢失平台原值。

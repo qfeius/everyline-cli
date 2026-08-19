@@ -10,13 +10,40 @@ import (
 
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
+// IdentityKind 标识请求使用的业务身份。
+type IdentityKind string
+
+const (
+	// IdentityApp 使用 tenant_access_token 访问开放平台。
+	IdentityApp IdentityKind = "app"
+	// IdentityUser 使用用户认证页面产生的用户访问 token。
+	IdentityUser IdentityKind = "user"
+)
+
+// ParseIdentityKind 将 CLI 输入转换为受限的身份枚举。
+// 入参：value string 为用户传入的身份名称。
+// 返回值：IdentityKind 为规范化身份；error 为未知身份。
+func ParseIdentityKind(value string) (IdentityKind, error) {
+	switch IdentityKind(strings.ToLower(strings.TrimSpace(value))) {
+	case "", IdentityApp:
+		return IdentityApp, nil
+	case IdentityUser:
+		return IdentityUser, nil
+	default:
+		return "", fmt.Errorf("身份必须是 app 或 user")
+	}
+}
+
 // Profile 保存一个智审开放平台环境的非敏感连接信息。
 type Profile struct {
-	Name          string `json:"name" yaml:"name"`
-	BaseURL       string `json:"base_url" yaml:"base_url"`
-	TokenURL      string `json:"token_url" yaml:"token_url"`
-	AppID         string `json:"app_id" yaml:"app_id"`
-	DefaultOutput string `json:"default_output" yaml:"default_output"`
+	Name            string       `json:"name" yaml:"name"`
+	BaseURL         string       `json:"base_url" yaml:"base_url"`
+	UserBaseURL     string       `json:"user_base_url,omitempty" yaml:"user_base_url,omitempty"`
+	AuthURL         string       `json:"auth_url,omitempty" yaml:"auth_url,omitempty"`
+	TokenURL        string       `json:"token_url" yaml:"token_url"`
+	AppID           string       `json:"app_id" yaml:"app_id"`
+	DefaultIdentity IdentityKind `json:"default_identity,omitempty" yaml:"default_identity,omitempty"`
+	DefaultOutput   string       `json:"default_output" yaml:"default_output"`
 }
 
 // Validate 校验 Profile 的名称、URL、应用 ID 和默认输出格式。
@@ -29,12 +56,27 @@ func (profile Profile) Validate() error {
 	if err := validateBaseURL(profile.BaseURL); err != nil {
 		return err
 	}
+	if profile.UserBaseURL != "" {
+		if err := validateBaseURL(profile.UserBaseURL); err != nil {
+			return fmt.Errorf("user-base-url: %w", err)
+		}
+	}
+	if profile.AuthURL != "" {
+		if err := validateHTTPURL("auth-url", profile.AuthURL); err != nil {
+			return err
+		}
+	}
 	if err := validateHTTPURL("token-url", profile.TokenURL); err != nil {
 		return err
 	}
 	if strings.TrimSpace(profile.AppID) == "" {
 		return fmt.Errorf("app-id 不能为空")
 	}
+	identity, err := ParseIdentityKind(string(profile.DefaultIdentity))
+	if err != nil {
+		return err
+	}
+	profile.DefaultIdentity = identity
 	if profile.DefaultOutput == "" {
 		profile.DefaultOutput = "table"
 	}
@@ -44,6 +86,26 @@ func (profile Profile) Validate() error {
 	default:
 		return fmt.Errorf("default-output 必须是 json、yaml、table 或 raw")
 	}
+}
+
+// BaseURLFor 返回指定身份的业务 API 基址；user 未单独配置时复用 app 基址。
+// 入参：identity IdentityKind 为请求身份。
+// 返回值：string 为可拼接 /open-apis/ 路径的基础地址。
+func (profile Profile) BaseURLFor(identity IdentityKind) string {
+	if identity == IdentityUser && strings.TrimSpace(profile.UserBaseURL) != "" {
+		return profile.UserBaseURL
+	}
+	return profile.BaseURL
+}
+
+// AuthURLFor 返回指定身份的用户认证页面地址；app 身份不需要页面认证。
+// 入参：identity IdentityKind 为业务身份。
+// 返回值：string 为配置中的自有认证页面地址，app 身份返回空字符串。
+func (profile Profile) AuthURLFor(identity IdentityKind) string {
+	if identity == IdentityUser {
+		return profile.AuthURL
+	}
+	return ""
 }
 
 // validateBaseURL 校验业务基础地址可被 HTTP Adapter 安全拼接固定的 /open-apis/ 路径。

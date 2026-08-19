@@ -4,6 +4,7 @@
 
 ```text
 --profile <name>
+--as app|user
 --output json|yaml|table|raw
 --raw
 --timeout 30s
@@ -14,17 +15,18 @@
 ## Profile 与鉴权
 
 ```text
-config add <name> [--env dev|test|blue|prod] --app-id [--base-url URL --token-url URL] [--default-output]
+config add <name> [--env dev|test|blue|prod] --app-id [--base-url URL --user-base-url URL --auth-url URL --token-url URL] [--default-identity app|user] [--default-output]
 config list
 config use <name>
 config show [name]
 
-auth login [--app-secret-stdin]
-auth status
-auth logout
+auth login [--as app|user] [--app-secret-stdin|--access-token-stdin]
+auth status [--as app|user]
+auth use [profile] --as app|user
+auth logout [--as app|user]
 ```
 
-`--env` 预设环境地址：`dev=https://dev-open.qtech.cn`、`test=https://test-open.qtech.cn`、`blue=https://blue-open.qtech.cn`、`prod=https://open.qfei.cn`。使用 `--env` 时不需要再传 `--base-url`/`--token-url`；不使用 `--env` 时仍需同时传入这两个地址。每个环境仍需提供对应的 `--app-id`，`app_secret` 通过 `auth login --app-secret-stdin` 或环境变量提供。
+`--env` 预设业务地址：`dev=https://dev-open.qtech.cn`、`test=https://test-open.qtech.cn`、`blue=https://blue-open.qtech.cn`、`prod=https://open.qfei.cn`；对应的自有用户认证页面分别为 `https://dev-contract-agent.qtech.cn`、`https://test-contract-agent.qtech.cn`、`https://blue-contract-agent.qtech.cn`、`https://contract-agent.qfei.cn`。使用 `--env` 时不需要再传 `--base-url`/`--token-url`；不使用 `--env` 时仍需同时传入这两个地址，可额外传 `--auth-url`。每个环境仍需提供对应的 `--app-id`。`app` 身份通过 `auth login --app-secret-stdin` 或环境变量提供，`user` 身份通过自有页面完成认证后使用 `auth login --access-token-stdin` 或 `EVERYLINE_USER_ACCESS_TOKEN` 提供。
 
 ## 审查
 

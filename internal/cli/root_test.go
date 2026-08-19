@@ -86,6 +86,42 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if profile.BaseURL != test.baseURL || profile.TokenURL != test.tokenURL {
 			t.Fatalf("environment=%s profile=%#v", test.name, profile)
 		}
+		if profile.AuthURL == "" {
+			t.Fatalf("environment=%s 缺少自有认证页面: %#v", test.name, profile)
+		}
+	}
+}
+
+// TestAuthUserLoginAndUse 验证 user token 从 stdin 缓存后可切换为 Profile 默认身份。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestAuthUserLoginAndUse(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	runtime.Input = strings.NewReader("user-token\n")
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", AuthURL: "https://dev-contract-agent.qtech.cn", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user", "--access-token-stdin", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"identity": "user"`) {
+		t.Fatalf("login output=%s", stdout.String())
+	}
+	stdout.Reset()
+	if err := Execute(context.Background(), runtime, []string{"auth", "use", "--as", "user", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := runtime.Profiles.Current()
+	if err != nil || current.DefaultIdentity != config.IdentityUser {
+		t.Fatalf("current=%#v err=%v", current, err)
+	}
+	stdout.Reset()
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--as", "user", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"authenticated": true`) {
+		t.Fatalf("status output=%s", stdout.String())
 	}
 }
 

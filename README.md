@@ -16,8 +16,7 @@ make build
 
 ```bash
 everyline-cli config add dev \
-  --base-url https://open.qfei.cn \
-  --token-url https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal \
+  --env dev \
   --app-id cli_xxx
 
 export EVERYLINE_APP_SECRET='replace-me'
@@ -39,6 +38,16 @@ everyline-cli config add prod --env prod --app-id cli_prod_xxx
 ```
 
 `app_secret` 不写入 Profile，也不提供明文命令行参数。可使用 `EVERYLINE_APP_SECRET`、Profile 专用变量或 `auth login --app-secret-stdin`。专用变量以 `EVERYLINE_APP_SECRET_` 开头；常见的小写字母映射为大写，数字保持不变，其他 UTF-8 字节（包括原始大写字母）编码为 `_XX`，因此后缀可逆且不会因大小写或符号碰撞。例如 `prod-eu`、`prod.eu`、`prod_eu` 分别对应 `EVERYLINE_APP_SECRET_PROD_2DEU`、`EVERYLINE_APP_SECRET_PROD_2EEU`、`EVERYLINE_APP_SECRET_PROD_5FEU`。token 缓存在权限为 `0600` 的 `~/.everyline-cli/tokens.json`；CI 可用 `EVERYLINE_ACCESS_TOKEN` 覆盖。
+
+CLI 同时支持 `app` 和 `user` 两种身份。`--env` 会自动写入每个环境对应的智审自有认证页面：dev 为 `https://dev-contract-agent.qtech.cn`、test 为 `https://test-contract-agent.qtech.cn`、blue 为 `https://blue-contract-agent.qtech.cn`、prod 为 `https://contract-agent.qfei.cn`。用户在页面完成认证后，将页面交接的 access token 通过 stdin 或 `EVERYLINE_USER_ACCESS_TOKEN` 注入 CLI：
+
+```bash
+everyline-cli auth login --as user --access-token-stdin
+everyline-cli auth use --as user
+everyline-cli review run --as user --input review-run.json --output json
+```
+
+`auth login --as user` 缺少 token 时会输出当前 Profile 的自有认证页面地址；CLI 不猜测页面内部协议。app/user token 在本地缓存中隔离保存。
 
 ## 一键审查输入
 

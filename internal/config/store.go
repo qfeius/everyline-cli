@@ -29,6 +29,7 @@ type Store interface {
 	Add(Profile) error
 	List() ([]Profile, error)
 	Use(string) error
+	SetDefaultIdentity(string, IdentityKind) error
 	Get(string) (Profile, error)
 	Current() (Profile, error)
 }
@@ -66,6 +67,9 @@ func DefaultDir() (string, error) {
 func (store *FileStore) Add(profile Profile) error {
 	if profile.DefaultOutput == "" {
 		profile.DefaultOutput = "table"
+	}
+	if profile.DefaultIdentity == "" {
+		profile.DefaultIdentity = IdentityApp
 	}
 	if err := profile.Validate(); err != nil {
 		return err
@@ -121,6 +125,32 @@ func (store *FileStore) Use(name string) error {
 			return fmt.Errorf("%w: %s", ErrProfileNotFound, name)
 		}
 		data.Current = name
+		return store.saveUnlocked(data)
+	})
+}
+
+// SetDefaultIdentity 更新 Profile 的默认业务身份，不触碰其他连接字段或 token 缓存。
+// 入参：name string 为 Profile 名称；identity IdentityKind 为 app 或 user。
+// 返回值：error，Profile 不存在、身份非法或落盘失败时非 nil。
+func (store *FileStore) SetDefaultIdentity(name string, identity IdentityKind) error {
+	parsed, err := ParseIdentityKind(string(identity))
+	if err != nil {
+		return err
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	return filelock.With(store.path+".lock", func() error {
+		data, err := store.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		profile, exists := data.Profiles[name]
+		if !exists {
+			return fmt.Errorf("%w: %s", ErrProfileNotFound, name)
+		}
+		profile.DefaultIdentity = parsed
+		data.Profiles[name] = profile
 		return store.saveUnlocked(data)
 	})
 }

@@ -7,7 +7,7 @@ Shell / Agent / CI
         |
       Cobra
         |
-        +--> Profile Store / Token Provider
+        +--> Profile Store / Identity Token Provider (app / user)
         +--> Review Workflow --> Review Service ----+--> OpenPlatform Client --> HTTP
         +--> Checklist / Rule Service --------------+
         +--> Renderer (json / yaml / table / raw)
@@ -15,7 +15,8 @@ Shell / Agent / CI
 
 ## 安全边界
 
-- Profile 只保存 `base_url/token_url/app_id/default_output`，不保存 `app_secret`。
+- Profile 只保存 `base_url/user_base_url/auth_url/token_url/app_id/default_identity/default_output`，不保存 `app_secret` 或用户 access token。
+- `app` 身份使用 tenant token；`user` 身份使用 everyline 自有认证页面交接的用户 token。OpenPlatform Client 在 Service 请求前按身份选择 token 和业务基址；未声明专用 user 路由的接口暂复用已验证的相对路径。
 - Profile 和 token 缓存目录权限为 `0700`、文件权限为 `0600`；跨进程文件锁保护完整的读改写事务。
 - 业务 HTTP Adapter 只接受 `/open-apis/` 相对路径，防止 Bearer token 被转发到任意主机。
 - GET 可对网络错误、429 和 5xx 做至多三次退避重试；POST 不自动重试；token、请求和退避共享一次 `--timeout` 总预算。
