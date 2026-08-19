@@ -61,12 +61,8 @@ func validContractInput(schema string) any {
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1"}
 	case "review-start.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{}}
-	case "review-start-feishu.schema.json":
-		return map[string]any{"fileId": 1, "selectedPosition": "legal", "hasQuota": true, "baseSignature": "payload.signature", "packID": "pack-1"}
 	case "review-task-query.schema.json":
 		return map[string]any{"taskId": 1, "businessId": "biz"}
-	case "review-feishu-task-query.schema.json":
-		return map[string]any{"smartAuditId": 1}
 	case "checklist.schema.json":
 		return checklist
 	case "checklist-batch-create.schema.json":

@@ -193,60 +193,17 @@ func newReviewSubjectExtractCommand(runtime *Runtime, root *rootOptions) *cobra.
 	return command
 }
 
-// newReviewTaskCommand 创建普通与字段捷径任务的发起、查询、详情和等待命令组。
+// newReviewTaskCommand 创建普通任务的发起、查询、详情和等待命令组。
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
-// 返回值：*cobra.Command，包含 start/start-feishu/status/info/info-feishu/wait/wait-feishu。
+// 返回值：*cobra.Command，包含 start/status/info/wait。
 func newReviewTaskCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{Use: "task", Short: "管理审查任务"}
 	command.AddCommand(
 		newReviewTaskStartCommand(runtime, root),
-		newReviewTaskStartFeishuCommand(runtime, root),
 		newReviewTaskStatusCommand(runtime, root),
 		newReviewTaskInfoCommand(runtime, root),
-		newReviewTaskFeishuInfoCommand(runtime, root),
 		newReviewTaskWaitCommand(runtime, root),
-		newReviewTaskFeishuWaitCommand(runtime, root),
 	)
-	return command
-}
-
-// newReviewTaskStartFeishuCommand 创建字段捷径发起审查命令。
-// 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
-// 返回值：*cobra.Command，支持 --input/--data 和 dry-run。
-func newReviewTaskStartFeishuCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	var inputPath string
-	var inline string
-	var dryRun bool
-	var printInput bool
-	command := &cobra.Command{
-		Use:   "start-feishu",
-		Short: "发起字段捷径智审任务",
-		Args:  cobra.NoArgs,
-		RunE: func(command *cobra.Command, args []string) error {
-			var request review.FeishuStartRequest
-			if err := readJSONInput(inputPath, inline, &request); err != nil {
-				return err
-			}
-			if err := request.Validate(); err != nil {
-				return err
-			}
-			if dryRun || printInput {
-				return render(runtime, root, "json", request)
-			}
-			service, profile, err := buildReviewService(runtime, root)
-			if err != nil {
-				return err
-			}
-			result, err := service.StartFeishu(command.Context(), request)
-			if err != nil {
-				return err
-			}
-			return render(runtime, root, profile.DefaultOutput, result)
-		},
-	}
-	addJSONInputFlags(command, &inputPath, &inline)
-	command.Flags().BoolVar(&dryRun, "dry-run", false, "只校验并输出请求，不调用远端")
-	command.Flags().BoolVar(&printInput, "print-input", false, "输出规范化请求，不调用远端")
 	return command
 }
 
@@ -341,31 +298,6 @@ func newReviewTaskInfoCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 	return command
 }
 
-// newReviewTaskFeishuInfoCommand 创建字段捷径任务详情查询命令。
-// 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
-// 返回值：*cobra.Command，可查询 /smartAudit/info 的字段捷径任务。
-func newReviewTaskFeishuInfoCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	query := review.FeishuTaskQuery{}
-	command := &cobra.Command{
-		Use:   "info-feishu",
-		Short: "查询字段捷径审查任务详情",
-		Args:  cobra.NoArgs,
-		RunE: func(command *cobra.Command, args []string) error {
-			service, profile, err := buildReviewService(runtime, root)
-			if err != nil {
-				return err
-			}
-			result, err := service.FeishuInfo(command.Context(), query)
-			if err != nil {
-				return err
-			}
-			return render(runtime, root, profile.DefaultOutput, result)
-		},
-	}
-	addFeishuTaskQueryFlags(command, &query)
-	return command
-}
-
 // newReviewTaskWaitCommand 创建 CLI 侧轮询器，不映射新的远端接口。
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，支持 interval/deadline。
@@ -396,40 +328,6 @@ func newReviewTaskWaitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 	}
 	addTaskQueryFlags(command, &query)
 	command.Flags().DurationVar(&interval, "interval", 2*time.Second, "轮询间隔")
-	command.Flags().DurationVar(&deadline, "deadline", 10*time.Minute, "最长等待时间")
-	return command
-}
-
-// newReviewTaskFeishuWaitCommand 创建字段捷径任务轮询命令，复用 CLI 工作流的 deadline 语义。
-// 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
-// 返回值：*cobra.Command，支持 smart-audit-id/review-position/interval/deadline。
-func newReviewTaskFeishuWaitCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	query := review.FeishuTaskQuery{}
-	var interval time.Duration
-	var deadline time.Duration
-	command := &cobra.Command{
-		Use:   "wait-feishu",
-		Short: "轮询字段捷径任务直到终态",
-		Args:  cobra.NoArgs,
-		RunE: func(command *cobra.Command, args []string) error {
-			service, profile, err := buildReviewService(runtime, root)
-			if err != nil {
-				return err
-			}
-			workflow := review.NewWorkflow(service, review.RealClock{}, review.WorkflowOptions{Interval: interval, Deadline: deadline})
-			progress(runtime, root, "正在等待字段捷径审查任务进入终态...")
-			result, err := workflow.WaitFeishu(command.Context(), query)
-			if err != nil {
-				if renderErr := render(runtime, root, profile.DefaultOutput, result); renderErr != nil {
-					return fmt.Errorf("%w；输出阶段结果失败: %v", err, renderErr)
-				}
-				return err
-			}
-			return render(runtime, root, profile.DefaultOutput, result)
-		},
-	}
-	addFeishuTaskQueryFlags(command, &query)
-	command.Flags().DurationVar(&interval, "interval", 5*time.Second, "轮询间隔")
 	command.Flags().DurationVar(&deadline, "deadline", 10*time.Minute, "最长等待时间")
 	return command
 }
@@ -531,13 +429,4 @@ func addTaskQueryFlags(command *cobra.Command, query *review.TaskQuery) {
 	command.Flags().StringVar(&query.AppType, "app-type", "", "可选接入类型")
 	command.Flags().StringVar(&query.VisibilityScope, "visibility-scope", "", "可选可见性范围：contractResult")
 	_ = command.MarkFlagRequired("task-id")
-}
-
-// addFeishuTaskQueryFlags 为字段捷径详情和等待命令注册统一查询参数。
-// 入参：command *cobra.Command 为目标命令；query *review.FeishuTaskQuery 接收 flag 值。
-// 返回值：无。
-func addFeishuTaskQueryFlags(command *cobra.Command, query *review.FeishuTaskQuery) {
-	command.Flags().Int64Var(&query.SmartAuditID, "smart-audit-id", 0, "字段捷径审查任务 ID")
-	command.Flags().StringVar(&query.ReviewPosition, "review-position", "", "可选审查立场")
-	_ = command.MarkFlagRequired("smart-audit-id")
 }

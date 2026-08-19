@@ -1,6 +1,6 @@
 # everyline-cli
 
-智审开放平台 V3 的 Go 命令行客户端。覆盖接口文档中的 27 个远端 operation 映射：Profile/tenant token、合同审查工作流、字段捷径发起与生命周期、审查清单以及规则分组/规则管理；其中 23 项已开放真实调用，4 项缺字段级详情的批量写操作失败关闭。文件快照接口按当前 CLI 范围暂不纳入同步。
+智审开放平台 V3 的 Go 命令行客户端。覆盖接口文档中的 25 个远端 operation 映射：Profile/tenant token、合同审查工作流、审查清单以及规则分组/规则管理；其中 21 项已开放真实调用，4 项缺字段级详情的批量写操作失败关闭。文件快照和字段捷径接口按当前 CLI 范围暂不纳入同步。
 
 ## 构建
 
@@ -66,7 +66,7 @@ everyline-cli review run --as user --input review-run.json --output json
 }
 ```
 
-完整命令和 27 项接口映射见 [命令参考](docs/command-reference.md) 与 [API 映射](docs/api-mapping.md)。清单、规则分组和规则的所有删除操作都要求显式 `--yes`；`--dry-run` 不调用远端。
+完整命令和 25 项接口映射见 [命令参考](docs/command-reference.md) 与 [API 映射](docs/api-mapping.md)。清单、规则分组和规则的所有删除操作都要求显式 `--yes`；`--dry-run` 不调用远端。
 
 可通过 `everyline-cli completion bash|fish|powershell|zsh` 生成 shell 补全脚本。四个尚缺字段级详情页的批量创建/更新命令仅开放 `--dry-run`，真实请求会失败关闭，具体清单见 API 映射。
 

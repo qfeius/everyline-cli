@@ -36,12 +36,9 @@ review file upload-url --file-url --name [--dry-run|--print-input]
 review subject extract --business-id --app-type --file-id [--file-hash] [--dry-run|--print-input]
 
 review task start (--input file.json | --data '{...}') [--dry-run|--print-input]
-review task start-feishu (--input file.json | --data '{...}') [--dry-run|--print-input]
 review task status --task-id [--business-id] [--app-type] [--visibility-scope contractResult]
 review task info --task-id [--business-id] [--app-type] [--visibility-scope contractResult]
 review task wait --task-id [--business-id] [--app-type] [--visibility-scope contractResult] [--interval 2s] [--deadline 10m]
-review task info-feishu --smart-audit-id [--review-position]
-review task wait-feishu --smart-audit-id [--review-position] [--interval 5s] [--deadline 10m]
 
 review run (--input file.json | --data '{...}') [--interval 2s] [--deadline 10m]
 
@@ -71,8 +68,6 @@ version
 ```
 
 所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端。`review task wait` 是 CLI 本地编排，不对应新的远端接口。
-
-字段捷径任务使用 `smartAuditId` 和数值 `taskStatus`，必须通过 `info-feishu`/`wait-feishu` 查询；它们与 V3 的 `task-id`、`status` 轮询命令分开。
 
 `review run` 使用 URL 来源时，上传接口只返回 `fileId`；输入还需提供 `businessId` 和对应文件内容的 SHA-256 `fileHash`，工作流才会继续发起审查。需要完整闭环时在输入中显式设置 `"wait": true`；省略或设置为 `false` 时命令在发起任务后返回。
 

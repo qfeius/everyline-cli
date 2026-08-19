@@ -261,19 +261,6 @@ func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 	}
 }
 
-// TestReviewStartFeishuDryRun 验证字段捷径入口校验并输出后端当前字段，且不调用远端。
-func TestReviewStartFeishuDryRun(t *testing.T) {
-	runtime, stdout, _ := testRuntime(t)
-	payload := `{"fileId":12,"reviewStrength":0,"selectedPosition":"legal","hasQuota":true,"baseSignature":"payload.signature","packID":"pack-1"}`
-	err := Execute(context.Background(), runtime, []string{"review", "task", "start-feishu", "--data", payload, "--dry-run", "--output", "json"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stdout.String(), `"reviewStrength": 0`) || !strings.Contains(stdout.String(), `"baseSignature": "payload.signature"`) || !strings.Contains(stdout.String(), `"hasQuota": true`) {
-		t.Fatalf("stdout=%s", stdout.String())
-	}
-}
-
 // TestReviewRunURLDryRunDefaultsConfig 验证 URL 工作流的身份字段和默认配置在 CLI 层可见。
 func TestReviewRunURLDryRunDefaultsConfig(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)

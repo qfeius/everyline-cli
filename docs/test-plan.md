@@ -15,7 +15,6 @@ go build ./cmd/everyline-cli
 - HTTP method/path/query/header/body、普通接口 `code=200` 和结构化 APIError。
 - 本地上传业务文件名扩展名、无扩展名路径、2 MiB 边界与 multipart 字段。
 - 普通 V3 工作流的统一 deadline、上传、发起、多次轮询、详情顺序和失败阶段结果输出。
-- 字段捷径 smartAuditId/taskStatus 数值状态映射、详情查询和终态轮询。
 - CLI 严格 JSON 输入、dry-run、stdout/stderr 与退出码。
 
 ## 真实环境冒烟
