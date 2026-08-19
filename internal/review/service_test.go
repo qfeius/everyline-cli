@@ -51,7 +51,7 @@ func TestServiceStartContract(t *testing.T) {
 	if err := json.Unmarshal(client.request.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["businessId"] != "biz-1" || body["appType"] != AppTypeThirdParty || body["fileHash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if body["businessId"] != "biz-1" || body["appType"] != AppTypeThirdParty || body["fileId"] != "11" || body["fileHash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("body=%#v", body)
 	}
 }

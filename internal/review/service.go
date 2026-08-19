@@ -183,11 +183,13 @@ func (service *Service) Start(ctx context.Context, request StartRequest) (Docume
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(request)
+	// 在 HTTP 边界使用与后端一致的字符串 fileId，避免内部 int64 类型直接泄漏到 JSON 请求体。
+	payload := request.ContractPayload()
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("编码发起审查请求: %w", err)
 	}
-	return service.doJSON(ctx, OperationStartReview, http.MethodPost, pathStartReview, nil, body, request)
+	return service.doJSON(ctx, OperationStartReview, http.MethodPost, pathStartReview, nil, body, payload)
 }
 
 // Status 查询轻量任务快照，供轮询器使用。

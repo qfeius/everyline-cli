@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
@@ -28,6 +29,28 @@ type StartRequest struct {
 	Config                         map[string]any `json:"config" yaml:"config"`
 	AllowInvalidSelectedChecklists bool           `json:"allowInvalidSelectedChecklists,omitempty" yaml:"allowInvalidSelectedChecklists,omitempty"`
 	TriggerScene                   string         `json:"triggerScene,omitempty" yaml:"triggerScene,omitempty"`
+}
+
+// ContractPayload 将内部发起请求转换为开放接口边界格式。
+// 入参：无，接收者 StartRequest 为内部使用 int64 表示文件 ID 的请求。
+// 返回值：map[string]any，为 startReview 接口使用字符串 fileId 的规范化请求体。
+func (request StartRequest) ContractPayload() map[string]any {
+	request = request.Normalize()
+	payload := map[string]any{
+		"businessId": request.BusinessID,
+		"appType":    request.AppType,
+		// startReview 接口要求 fileId 以 JSON 字符串传输；内部保留 int64 便于解析上传响应和任务数据。
+		"fileId":   strconv.FormatInt(request.FileID, 10),
+		"fileHash": request.FileHash,
+		"config":   request.Config,
+	}
+	if request.AllowInvalidSelectedChecklists {
+		payload["allowInvalidSelectedChecklists"] = true
+	}
+	if request.TriggerScene != "" {
+		payload["triggerScene"] = request.TriggerScene
+	}
+	return payload
 }
 
 // Validate 校验普通发起审查的必填字段、应用类型和触发场景。

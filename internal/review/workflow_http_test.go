@@ -86,7 +86,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				t.Errorf("start body: %v", err)
 			}
-			if body["businessId"] != "biz-1" || body["appType"] != AppTypeCLM || body["fileId"] != float64(11) || body["fileHash"] != hash {
+			if body["businessId"] != "biz-1" || body["appType"] != AppTypeCLM || body["fileId"] != "11" || body["fileHash"] != hash {
 				t.Errorf("start body=%#v", body)
 			}
 			calls = append(calls, "start")

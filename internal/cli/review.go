@@ -229,7 +229,7 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 				return err
 			}
 			if dryRun || printInput {
-				return render(runtime, root, "json", request)
+				return render(runtime, root, "json", request.ContractPayload())
 			}
 			service, profile, err := buildReviewService(runtime, root)
 			if err != nil {

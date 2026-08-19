@@ -210,7 +210,7 @@ func TestReviewStartDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"fileId": 12`) || !strings.Contains(stdout.String(), `"config": {}`) {
+	if !strings.Contains(stdout.String(), `"fileId": "12"`) || !strings.Contains(stdout.String(), `"config": {}`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
