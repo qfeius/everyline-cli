@@ -22,21 +22,15 @@ const (
 	OperationUploadFileURL   = "uploadContractFileByURLV3"
 	OperationExtractSubjects = "smartAuditContractSubjects"
 	OperationStartReview     = "smartAuditTaskStartReview"
-	OperationStartFeishu     = "feishuSmartAuditTaskStartReviewV3"
 	OperationTaskStatus      = "smartAuditTaskStatus"
 	OperationTaskInfo        = "smartAuditTaskInfo"
-	OperationFeishuTaskInfo  = "feishuSmartAuditTaskInfo"
 
 	pathUploadFile      = "/open-apis/contract-review/v3/file/contract/upload"
 	pathUploadFileURL   = "/open-apis/contract-review/v1/file/contract/uploadByUrl"
 	pathExtractSubjects = "/open-apis/contract-review/v3/smartAudit/contract/subjects"
 	pathStartReview     = "/open-apis/contract-review/v3/smartAudit/task/startReview"
-	// pathStartFeishu 是后端 /open-api/feishu/v1/smartAudit/init 在开放平台网关的路径映射。
-	pathStartFeishu = "/open-apis/contract-review/feishu/v1/smartAudit/init"
-	pathTaskStatus  = "/open-apis/contract-review/v3/smartAudit/task/status"
-	pathTaskInfo    = "/open-apis/contract-review/v3/smartAudit/task/info"
-	// pathFeishuTaskInfo 是后端 /open-api/v1/smartAudit/info 在开放平台网关的路径映射。
-	pathFeishuTaskInfo = "/open-apis/contract-review/v1/smartAudit/info"
+	pathTaskStatus      = "/open-apis/contract-review/v3/smartAudit/task/status"
+	pathTaskInfo        = "/open-apis/contract-review/v3/smartAudit/task/info"
 
 	MaxUploadBytes = 2 * 1024 * 1024
 )
@@ -54,14 +48,8 @@ type API interface {
 	UploadURL(context.Context, string, string) (Document, error)
 	ExtractSubjects(context.Context, StartRequest) (Document, error)
 	Start(context.Context, StartRequest) (Document, error)
-	StartFeishu(context.Context, FeishuStartRequest) (Document, error)
 	Status(context.Context, TaskQuery) (Document, error)
 	Info(context.Context, TaskQuery) (Document, error)
-}
-
-// FeishuAPI 描述字段捷径任务生命周期所需的合并状态与详情查询能力。
-type FeishuAPI interface {
-	FeishuInfo(context.Context, FeishuTaskQuery) (Document, error)
 }
 
 // Service 将每个审查 operation ID 映射到唯一 method/path/body 契约。
@@ -195,25 +183,13 @@ func (service *Service) Start(ctx context.Context, request StartRequest) (Docume
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(request)
+	// 在 HTTP 边界使用与后端一致的字符串 fileId，避免内部 int64 类型直接泄漏到 JSON 请求体。
+	payload := request.ContractPayload()
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("编码发起审查请求: %w", err)
 	}
-	return service.doJSON(ctx, OperationStartReview, http.MethodPost, pathStartReview, nil, body, request)
-}
-
-// StartFeishu 发起字段捷径审查，透传当前后端 /open-api/feishu/v1/smartAudit/init 契约。
-// 入参：ctx context.Context；request FeishuStartRequest 为快捷入口请求。
-// 返回值：Document 为任务结果；error 为校验或 API 失败。
-func (service *Service) StartFeishu(ctx context.Context, request FeishuStartRequest) (Document, error) {
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("编码字段捷径发起审查请求: %w", err)
-	}
-	return service.doJSON(ctx, OperationStartFeishu, http.MethodPost, pathStartFeishu, nil, body, request)
+	return service.doJSON(ctx, OperationStartReview, http.MethodPost, pathStartReview, nil, body, payload)
 }
 
 // Status 查询轻量任务快照，供轮询器使用。
@@ -238,18 +214,6 @@ func (service *Service) Info(ctx context.Context, query TaskQuery) (Document, er
 		return nil, err
 	}
 	return service.doJSON(ctx, OperationTaskInfo, http.MethodGet, pathTaskInfo, values, nil, query)
-}
-
-// FeishuInfo 查询字段捷径任务的状态与渐进式审查结果。
-// 入参：ctx context.Context 控制取消；query FeishuTaskQuery 提供 smartAuditId 和可选立场。
-// 返回值：Document 为后端原始任务详情；error 为输入或 API 失败。
-func (service *Service) FeishuInfo(ctx context.Context, query FeishuTaskQuery) (Document, error) {
-	query.ReviewPosition = strings.TrimSpace(query.ReviewPosition)
-	values, err := feishuTaskQueryValues(query)
-	if err != nil {
-		return nil, err
-	}
-	return service.doJSON(ctx, OperationFeishuTaskInfo, http.MethodGet, pathFeishuTaskInfo, values, nil, query)
 }
 
 // doJSON 执行 JSON 或 GET 操作，并解开已验证的业务 data。
@@ -338,20 +302,6 @@ func taskQueryValues(query TaskQuery) (url.Values, error) {
 			return nil, fmt.Errorf("visibility-scope=%s 必须同时提供 business-id 和 app-type", VisibilityScopeContractResult)
 		}
 		values.Set("visibilityScope", query.VisibilityScope)
-	}
-	return values, nil
-}
-
-// feishuTaskQueryValues 校验字段捷径任务 ID 并构造后端 smartAudit/info query。
-// 入参：query FeishuTaskQuery 为字段捷径任务查询上下文。
-// 返回值：url.Values 为请求参数；error 为非法任务 ID。
-func feishuTaskQueryValues(query FeishuTaskQuery) (url.Values, error) {
-	if query.SmartAuditID <= 0 {
-		return nil, fmt.Errorf("smart-audit-id 必须大于 0")
-	}
-	values := url.Values{"smartAuditId": []string{strconv.FormatInt(query.SmartAuditID, 10)}}
-	if position := strings.TrimSpace(query.ReviewPosition); position != "" {
-		values.Set("reviewPosition", position)
 	}
 	return values, nil
 }

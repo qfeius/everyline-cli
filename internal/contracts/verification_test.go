@@ -60,13 +60,9 @@ func validContractInput(schema string) any {
 	case "review-subject.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1"}
 	case "review-start.schema.json":
-		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{}}
-	case "review-start-feishu.schema.json":
-		return map[string]any{"fileId": 1, "selectedPosition": "legal", "hasQuota": true, "baseSignature": "payload.signature", "packID": "pack-1"}
+		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{}}
 	case "review-task-query.schema.json":
 		return map[string]any{"taskId": 1, "businessId": "biz"}
-	case "review-feishu-task-query.schema.json":
-		return map[string]any{"smartAuditId": 1}
 	case "checklist.schema.json":
 		return checklist
 	case "checklist-batch-create.schema.json":
@@ -132,7 +128,7 @@ func TestTaskQuerySchemaAllowsOptionalContext(t *testing.T) {
 
 // TestStartSchemaAllowsDefaultConfig 验证发起接口可省略配置，CLI 会在发送前补为空对象。
 func TestStartSchemaAllowsDefaultConfig(t *testing.T) {
-	input := map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": 1, "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	input := map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +141,7 @@ func TestStartSchemaRejectsInternalUsageContext(t *testing.T) {
 	input := map[string]any{
 		"businessId":         "biz",
 		"appType":            "THIRD_PARTY",
-		"fileId":             1,
+		"fileId":             "1",
 		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"usageReportContext": map[string]any{},
 	}

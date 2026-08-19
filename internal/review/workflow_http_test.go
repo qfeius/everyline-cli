@@ -86,7 +86,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				t.Errorf("start body: %v", err)
 			}
-			if body["businessId"] != "biz-1" || body["appType"] != AppTypeCLM || body["fileId"] != float64(11) || body["fileHash"] != hash {
+			if body["businessId"] != "biz-1" || body["appType"] != AppTypeCLM || body["fileId"] != "11" || body["fileHash"] != hash {
 				t.Errorf("start body=%#v", body)
 			}
 			calls = append(calls, "start")
@@ -143,50 +143,5 @@ func assertIntegrationTaskQuery(t *testing.T, request *http.Request) {
 	query := request.URL.Query()
 	if query.Get("taskId") != "88" || query.Get("businessId") != "biz-1" || query.Get("appType") != AppTypeCLM || query.Get("visibilityScope") != VisibilityScopeContractResult {
 		t.Errorf("task query=%s", request.URL.RawQuery)
-	}
-}
-
-// TestServiceStartFeishuHTTPPath 验证网关外部路径经 rewrite 后可到达后端 /open-api/feishu/v1 路由。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；失败通过 t.Fatal 报告。
-func TestServiceStartFeishuHTTPPath(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost || request.URL.Path != pathStartFeishu {
-			t.Errorf("method/path=%s %s", request.Method, request.URL.Path)
-		}
-		writeIntegrationEnvelope(writer, `{"smartAuditId":89,"taskStatus":0,"taskStatusName":"RUNNING"}`)
-	}))
-	defer server.Close()
-	client := openplatform.NewClient(config.Profile{BaseURL: server.URL}, integrationTokenProvider{}, server.Client())
-	service := NewService(client, time.Second)
-	reviewStrength := 0
-	if _, err := service.StartFeishu(context.Background(), FeishuStartRequest{
-		FileID: 11, ReviewStrength: &reviewStrength, SelectedPosition: "legal", HasQuota: true,
-		BaseSignature: "payload.signature", PackID: "pack-1",
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestServiceFeishuInfoHTTPPath 验证字段捷径生命周期查询使用标准 v1 smartAudit/info 路由和 query 别名。
-func TestServiceFeishuInfoHTTPPath(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodGet || request.URL.Path != pathFeishuTaskInfo {
-			t.Errorf("method/path=%s %s", request.Method, request.URL.Path)
-		}
-		if request.URL.Query().Get("smartAuditId") != "89" || request.URL.Query().Get("reviewPosition") != "legal" {
-			t.Errorf("query=%s", request.URL.RawQuery)
-		}
-		writeIntegrationEnvelope(writer, `{"smartAuditId":89,"taskStatus":1,"taskStatusName":"COMPLETE","result":[]}`)
-	}))
-	defer server.Close()
-	client := openplatform.NewClient(config.Profile{BaseURL: server.URL}, integrationTokenProvider{}, server.Client())
-	service := NewService(client, time.Second)
-	result, err := service.FeishuInfo(context.Background(), FeishuTaskQuery{SmartAuditID: 89, ReviewPosition: "legal"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status := FeishuTaskStatus(result); status != "success" {
-		t.Fatalf("result=%#v status=%q", result, status)
 	}
 }

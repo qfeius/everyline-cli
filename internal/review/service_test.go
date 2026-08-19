@@ -51,7 +51,7 @@ func TestServiceStartContract(t *testing.T) {
 	if err := json.Unmarshal(client.request.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["businessId"] != "biz-1" || body["appType"] != AppTypeThirdParty || body["fileHash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if body["businessId"] != "biz-1" || body["appType"] != AppTypeThirdParty || body["fileId"] != "11" || body["fileHash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("body=%#v", body)
 	}
 }
@@ -71,27 +71,6 @@ func TestServiceExtractSubjectsUsesStringFileID(t *testing.T) {
 	}
 	if fileID, ok := body["fileId"].(string); !ok || fileID != "12" {
 		t.Fatalf("body=%#v，fileId 应为字符串 12", body)
-	}
-}
-
-// TestServiceStartFeishuContract 验证字段捷径入口使用当前后端的请求字段和路径。
-func TestServiceStartFeishuContract(t *testing.T) {
-	client := &recordingClient{data: `{"smartAuditId":88,"taskStatus":"running"}`}
-	service := NewService(client, time.Second)
-	reviewStrength := 0
-	request := FeishuStartRequest{FileID: 11, ReviewStrength: &reviewStrength, SelectedPosition: "legal", HasQuota: true, BaseSignature: "payload.signature", PackID: "pack-1"}
-	if _, err := service.StartFeishu(context.Background(), request); err != nil {
-		t.Fatal(err)
-	}
-	if client.request.OperationID != OperationStartFeishu || client.request.Method != "POST" || client.request.Path != pathStartFeishu {
-		t.Fatalf("request=%#v", client.request)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(client.request.Body, &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["fileId"] != float64(11) || body["reviewStrength"] != float64(0) || body["selectedPosition"] != "legal" || body["hasQuota"] != true {
-		t.Fatalf("body=%#v", body)
 	}
 }
 
@@ -166,30 +145,6 @@ func TestServiceTaskQueryExtensions(t *testing.T) {
 	}
 }
 
-// TestServiceFeishuInfoContract 验证字段捷径查询使用 smartAuditId/reviewPosition 和独立的 v1 路由。
-func TestServiceFeishuInfoContract(t *testing.T) {
-	client := &recordingClient{data: `{"smartAuditId":88,"taskStatus":0,"taskStatusName":"RUNNING","result":[]}`}
-	service := NewService(client, time.Second)
-	if _, err := service.FeishuInfo(context.Background(), FeishuTaskQuery{SmartAuditID: 88, ReviewPosition: "legal"}); err != nil {
-		t.Fatal(err)
-	}
-	if client.request.OperationID != OperationFeishuTaskInfo || client.request.Method != "GET" || client.request.Path != pathFeishuTaskInfo {
-		t.Fatalf("request=%#v", client.request)
-	}
-	if client.request.Query.Get("smartAuditId") != "88" || client.request.Query.Get("reviewPosition") != "legal" {
-		t.Fatalf("query=%#v", client.request.Query)
-	}
-}
-
-// TestFeishuTaskStatusMapsBackendCodes 验证后端 AsyncTaskStatus 数值与工作流语义状态的映射。
-func TestFeishuTaskStatusMapsBackendCodes(t *testing.T) {
-	for code, expected := range map[int]string{4: "prepare", 0: "running", 1: "success", 2: "fail", 3: "skipped"} {
-		if status := FeishuTaskStatus(Document{"taskStatus": code}); status != expected {
-			t.Fatalf("code=%d status=%q，期望 %q", code, status, expected)
-		}
-	}
-}
-
 // TestTaskQueriesAllowMissingBusinessID 验证后端允许仅用 taskId 查询状态和详情。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -236,27 +191,6 @@ func TestTaskQueryRequiresContextForContractResult(t *testing.T) {
 	}
 	if client.request.OperationID != "" {
 		t.Fatalf("上下文不完整时不应调用 HTTP client: %#v", client.request)
-	}
-}
-
-// TestFeishuStartRejectsMalformedReviewRules 验证字段捷径规则字符串在本地先满足数组 JSON 约定。
-func TestFeishuStartRejectsMalformedReviewRules(t *testing.T) {
-	client := &recordingClient{data: `{"ok":true}`}
-	request := FeishuStartRequest{
-		FileID: 11, SelectedPosition: "legal", ReviewRules: "{bad-json}", HasQuota: true,
-		BaseSignature: "payload.signature", PackID: "pack-1",
-	}
-	_, err := NewService(client, time.Second).StartFeishu(context.Background(), request)
-	if err == nil || !strings.Contains(err.Error(), "reviewRules 必须是规则数组 JSON") {
-		t.Fatalf("err=%v", err)
-	}
-	if client.request.OperationID != "" {
-		t.Fatalf("非法 reviewRules 不应调用 HTTP client: %#v", client.request)
-	}
-	request.ReviewRules = `[{"name":"规则"}]`
-	_, err = NewService(client, time.Second).StartFeishu(context.Background(), request)
-	if err == nil || !strings.Contains(err.Error(), "reviewRules 第 1 项") {
-		t.Fatalf("err=%v", err)
 	}
 }
 

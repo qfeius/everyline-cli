@@ -88,12 +88,6 @@ func (api *fakeAPI) Start(ctx context.Context, _ StartRequest) (Document, error)
 	return Document{"taskId": int64(88), "status": "running"}, nil
 }
 
-// StartFeishu 仅满足 API 接口，工作流不调用字段捷径入口。
-func (api *fakeAPI) StartFeishu(context.Context, FeishuStartRequest) (Document, error) {
-	api.calls = append(api.calls, "start-feishu")
-	return Document{"taskId": int64(89), "status": "running"}, nil
-}
-
 // Status 按顺序返回预设状态。
 // 入参：context 和 TaskQuery 仅满足 API。
 // 返回值：Document 为当前状态；error 为 nil。
@@ -131,49 +125,6 @@ type failingClock struct{ err error }
 
 func (clock failingClock) After(context.Context, time.Duration) error { return clock.err }
 
-type fakeFeishuAPI struct {
-	snapshots []Document
-	index     int
-	queries   []FeishuTaskQuery
-}
-
-// FeishuInfo 返回预设字段捷径任务详情，供轮询器测试数值状态转换。
-func (api *fakeFeishuAPI) FeishuInfo(_ context.Context, query FeishuTaskQuery) (Document, error) {
-	api.queries = append(api.queries, query)
-	snapshot := api.snapshots[api.index]
-	api.index++
-	return snapshot, nil
-}
-
-// UploadFile 满足 Workflow API，用于构造字段捷径等待器测试实例。
-func (api *fakeFeishuAPI) UploadFile(context.Context, string, string, string, string) (Document, error) {
-	return nil, nil
-}
-
-// UploadURL 满足 Workflow API，用于构造字段捷径等待器测试实例。
-func (api *fakeFeishuAPI) UploadURL(context.Context, string, string) (Document, error) {
-	return nil, nil
-}
-
-// ExtractSubjects 满足 Workflow API，用于构造字段捷径等待器测试实例。
-func (api *fakeFeishuAPI) ExtractSubjects(context.Context, StartRequest) (Document, error) {
-	return nil, nil
-}
-
-// Start 满足 Workflow API，用于构造字段捷径等待器测试实例。
-func (api *fakeFeishuAPI) Start(context.Context, StartRequest) (Document, error) { return nil, nil }
-
-// StartFeishu 满足 Workflow API，用于构造字段捷径等待器测试实例。
-func (api *fakeFeishuAPI) StartFeishu(context.Context, FeishuStartRequest) (Document, error) {
-	return nil, nil
-}
-
-// Status 满足 Workflow API，用于构造字段捷径等待器测试实例。
-func (api *fakeFeishuAPI) Status(context.Context, TaskQuery) (Document, error) { return nil, nil }
-
-// Info 满足 Workflow API，用于构造字段捷径等待器测试实例。
-func (api *fakeFeishuAPI) Info(context.Context, TaskQuery) (Document, error) { return nil, nil }
-
 // TestWorkflowRun 验证上传、主体提取、发起、轮询、详情的固定顺序。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -207,32 +158,6 @@ func TestWorkflowRun(t *testing.T) {
 		if query.VisibilityScope != VisibilityScopeContractResult {
 			t.Fatalf("query=%#v，CLM/CR 链路应使用 contractResult", query)
 		}
-	}
-}
-
-// TestWorkflowWaitFeishu 验证字段捷径详情接口按数值状态轮询并返回完整终态快照。
-func TestWorkflowWaitFeishu(t *testing.T) {
-	api := &fakeFeishuAPI{snapshots: []Document{{"smartAuditId": 88, "taskStatus": 0}, {"smartAuditId": 88, "taskStatus": 1, "result": []any{}}}}
-	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
-	snapshot, err := workflow.WaitFeishu(context.Background(), FeishuTaskQuery{SmartAuditID: 88, ReviewPosition: "legal"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status := FeishuTaskStatus(snapshot); status != "success" {
-		t.Fatalf("snapshot=%#v status=%q", snapshot, status)
-	}
-	if len(api.queries) != 2 || api.queries[0].SmartAuditID != 88 || api.queries[0].ReviewPosition != "legal" {
-		t.Fatalf("queries=%#v", api.queries)
-	}
-}
-
-// TestWorkflowWaitFeishuPreservesFailure 验证字段捷径失败终态返回原始快照和统一任务错误。
-func TestWorkflowWaitFeishuPreservesFailure(t *testing.T) {
-	api := &fakeFeishuAPI{snapshots: []Document{{"smartAuditId": 88, "taskStatus": 2, "msg": "规则失败"}}}
-	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
-	snapshot, err := workflow.WaitFeishu(context.Background(), FeishuTaskQuery{SmartAuditID: 88})
-	if !errors.Is(err, ErrTaskFailed) || snapshot == nil {
-		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}
 }
 

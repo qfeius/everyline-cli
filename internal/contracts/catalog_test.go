@@ -25,8 +25,8 @@ func TestCatalogCompleteness(t *testing.T) {
 	root := cli.NewRootCommand(runtime)
 	seen := map[string]struct{}{}
 	specs := contracts.All()
-	if len(specs) != 27 {
-		t.Fatalf("operation 数量=%d，期望 27", len(specs))
+	if len(specs) != 25 {
+		t.Fatalf("operation 数量=%d，期望 25", len(specs))
 	}
 	for _, spec := range specs {
 		if _, exists := seen[spec.OperationID]; exists {

@@ -210,7 +210,7 @@ func TestReviewStartDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"fileId": 12`) || !strings.Contains(stdout.String(), `"config": {}`) {
+	if !strings.Contains(stdout.String(), `"fileId": "12"`) || !strings.Contains(stdout.String(), `"config": {}`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
@@ -258,19 +258,6 @@ func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("err=%v", err)
-	}
-}
-
-// TestReviewStartFeishuDryRun 验证字段捷径入口校验并输出后端当前字段，且不调用远端。
-func TestReviewStartFeishuDryRun(t *testing.T) {
-	runtime, stdout, _ := testRuntime(t)
-	payload := `{"fileId":12,"reviewStrength":0,"selectedPosition":"legal","hasQuota":true,"baseSignature":"payload.signature","packID":"pack-1"}`
-	err := Execute(context.Background(), runtime, []string{"review", "task", "start-feishu", "--data", payload, "--dry-run", "--output", "json"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stdout.String(), `"reviewStrength": 0`) || !strings.Contains(stdout.String(), `"baseSignature": "payload.signature"`) || !strings.Contains(stdout.String(), `"hasQuota": true`) {
-		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
 
