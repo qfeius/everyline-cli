@@ -165,6 +165,7 @@ func (service *Service) UploadURL(ctx context.Context, fileURL string, name stri
 // ExtractSubjects 无副作用提取合同主体，复用 start 请求中的文件身份字段。
 // 入参：ctx context.Context；request StartRequest 提供 businessId/appType/fileId，fileHash 可选。
 // 返回值：Document 为主体候选；error 为输入或 API 失败。
+// 关键约束：主体提取接口要求 fileId 以 JSON 字符串传输，因此在请求边界完成类型转换。
 func (service *Service) ExtractSubjects(ctx context.Context, request StartRequest) (Document, error) {
 	request = request.Normalize()
 	if err := ValidateSubjectIdentity(request); err != nil {
@@ -173,7 +174,8 @@ func (service *Service) ExtractSubjects(ctx context.Context, request StartReques
 	input := map[string]any{
 		"businessId": request.BusinessID,
 		"appType":    request.AppType,
-		"fileId":     request.FileID,
+		// 主体提取接口的 fileId 契约是字符串；StartRequest 内部仍保留 int64 便于复用校验和响应解析。
+		"fileId": strconv.FormatInt(request.FileID, 10),
 	}
 	if strings.TrimSpace(request.FileHash) != "" {
 		input["fileHash"] = request.FileHash

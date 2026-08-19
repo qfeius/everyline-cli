@@ -28,7 +28,6 @@ type StartRequest struct {
 	Config                         map[string]any `json:"config" yaml:"config"`
 	AllowInvalidSelectedChecklists bool           `json:"allowInvalidSelectedChecklists,omitempty" yaml:"allowInvalidSelectedChecklists,omitempty"`
 	TriggerScene                   string         `json:"triggerScene,omitempty" yaml:"triggerScene,omitempty"`
-	UsageReportContext             map[string]any `json:"usageReportContext,omitempty" yaml:"usageReportContext,omitempty"`
 }
 
 // Validate 校验普通发起审查的必填字段、应用类型和触发场景。

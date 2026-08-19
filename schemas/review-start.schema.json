@@ -21,7 +21,6 @@
       "additionalProperties": true
     },
     "allowInvalidSelectedChecklists": {"type": "boolean", "default": false},
-    "triggerScene": {"enum": ["manual", "auto"], "default": "manual"},
-    "usageReportContext": {"type": "object"}
+    "triggerScene": {"enum": ["manual", "auto"], "default": "manual"}
   }
 }

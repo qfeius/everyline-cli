@@ -56,6 +56,24 @@ func TestServiceStartContract(t *testing.T) {
 	}
 }
 
+// TestServiceExtractSubjectsUsesStringFileID 验证主体提取请求按后端契约发送字符串 fileId。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；请求字段类型不匹配时通过 t.Fatal 报告。
+func TestServiceExtractSubjectsUsesStringFileID(t *testing.T) {
+	client := &recordingClient{data: `{"subjects":[]}`}
+	service := NewService(client, time.Second)
+	if _, err := service.ExtractSubjects(context.Background(), StartRequest{BusinessID: "biz-1", AppType: AppTypeThirdParty, FileID: 12}); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(client.request.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if fileID, ok := body["fileId"].(string); !ok || fileID != "12" {
+		t.Fatalf("body=%#v，fileId 应为字符串 12", body)
+	}
+}
+
 // TestServiceStartFeishuContract 验证字段捷径入口使用当前后端的请求字段和路径。
 func TestServiceStartFeishuContract(t *testing.T) {
 	client := &recordingClient{data: `{"smartAuditId":88,"taskStatus":"running"}`}
