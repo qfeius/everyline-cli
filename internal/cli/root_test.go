@@ -540,6 +540,53 @@ func TestReviewRunRendersPartialResultOnFailure(t *testing.T) {
 	}
 }
 
+// TestReviewTaskResultPollsAndRendersInfo 验证 result 命令隐藏轮询过程，并输出成功后的最终详情。
+// 该测试属于命令层回归验证，确认 CLI 入口正确复用领域结果编排。
+func TestReviewTaskResultPollsAndRendersInfo(t *testing.T) {
+	statusCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/open-apis/contract-review/v3/smartAudit/task/status":
+			statusCalls++
+			if statusCalls == 1 {
+				_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"running"}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"success"}}`))
+		case "/open-apis/contract-review/v3/smartAudit/task/info":
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"success","result":{"riskCount":0}}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("EVERYLINE_ACCESS_TOKEN", "test-token")
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "local", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute(context.Background(), runtime, []string{
+		"review", "task", "result", "--task-id", "88", "--business-id", "biz-1",
+		"--app-type", "CLM", "--visibility-scope", "contractResult",
+		"--interval", "1ms", "--deadline", "1s", "--output", "json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statusCalls != 2 {
+		t.Fatalf("statusCalls=%d，期望 running 后继续轮询一次", statusCalls)
+	}
+	for _, expected := range []string{`"status": "success"`, `"riskCount": 0`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
+		}
+	}
+}
+
 // TestExitCodePrefersNetwork 验证 token 刷新网络失败返回 5，而普通凭证缺失返回 3。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

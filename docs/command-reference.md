@@ -6,11 +6,13 @@
 --profile <name>
 --as app|user
 --output json|yaml|table|raw
---raw
+--raw                         # 等价于 --output raw
 --timeout 30s
 --verbose
 --no-color
 ```
+
+参数优先级：`--profile` 覆盖当前 Profile，仅对本次命令生效；身份选择优先级为 `--as` > Profile 默认身份 > `app`；输出格式优先级为 `--output` > Profile 默认输出 > `table`。
 
 ## Profile 与鉴权
 
@@ -28,7 +30,18 @@ auth logout [--as app|user]
 
 `--env` 预设业务地址：`dev=https://dev-open.qtech.cn`、`test=https://test-open.qtech.cn`、`blue=https://blue-open.qtech.cn`、`prod=https://open.qfei.cn`；对应的自有用户认证页面分别为 `https://dev-contract-agent.qtech.cn`、`https://test-contract-agent.qtech.cn`、`https://blue-contract-agent.qtech.cn`、`https://contract-agent.qfei.cn`。使用 `--env` 时不需要再传 `--base-url`/`--token-url`；不使用 `--env` 时仍需同时传入这两个地址，可额外传 `--auth-url`。每个环境仍需提供对应的 `--app-id`。`app` 身份通过 `auth login --app-secret-stdin` 或环境变量提供，`user` 身份通过自有页面完成认证后使用 `auth login --access-token-stdin` 或 `EVERYLINE_USER_ACCESS_TOKEN` 提供。
 
+`config use <name>` 会切换当前默认 Profile；`auth use [profile] --as app|user` 会修改指定 Profile 的默认身份。只对当前命令临时指定 Profile 或身份时，使用 `--profile` 或 `--as`。
+
 ## 审查
+
+命令选择：
+
+- 使用 `review run` 执行上传、发起、等待的一键审查流程。
+- 使用 `review file` 只准备审查输入文件，不自动发起任务。
+- 使用 `review subject` 提取已上传合同的主体信息。
+- 使用 `review task` 分步发起、查询或获取审查任务结果。
+- 使用 `checklist` 管理审查清单。
+- 使用 `rule` 管理规则分组和审查规则。
 
 ```text
 review file upload --file --name [--app-type] [--business-id] [--dry-run|--print-input]
@@ -38,7 +51,7 @@ review subject extract --business-id --app-type --file-id [--file-hash] [--dry-r
 review task start (--input file.json | --data '{...}') [--dry-run|--print-input]
 review task status --task-id [--business-id] [--app-type] [--visibility-scope contractResult]
 review task info --task-id [--business-id] [--app-type] [--visibility-scope contractResult]
-review task wait --task-id [--business-id] [--app-type] [--visibility-scope contractResult] [--interval 2s] [--deadline 10m]
+review task result --task-id [--business-id] [--app-type] [--visibility-scope contractResult] [--interval 2s] [--deadline 10m]
 
 review run (--input file.json | --data '{...}') [--interval 2s] [--deadline 10m]
 
@@ -67,7 +80,7 @@ completion bash|fish|powershell|zsh
 version
 ```
 
-所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端。`review task wait` 是 CLI 本地编排，不对应新的远端接口。
+所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端；两者当前行为一致。`review task result` 是 CLI 本地编排，不对应新的远端接口；它会轮询任务状态，成功后自动获取并输出最终详情。
 
 `review run` 使用 URL 来源时，上传接口只返回 `fileId`；输入还需提供 `businessId` 和对应文件内容的 SHA-256 `fileHash`，工作流才会继续发起审查。需要完整闭环时在输入中显式设置 `"wait": true`；省略或设置为 `false` 时命令在发起任务后返回。
 

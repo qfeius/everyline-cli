@@ -34,11 +34,11 @@
 
 普通业务接口以 `code=200` 为成功；token 接口以 `code=0` 为成功，两者不会共用固定成功码。
 
-`review task wait` 复用 `smartAuditTaskStatus` 做 CLI 侧轮询，不单独计为远端 operation。文件快照接口属于 V3 文档能力，但按当前范围不纳入 CLI 清单，也不参与一键工作流。
+`review task result` 复用 `smartAuditTaskStatus` 做 CLI 侧轮询，并在成功后调用 `smartAuditTaskInfo` 获取最终详情，不单独计为远端 operation。文件快照接口属于 V3 文档能力，但按当前范围不纳入 CLI 清单，也不参与一键工作流。
 
 批量删除命令对外仍接受重复 `--id` 或 JSON ID 数组，但 HTTP 请求体统一包装为 `{"ids":[...]}`，以匹配平台批量删除接口契约。
 
-任务 `status/info/wait` 查询默认只要求 `taskId`；使用 `visibilityScope=contractResult` 时，必须同时提供 `businessId` 与 `appType`，该范围当前只接受 `contractResult`。
+任务 `status/info/result` 查询默认只要求 `taskId`；使用 `visibilityScope=contractResult` 时，必须同时提供 `businessId` 与 `appType`，该范围当前只接受 `contractResult`。
 
 `review task start` 仅接受 V3 `startReview` 定义的 `businessId`、`appType`、`fileId`、`fileHash`、`config`、`allowInvalidSelectedChecklists` 和 `triggerScene`。内部自动触发链路的 `usageReportContext` 不属于开放接口入参，CLI 会在 JSON 解码阶段拒绝该字段。`review subject extract` 的 `fileHash` 仍按文档作为可选链路追踪字段透传。
 

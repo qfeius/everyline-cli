@@ -53,7 +53,7 @@ type Workflow struct {
 
 // NewWorkflow 创建审查工作流。
 // 入参：api API 为领域操作；clock Clock 为可测试时钟；options WorkflowOptions 为轮询参数。
-// 返回值：*Workflow，可执行一键审查和等待。
+// 返回值：*Workflow，可执行一键审查、等待和结果获取。
 func NewWorkflow(api API, clock Clock, options WorkflowOptions) *Workflow {
 	if clock == nil {
 		clock = RealClock{}
@@ -144,16 +144,10 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 		AppType:         spec.AppType,
 		VisibilityScope: workflowVisibilityScope(spec.AppType),
 	}
-	// 先保存轮询终态；失败时调用方仍可读取诊断字段，成功时再用完整详情替换。
-	result.Final, err = workflow.Wait(workflowContext, query)
+	result.Final, err = workflow.WaitForResult(workflowContext, query)
 	if err != nil {
 		return result, err
 	}
-	info, err := workflow.api.Info(workflowContext, query)
-	if err != nil {
-		return result, err
-	}
-	result.Final = info
 	return result, nil
 }
 
@@ -197,4 +191,22 @@ func (workflow *Workflow) Wait(ctx context.Context, query TaskQuery) (Document, 
 			return snapshot, fmt.Errorf("等待任务终态: %w", err)
 		}
 	}
+}
+
+// WaitForResult 等待任务成功并获取一次最终详情。
+// 入参：ctx context.Context 控制取消；query TaskQuery 为任务身份。
+// 返回值：Document 为最终详情或失败时的最后状态快照；error 为任务失败、超时、取消或详情查询失败。
+func (workflow *Workflow) WaitForResult(ctx context.Context, query TaskQuery) (Document, error) {
+	resultContext, cancel := context.WithTimeout(ctx, workflow.options.Deadline)
+	defer cancel()
+
+	snapshot, err := workflow.Wait(resultContext, query)
+	if err != nil {
+		return snapshot, err
+	}
+	info, err := workflow.api.Info(resultContext, query)
+	if err != nil {
+		return snapshot, err
+	}
+	return info, nil
 }

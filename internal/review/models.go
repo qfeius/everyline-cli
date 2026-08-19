@@ -188,7 +188,7 @@ type RunResult struct {
 	Final    Document `json:"final,omitempty" yaml:"final,omitempty"`
 }
 
-// TaskQuery 是 status、info 和 wait 的公共查询上下文。
+// TaskQuery 是 status、info 和 result 的公共查询上下文。
 type TaskQuery struct {
 	TaskID          int64  `json:"taskId"`
 	BusinessID      string `json:"businessId,omitempty"`

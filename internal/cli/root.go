@@ -26,32 +26,66 @@ type rootOptions struct {
 // 入参：runtime *Runtime 为存储、HTTP、时钟和 I/O 依赖。
 // 返回值：*cobra.Command，可被应用层执行或测试。
 func NewRootCommand(runtime *Runtime) *cobra.Command {
+	// 帮助命令按业务流程展示，而不是按名称排序；各命令组显式维护自己的顺序。
+	cobra.EnableCommandSorting = false
 	options := &rootOptions{}
 	command := &cobra.Command{
-		Use:           "everyline-cli",
-		Short:         "智审开放平台命令行客户端",
+		Use:   "everyline-cli",
+		Short: "智审开放平台命令行客户端",
+		Long: `智审开放平台命令行客户端。
+
+用于合同文件准备、智能审查任务执行、审查清单管理和审查规则管理。
+
+完整审查流程推荐使用 review run；需要分步控制时，使用 review file、review subject 和 review task。`,
+		Example: `  everyline-cli review run --input review-run.json --output json
+  everyline-cli review task result --task-id 123 --output json`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	command.SetIn(runtime.Input)
 	command.SetOut(runtime.Output)
 	command.SetErr(runtime.Error)
-	command.PersistentFlags().StringVar(&options.Profile, "profile", "", "使用指定 Profile")
-	command.PersistentFlags().StringVar(&options.Identity, "as", "", "使用身份：app|user；默认读取 Profile")
-	command.PersistentFlags().StringVarP(&options.Output, "output", "o", "", "输出格式：json|yaml|table")
-	command.PersistentFlags().BoolVar(&options.Raw, "raw", false, "输出紧凑原始 JSON")
+	command.SetHelpTemplate(everylineHelpTemplate)
+	command.PersistentFlags().StringVar(&options.Profile, "profile", "", "覆盖当前 Profile，仅对本次命令生效")
+	command.PersistentFlags().StringVar(&options.Identity, "as", "", "覆盖 Profile 默认身份，仅支持 app|user")
+	command.PersistentFlags().StringVarP(&options.Output, "output", "o", "", "输出格式：json|yaml|table|raw")
+	command.PersistentFlags().BoolVar(&options.Raw, "raw", false, "输出紧凑 JSON，等价于 --output raw")
 	command.PersistentFlags().DurationVar(&options.Timeout, "timeout", 30*time.Second, "普通远端请求超时")
-	command.PersistentFlags().BoolVar(&options.Verbose, "verbose", false, "将工作流进度写入 stderr")
+	command.PersistentFlags().BoolVar(&options.Verbose, "verbose", false, "将工作流进度写入 stderr，不污染 stdout")
 	command.PersistentFlags().BoolVar(&options.NoColor, "no-color", false, "禁用彩色输出")
+	command.AddGroup(
+		&cobra.Group{ID: "business", Title: "Review"},
+		&cobra.Group{ID: "cli", Title: "CLI Management"},
+	)
+	command.SetHelpCommandGroupID("cli")
+	command.SetCompletionCommandGroupID("cli")
+	withNotes(command,
+		"使用 everyline-cli <command> --help 查看具体命令参数。",
+		"推荐使用 review run 执行上传、发起、等待和获取结果的一键流程。",
+		"已有 task-id 时使用 review task result 获取最终审查结果。",
+		"--verbose 的工作流进度输出到 stderr，不污染结构化 stdout。",
+	)
+	reviewCommand := newReviewCommand(runtime, options)
+	reviewCommand.GroupID = "business"
+	checklistCommand := newChecklistCommand(runtime, options)
+	checklistCommand.GroupID = "business"
+	ruleCommand := newRuleCommand(runtime, options)
+	ruleCommand.GroupID = "business"
+	configCommand := newConfigCommand(runtime, options)
+	configCommand.GroupID = "cli"
+	authCommand := newAuthCommand(runtime, options)
+	authCommand.GroupID = "cli"
 	command.AddCommand(
-		newConfigCommand(runtime, options),
-		newAuthCommand(runtime, options),
-		newReviewCommand(runtime, options),
-		newChecklistCommand(runtime, options),
-		newRuleCommand(runtime, options),
-		newVersionCommand(runtime, options),
+		reviewCommand,
+		checklistCommand,
+		ruleCommand,
+		configCommand,
+		authCommand,
 	)
 	command.InitDefaultCompletionCmd()
+	versionCommand := newVersionCommand(runtime, options)
+	versionCommand.GroupID = "cli"
+	command.AddCommand(versionCommand)
 	return command
 }
 

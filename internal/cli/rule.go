@@ -16,12 +16,23 @@ import (
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，包含 group CRUD 和规则单条/批量 CRUD。
 func newRuleCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "rule", Short: "管理审查规则"}
+	command := &cobra.Command{
+		Use:   "rule",
+		Short: "管理审查规则",
+		Long: `管理审查规则及规则分组。
+
+		规则必须属于规则分组；除规则分组命令外，规则相关命令都需要通过 --group-id 指定父分组。`,
+	}
+	withNotes(command,
+		"除 rule group 外，规则命令都需要通过 --group-id 指定父分组。",
+		"batch-create 和 batch-update 当前仅支持 dry-run。",
+		"删除规则分组会级联删除其所属规则。",
+	)
 	command.AddCommand(
 		newRuleGroupCommand(runtime, root),
+		newRuleListCommand(runtime, root),
 		newRuleCreateCommand(runtime, root),
 		newRuleBatchCreateCommand(runtime, root),
-		newRuleListCommand(runtime, root),
 		newRuleUpdateCommand(runtime, root),
 		newRuleBatchUpdateCommand(runtime, root),
 		newRuleDeleteCommand(runtime, root),
@@ -34,10 +45,15 @@ func newRuleCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，包含 create/list/update/delete。
 func newRuleGroupCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "group", Short: "管理审查规则分组"}
+	command := &cobra.Command{
+		Use:   "group",
+		Short: "管理审查规则分组",
+		Long:  "管理规则分组。删除规则分组会级联删除其所属规则。",
+	}
+	withNotes(command, "删除规则分组会级联删除其所属规则，并需要显式提供 --yes。")
 	command.AddCommand(
-		newRuleGroupCreateCommand(runtime, root),
 		newRuleGroupListCommand(runtime, root),
+		newRuleGroupCreateCommand(runtime, root),
 		newRuleGroupUpdateCommand(runtime, root),
 		newRuleGroupDeleteCommand(runtime, root),
 	)
@@ -51,7 +67,10 @@ func newRuleGroupCreateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "create", Short: "创建规则分组", Args: cobra.NoArgs,
+		Use:   "create",
+		Short: "创建规则分组",
+		Long:  "创建规则分组，需要通过 --input 或 --data 提供 JSON 请求。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload rule.Group
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -85,7 +104,10 @@ func newRuleGroupCreateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 func newRuleGroupListCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	query := rule.Query{}
 	command := &cobra.Command{
-		Use: "list", Short: "查询规则分组", Args: cobra.NoArgs,
+		Use:   "list",
+		Short: "查询规则分组",
+		Long:  "查询规则分组，支持排序和分页。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			service, profile, err := buildRuleService(runtime, root)
 			if err != nil {
@@ -109,7 +131,10 @@ func newRuleGroupUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var id, inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "update", Short: "更新规则分组", Args: cobra.NoArgs,
+		Use:   "update",
+		Short: "更新规则分组",
+		Long:  "更新指定规则分组，需要通过 --id 指定目标分组。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload rule.Group
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -147,7 +172,10 @@ func newRuleGroupDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var id string
 	var yes, dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "delete", Short: "级联删除规则分组及其规则", Args: cobra.NoArgs,
+		Use:   "delete",
+		Short: "级联删除规则分组及其规则",
+		Long:  "级联删除规则分组及其所属规则，属于高风险操作，必须传 --yes。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			resolvedID, err := normalizeRequiredID(id, "id")
 			if err != nil {
@@ -186,7 +214,10 @@ func newRuleCreateCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var groupID, inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "create", Short: "创建审查规则", Args: cobra.NoArgs,
+		Use:   "create",
+		Short: "创建审查规则",
+		Long:  "在指定规则分组下创建审查规则，需要传 --group-id。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload rule.Rule
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -222,7 +253,10 @@ func newRuleBatchCreateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var groupID, inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "batch-create", Short: "批量创建审查规则", Args: cobra.NoArgs,
+		Use:   "batch-create",
+		Short: "批量创建审查规则",
+		Long:  "批量创建指定分组下的审查规则；当前仅支持 dry-run。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload []rule.Rule
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -261,7 +295,10 @@ func newRuleListCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var groupID string
 	query := rule.Query{}
 	command := &cobra.Command{
-		Use: "list", Short: "查询审查规则", Args: cobra.NoArgs,
+		Use:   "list",
+		Short: "查询审查规则",
+		Long:  "查询指定规则分组下的审查规则，需要传 --group-id。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			service, profile, err := buildRuleService(runtime, root)
 			if err != nil {
@@ -286,7 +323,10 @@ func newRuleUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var groupID, ruleID, inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "update", Short: "更新审查规则", Args: cobra.NoArgs,
+		Use:   "update",
+		Short: "更新审查规则",
+		Long:  "更新指定规则分组下的审查规则，需要传 --group-id 和 --rule-id。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload rule.Rule
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -325,7 +365,10 @@ func newRuleBatchUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var groupID, inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "batch-update", Short: "批量更新审查规则", Args: cobra.NoArgs,
+		Use:   "batch-update",
+		Short: "批量更新审查规则",
+		Long:  "批量更新指定分组下的审查规则；当前仅支持 dry-run。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload []rule.Rule
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -364,7 +407,10 @@ func newRuleDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var groupID, ruleID string
 	var yes, dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "delete", Short: "删除审查规则", Args: cobra.NoArgs,
+		Use:   "delete",
+		Short: "删除审查规则",
+		Long:  "删除指定分组下的审查规则，属于写操作，必须传 --yes。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			resolvedRuleID, err := normalizeRequiredID(ruleID, "rule-id")
 			if err != nil {
@@ -404,7 +450,10 @@ func newRuleBatchDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var ids []string
 	var yes, dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "batch-delete", Short: "批量删除审查规则", Args: cobra.NoArgs,
+		Use:   "batch-delete",
+		Short: "批量删除审查规则",
+		Long:  "批量删除指定分组下的审查规则，属于写操作，必须传 --yes。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			resolved, err := readIDList(ids, inputPath, inline)
 			if err != nil {

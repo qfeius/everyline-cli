@@ -161,6 +161,39 @@ func TestWorkflowRun(t *testing.T) {
 	}
 }
 
+// TestWorkflowWaitForResultPollsThenLoadsInfo 验证已有任务的结果流程只轮询状态，并在成功后加载一次详情。
+// 该测试覆盖从 Run 中抽取的共享结果编排，属于行为回归验证，不单独计为 RED。
+func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
+	api := &fakeAPI{statuses: []Document{{"status": "running"}, {"status": "success"}}}
+	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
+	result, err := workflow.WaitForResult(context.Background(), TaskQuery{
+		TaskID:          88,
+		BusinessID:      "biz-1",
+		AppType:         AppTypeCLM,
+		VisibilityScope: VisibilityScopeContractResult,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := StringValue(result, "status"); status != "success" {
+		t.Fatalf("result=%#v，期望返回最终详情", result)
+	}
+	expected := []string{"status", "status", "info"}
+	if len(api.calls) != len(expected) {
+		t.Fatalf("calls=%#v，期望 status -> status -> info", api.calls)
+	}
+	for index := range expected {
+		if api.calls[index] != expected[index] {
+			t.Fatalf("calls=%#v，期望 status -> status -> info", api.calls)
+		}
+	}
+	for _, query := range api.queries {
+		if query.VisibilityScope != VisibilityScopeContractResult || query.BusinessID != "biz-1" || query.AppType != AppTypeCLM {
+			t.Fatalf("query=%#v，详情查询必须复用完整任务上下文", query)
+		}
+	}
+}
+
 // TestRunSpecCLMRequiresBusinessID 验证 review-run Schema 在上传前拦截缺少业务对象 ID 的输入。
 func TestRunSpecCLMRequiresBusinessID(t *testing.T) {
 	spec := RunSpec{

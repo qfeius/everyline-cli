@@ -18,7 +18,22 @@ import (
 // 入参：runtime *Runtime 为 HTTP、凭证和输出依赖；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，包含 run/file/subject/task。
 func newReviewCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "review", Short: "执行合同智能审查"}
+	command := &cobra.Command{
+		Use:   "review",
+		Short: "执行合同智能审查",
+		Long: `执行合同智能审查。
+
+推荐使用 review run 执行上传、发起、等待的一键审查流程。
+需要分步控制时，使用 review file、review subject 和 review task。
+审查清单和审查规则管理请使用 checklist 和 rule。`,
+		Example: `  everyline-cli review run --input review-run.json --output json
+  everyline-cli review task result --task-id 123 --output json`,
+	}
+	withNotes(command,
+		"review run 适合从文件准备开始的一键审查流程。",
+		"已有 task-id 时使用 review task result 获取最终结果。",
+		"review file、review subject 和 review task 用于需要分步控制的场景。",
+	)
 	command.AddCommand(
 		newReviewRunCommand(runtime, root),
 		newReviewFileCommand(runtime, root),
@@ -32,7 +47,15 @@ func newReviewCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，包含 upload/upload-url。
 func newReviewFileCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "file", Short: "准备审查文件"}
+	command := &cobra.Command{
+		Use:   "file",
+		Short: "准备审查输入文件",
+		Long: `准备审查输入文件。
+
+本组命令只负责上传文件，不会自动发起审查任务。
+支持本地文件上传和通过 URL 上传。`,
+	}
+	withNotes(command, "upload 和 upload-url 只准备审查文件，不会自动发起审查任务。")
 	command.AddCommand(
 		newReviewFileUploadCommand(runtime, root),
 		newReviewFileUploadURLCommand(runtime, root),
@@ -53,6 +76,7 @@ func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 	command := &cobra.Command{
 		Use:   "upload",
 		Short: "上传本地合同文件",
+		Long:  "上传本地合同文件，返回平台文件信息；不会自动发起审查任务。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := review.ValidateUploadFile(filePath); err != nil {
@@ -105,6 +129,7 @@ func newReviewFileUploadURLCommand(runtime *Runtime, root *rootOptions) *cobra.C
 	command := &cobra.Command{
 		Use:   "upload-url",
 		Short: "通过 URL 上传合同文件",
+		Long:  "通过 HTTP/HTTPS URL 上传合同文件，返回平台文件信息；不会自动发起审查任务。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			parsed, err := url.ParseRequestURI(fileURL)
@@ -143,7 +168,11 @@ func newReviewFileUploadURLCommand(runtime *Runtime, root *rootOptions) *cobra.C
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，包含 extract。
 func newReviewSubjectCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "subject", Short: "提取合同主体"}
+	command := &cobra.Command{
+		Use:   "subject",
+		Short: "提取已上传合同的主体信息",
+		Long:  "提取已上传合同的主体信息；本组命令不代替完整合同审查流程。",
+	}
 	command.AddCommand(newReviewSubjectExtractCommand(runtime, root))
 	return command
 }
@@ -158,6 +187,7 @@ func newReviewSubjectExtractCommand(runtime *Runtime, root *rootOptions) *cobra.
 	command := &cobra.Command{
 		Use:   "extract",
 		Short: "无副作用提取合同参与方",
+		Long:  "提取合同参与方信息，不执行完整合同审查。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := review.ValidateSubjectIdentity(request); err != nil {
@@ -193,16 +223,29 @@ func newReviewSubjectExtractCommand(runtime *Runtime, root *rootOptions) *cobra.
 	return command
 }
 
-// newReviewTaskCommand 创建普通任务的发起、查询、详情和等待命令组。
+// newReviewTaskCommand 创建普通任务的发起、查询、详情和结果命令组。
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
-// 返回值：*cobra.Command，包含 start/status/info/wait。
+// 返回值：*cobra.Command，包含 start/status/info/result。
 func newReviewTaskCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "task", Short: "管理审查任务"}
+	command := &cobra.Command{
+		Use:   "task",
+		Short: "管理审查任务生命周期",
+		Long: `管理审查任务生命周期。
+
+支持发起任务、查询状态、查询详情，以及等待并获取最终结果。`,
+	}
+	withNotes(command,
+		"start 只负责发起任务，不上传文件。",
+		"result 会轮询任务状态，成功后自动获取最终审查详情。",
+		"status 只查询一次当前状态，不等待任务完成。",
+		"info 只查询一次任务详情，不负责轮询。",
+		"使用 visibility-scope=contractResult 时，需要同时提供 business-id 和 app-type。",
+	)
 	command.AddCommand(
 		newReviewTaskStartCommand(runtime, root),
+		newReviewTaskResultCommand(runtime, root),
 		newReviewTaskStatusCommand(runtime, root),
 		newReviewTaskInfoCommand(runtime, root),
-		newReviewTaskWaitCommand(runtime, root),
 	)
 	return command
 }
@@ -217,7 +260,8 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var printInput bool
 	command := &cobra.Command{
 		Use:   "start",
-		Short: "发起普通 V3 智审任务",
+		Short: "发起智审任务",
+		Long:  "使用 JSON 请求发起智审任务；本命令不会上传文件。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var request review.StartRequest
@@ -242,6 +286,7 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
+	withNotes(command, "需要通过 --input 或 --data 提供 JSON 请求；本命令不会上传文件。")
 	addJSONInputFlags(command, &inputPath, &inline)
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "只校验并输出请求，不调用远端")
 	command.Flags().BoolVar(&printInput, "print-input", false, "输出规范化请求，不调用远端")
@@ -256,6 +301,7 @@ func newReviewTaskStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 	command := &cobra.Command{
 		Use:   "status",
 		Short: "查询审查任务状态",
+		Long:  "查询审查任务当前状态；不会等待任务完成。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			service, profile, err := buildReviewService(runtime, root)
@@ -269,6 +315,7 @@ func newReviewTaskStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
+	withNotes(command, "只发起一次状态查询；需要等待并获取详情时使用 review task result。")
 	addTaskQueryFlags(command, &query)
 	return command
 }
@@ -281,6 +328,7 @@ func newReviewTaskInfoCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 	command := &cobra.Command{
 		Use:   "info",
 		Short: "查询审查任务详情",
+		Long:  "查询审查任务详情。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			service, profile, err := buildReviewService(runtime, root)
@@ -294,29 +342,33 @@ func newReviewTaskInfoCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
+	withNotes(command, "只发起一次详情查询；不会轮询任务状态。")
 	addTaskQueryFlags(command, &query)
 	return command
 }
 
-// newReviewTaskWaitCommand 创建 CLI 侧轮询器，不映射新的远端接口。
+// newReviewTaskResultCommand 创建 CLI 侧结果工作流，不映射新的远端接口。
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，支持 interval/deadline。
-func newReviewTaskWaitCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
+func newReviewTaskResultCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	query := review.TaskQuery{}
 	var interval time.Duration
 	var deadline time.Duration
 	command := &cobra.Command{
-		Use:   "wait",
-		Short: "轮询直到审查任务终态",
-		Args:  cobra.NoArgs,
+		Use:   "result",
+		Short: "等待审查完成并获取最终结果",
+		Long: `等待已有审查任务进入终态。
+
+任务成功后，CLI 会自动获取并输出最终审查结果；这是 CLI 本地编排，不对应新的远端接口。`,
+		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			service, profile, err := buildReviewService(runtime, root)
 			if err != nil {
 				return err
 			}
 			workflow := review.NewWorkflow(service, review.RealClock{}, review.WorkflowOptions{Interval: interval, Deadline: deadline})
-			progress(runtime, root, "正在等待审查任务进入终态...")
-			result, err := workflow.Wait(command.Context(), query)
+			progress(runtime, root, "正在等待审查任务完成并获取最终结果...")
+			result, err := workflow.WaitForResult(command.Context(), query)
 			if err != nil {
 				if renderErr := render(runtime, root, profile.DefaultOutput, result); renderErr != nil {
 					return fmt.Errorf("%w；输出阶段结果失败: %v", err, renderErr)
@@ -326,6 +378,10 @@ func newReviewTaskWaitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
+	withNotes(command,
+		"内部轮询 status，任务成功后调用一次 info。",
+		"超时、取消或详情获取失败时返回最后可用的任务快照和错误。",
+	)
 	addTaskQueryFlags(command, &query)
 	command.Flags().DurationVar(&interval, "interval", 2*time.Second, "轮询间隔")
 	command.Flags().DurationVar(&deadline, "deadline", 10*time.Minute, "最长等待时间")
@@ -345,7 +401,13 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "run",
 		Short: "上传、发起并可选等待获取最终详情",
-		Args:  cobra.NoArgs,
+		Long: `一键执行完整合同审查流程。
+
+根据 JSON 输入上传本地文件或 URL 文件，发起审查任务，
+并根据 wait 配置决定是否等待任务进入终态。`,
+		Example: `  everyline-cli review run --input review-run.json --output json
+  everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"businessId":"biz-001"}' --dry-run`,
+		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var spec review.RunSpec
 			if err := readJSONInput(inputPath, inline, &spec); err != nil {
@@ -387,6 +449,10 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
+	withNotes(command,
+		"输入中的 wait=true 才会等待任务终态并返回最终详情。",
+		"URL 来源需要额外提供 businessId 和文件内容 SHA-256 fileHash。",
+	)
 	addJSONInputFlags(command, &inputPath, &inline)
 	command.Flags().DurationVar(&interval, "interval", 2*time.Second, "轮询间隔")
 	command.Flags().DurationVar(&deadline, "deadline", 10*time.Minute, "最长等待时间")
@@ -420,7 +486,7 @@ func addJSONInputFlags(command *cobra.Command, inputPath *string, inline *string
 	command.Flags().StringVar(inline, "data", "", "内联 JSON 输入")
 }
 
-// addTaskQueryFlags 为 status/info/wait 注册一致的任务查询参数。
+// addTaskQueryFlags 为 status/info/result 注册一致的任务查询参数。
 // 入参：command *cobra.Command 为目标命令；query *review.TaskQuery 接收值。
 // 返回值：无。
 func addTaskQueryFlags(command *cobra.Command, query *review.TaskQuery) {

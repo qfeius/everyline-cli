@@ -13,11 +13,22 @@ import (
 // 入参：runtime *Runtime 为配置和输出依赖；root *rootOptions 为公共输出 flags。
 // 返回值：*cobra.Command，包含 add/list/use/show。
 func newConfigCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "config", Short: "管理多环境 Profile"}
+	command := &cobra.Command{
+		Use:   "config",
+		Short: "管理多环境 Profile",
+		Long: `管理多环境 Profile。
+
+		Profile 保存环境地址、应用 ID、默认身份和默认输出格式，不保存 app secret 或 access token。`,
+	}
+	withNotes(command,
+		"Profile 保存环境地址、应用 ID、默认身份和默认输出格式。",
+		"Profile 不保存 app secret 或 access token。",
+		"config use 会修改当前默认 Profile。",
+	)
 	command.AddCommand(
 		newConfigAddCommand(runtime, root),
-		newConfigListCommand(runtime, root),
 		newConfigUseCommand(runtime, root),
+		newConfigListCommand(runtime, root),
 		newConfigShowCommand(runtime, root),
 	)
 	return command
@@ -38,6 +49,7 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "add <name>",
 		Short: "新增或更新 Profile",
+		Long:  "新增或更新 Profile。使用 --env 创建预设环境配置，或同时提供 --base-url 和 --token-url。",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if environment != "" {
@@ -104,6 +116,7 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			return render(runtime, root, "table", profile)
 		},
 	}
+	withNotes(command, "Profile 不保存 app secret 或 access token。")
 	command.Flags().StringVar(&environment, "env", "", "使用预设环境：dev|test|blue|prod")
 	command.Flags().StringVar(&baseURL, "base-url", "", "智审开放平台基础 URL")
 	command.Flags().StringVar(&userBaseURL, "user-base-url", "", "用户身份业务基础 URL；为空时复用 base-url")
@@ -145,6 +158,7 @@ func newConfigListCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "列出全部 Profile",
+		Long:  "列出全部 Profile，并标记当前 Profile；不会输出密钥或 token。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			profiles, err := runtime.Profiles.List()
@@ -192,7 +206,8 @@ func identityName(identity config.IdentityKind) string {
 func newConfigUseCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "use <name>",
-		Short: "选择默认 Profile",
+		Short: "切换当前默认 Profile",
+		Long:  "切换当前默认 Profile；仅影响后续未显式指定 --profile 的命令。",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if err := runtime.Profiles.Use(args[0]); err != nil {
@@ -210,6 +225,7 @@ func newConfigShowCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show [name]",
 		Short: "显示一个 Profile",
+		Long:  "显示指定或当前 Profile 的配置；不会输出 app secret 或 access token。",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			var profile config.Profile

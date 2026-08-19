@@ -17,7 +17,18 @@ import (
 // 入参：runtime *Runtime 为凭证存储和 HTTP 依赖；root *rootOptions 为 Profile/输出 flags。
 // 返回值：*cobra.Command，包含 login/status/use/logout。
 func newAuthCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "auth", Short: "管理 app/user 身份凭证"}
+	command := &cobra.Command{
+		Use:   "auth",
+		Short: "管理 app/user 身份凭证",
+		Long: `管理 app/user 身份凭证。
+
+		身份选择优先级为：--as > Profile 默认身份 > app。
+auth use 会修改 Profile 的默认身份；仅对当前命令临时指定身份请使用 --as。`,
+	}
+	withNotes(command,
+		"app 身份使用 app secret，user 身份使用认证页面交接的 access token。",
+		"auth logout 只删除当前 Profile 的 token 缓存。",
+	)
 	command.AddCommand(
 		newAuthLoginCommand(runtime, root),
 		newAuthStatusCommand(runtime, root),
@@ -36,6 +47,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "login",
 		Short: "获取并安全缓存 app/user token",
+		Long:  "获取并安全缓存 app 或 user 身份凭证；app 使用 app secret，user 使用认证页面交接的 access token。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			profile, err := selectedProfile(runtime, root)
@@ -110,6 +122,7 @@ func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "检查当前鉴权状态",
+		Long:  "检查当前 Profile 和身份的凭证状态；不会输出 token 本身。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			profile, err := selectedProfile(runtime, root)
@@ -163,6 +176,7 @@ func newAuthUseCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "use [profile]",
 		Short: "选择 Profile 的默认身份",
+		Long:  "设置指定 Profile 的默认业务身份；会修改本地配置。仅对当前命令临时指定身份请使用 --as。",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if root.Identity == "" {
@@ -198,6 +212,7 @@ func newAuthLogoutCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "删除当前 Profile 的 token 缓存",
+		Long:  "删除当前 Profile 和身份对应的 token 缓存；不会删除 Profile 配置。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			profile, err := selectedProfile(runtime, root)

@@ -16,11 +16,22 @@ import (
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，包含七个远端操作。
 func newChecklistCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	command := &cobra.Command{Use: "checklist", Short: "管理审查清单"}
+	command := &cobra.Command{
+		Use:   "checklist",
+		Short: "管理审查清单",
+		Long: `管理审查清单。
+
+审查清单由名称和关联审查规则组成。
+		创建、更新和删除属于写操作；批量创建和批量更新当前仅支持 dry-run。`,
+	}
+	withNotes(command,
+		"batch-create 和 batch-update 当前仅支持 dry-run。",
+		"delete 和 batch-delete 必须显式提供 --yes。",
+	)
 	command.AddCommand(
+		newChecklistListCommand(runtime, root),
 		newChecklistCreateCommand(runtime, root),
 		newChecklistBatchCreateCommand(runtime, root),
-		newChecklistListCommand(runtime, root),
 		newChecklistUpdateCommand(runtime, root),
 		newChecklistBatchUpdateCommand(runtime, root),
 		newChecklistDeleteCommand(runtime, root),
@@ -36,7 +47,10 @@ func newChecklistCreateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "create", Short: "创建审查清单", Args: cobra.NoArgs,
+		Use:   "create",
+		Short: "创建审查清单",
+		Long:  "创建审查清单，需要通过 --input 或 --data 提供 JSON 请求。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload checklist.Checklist
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -71,7 +85,10 @@ func newChecklistBatchCreateCommand(runtime *Runtime, root *rootOptions) *cobra.
 	var inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "batch-create", Short: "批量创建审查清单", Args: cobra.NoArgs,
+		Use:   "batch-create",
+		Short: "批量创建审查清单",
+		Long:  "批量创建审查清单；当前仅支持 dry-run，真实调用需等待接口契约核验。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload []checklist.Checklist
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -109,7 +126,10 @@ func newChecklistListCommand(runtime *Runtime, root *rootOptions) *cobra.Command
 	query := checklist.Query{}
 	var enabled bool
 	command := &cobra.Command{
-		Use: "list", Short: "查询审查清单", Args: cobra.NoArgs,
+		Use:   "list",
+		Short: "查询审查清单",
+		Long:  "查询审查清单，支持名称、分类、阶段、启用状态和分页过滤。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if command.Flags().Changed("enabled") {
 				query.Enabled = &enabled
@@ -146,7 +166,10 @@ func newChecklistUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var id, inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "update", Short: "更新审查清单", Args: cobra.NoArgs,
+		Use:   "update",
+		Short: "更新审查清单",
+		Long:  "更新指定审查清单，需要通过 --id 指定目标清单。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload checklist.Checklist
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -184,7 +207,10 @@ func newChecklistBatchUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.
 	var inputPath, inline string
 	var dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "batch-update", Short: "批量更新审查清单", Args: cobra.NoArgs,
+		Use:   "batch-update",
+		Short: "批量更新审查清单",
+		Long:  "批量更新审查清单；当前仅支持 dry-run，真实调用需等待接口契约核验。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload []checklist.Checklist
 			if err := readJSONInput(inputPath, inline, &payload); err != nil {
@@ -222,7 +248,10 @@ func newChecklistDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var id string
 	var yes, dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "delete", Short: "删除审查清单", Args: cobra.NoArgs,
+		Use:   "delete",
+		Short: "删除审查清单",
+		Long:  "删除指定审查清单，属于写操作，必须传 --yes。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			resolvedID, err := normalizeRequiredID(id, "id")
 			if err != nil {
@@ -261,7 +290,10 @@ func newChecklistBatchDeleteCommand(runtime *Runtime, root *rootOptions) *cobra.
 	var inputPath, inline string
 	var yes, dryRun, printInput bool
 	command := &cobra.Command{
-		Use: "batch-delete", Short: "批量删除审查清单", Args: cobra.NoArgs,
+		Use:   "batch-delete",
+		Short: "批量删除审查清单",
+		Long:  "批量删除指定审查清单，属于写操作，必须传 --yes。",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			resolved, err := readIDList(ids, inputPath, inline)
 			if err != nil {
