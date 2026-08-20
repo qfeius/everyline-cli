@@ -19,22 +19,40 @@ import (
 var (
 	ErrCredentialsMissing = errors.New("缺少应用密钥或有效 token")
 	ErrAuthentication     = errors.New("鉴权失败")
-	ErrUserAuthentication = errors.New("用户认证未完成，请先通过 everyline 自有认证页面获取用户 token")
+	ErrUserAuthentication = errors.New("用户 OAuth 认证未完成，请执行 auth login --as user")
 )
 
 const OperationTenantAccessTokenInternal = "tenantAccessTokenInternal"
 
-// Token 是缓存中的访问凭证及其绝对过期时间。
+// Token 是缓存中的访问凭证及其可选生命周期信息。
 type Token struct {
-	AccessToken string    `json:"access_token" yaml:"-"`
-	ExpiresAt   time.Time `json:"expires_at" yaml:"expires_at"`
+	AccessToken  string    `json:"access_token" yaml:"-"`
+	TokenType    string    `json:"token_type,omitempty" yaml:"-"`
+	RefreshToken string    `json:"refresh_token,omitempty" yaml:"-"`
+	Scope        string    `json:"scope,omitempty" yaml:"-"`
+	IssuedAt     time.Time `json:"issued_at,omitempty" yaml:"-"`
+	ExpiresAt    time.Time `json:"expires_at" yaml:"expires_at"`
 }
 
 // ValidAt 判断 token 在预留刷新窗口后是否仍有效。
 // 入参：now time.Time 为当前时间；refreshBefore time.Duration 为提前刷新窗口。
 // 返回值：bool，有非空 token 且未进入刷新窗口时为 true。
 func (token Token) ValidAt(now time.Time, refreshBefore time.Duration) bool {
-	return token.AccessToken != "" && now.Add(refreshBefore).Before(token.ExpiresAt)
+	if token.AccessToken == "" {
+		return false
+	}
+	// 缺少服务端生命周期信息的 token 仍可使用；未知不等于已过期。
+	if token.ExpiresAt.IsZero() {
+		return true
+	}
+	return now.Add(refreshBefore).Before(token.ExpiresAt)
+}
+
+// ExpiredAt 判断 token 是否已被服务端返回的过期时间明确判定为过期。
+// 入参：now time.Time 为当前时间。
+// 返回值：bool，只有已知 expires_at 且当前时间不早于它时才为 true。
+func (token Token) ExpiredAt(now time.Time) bool {
+	return token.AccessToken != "" && !token.ExpiresAt.IsZero() && !now.Before(token.ExpiresAt)
 }
 
 // TokenStore 定义访问 token 缓存的最小读写能力。
@@ -44,34 +62,39 @@ type TokenStore interface {
 	Delete(string) error
 }
 
-// Provider 统一处理环境变量覆盖、本地缓存和远端刷新。
+// Provider 统一处理环境变量覆盖、本地缓存和服务端 token 获取。
 type Provider struct {
-	store      TokenStore
-	httpClient *http.Client
-	now        func() time.Time
+	store       TokenStore
+	secretStore AppSecretStore
+	httpClient  *http.Client
+	now         func() time.Time
 }
 
 // NewProvider 创建 token 提供器。
-// 入参：store TokenStore 为安全缓存；httpClient *http.Client 为 token 专用客户端；now func() time.Time 为时钟。
-// 返回值：*Provider，可用于登录、读取和刷新 token。
-func NewProvider(store TokenStore, httpClient *http.Client, now func() time.Time) *Provider {
+// 入参：store TokenStore 为安全缓存；httpClient *http.Client 为 token 专用客户端；now func() time.Time 为时钟；secretStores 为可选 app secret 仓库。
+// 返回值：*Provider，可用于登录和读取 token。
+func NewProvider(store TokenStore, httpClient *http.Client, now func() time.Time, secretStores ...AppSecretStore) *Provider {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &Provider{store: store, httpClient: httpClient, now: now}
+	var secretStore AppSecretStore
+	if len(secretStores) > 0 {
+		secretStore = secretStores[0]
+	}
+	return &Provider{store: store, secretStore: secretStore, httpClient: httpClient, now: now}
 }
 
-// Token 优先读取显式环境变量，其次读取有效缓存，最后用环境变量中的 app secret 刷新。
+// Token 优先读取显式环境变量，其次读取有效缓存，最后用环境变量中的 app secret 重新获取 app token。
 // 入参：ctx context.Context 控制请求取消；profile config.Profile 指定凭证和 token 地址。
 // 返回值：Token 为可用凭证；error 在缺少凭证或远端失败时非 nil。
 func (provider *Provider) Token(ctx context.Context, profile config.Profile) (Token, error) {
 	return provider.TokenForIdentity(ctx, profile, config.IdentityApp)
 }
 
-// TokenForIdentity 按 user/app 身份读取环境变量、隔离缓存或执行对应登录流程。
+// TokenForIdentity 按 user/app 身份读取环境变量、隔离缓存、本地 secret 存储或执行对应登录流程。
 // 入参：ctx context.Context 控制远端请求；profile config.Profile 指定环境；identity config.IdentityKind 为业务身份。
 // 返回值：Token 为可用访问凭证；error 在凭证缺失或刷新失败时非 nil。
 func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.Profile, identity config.IdentityKind) (Token, error) {
@@ -81,9 +104,6 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 	}
 	identity = parsedIdentity
 	if identity == config.IdentityUser {
-		if accessToken := strings.TrimSpace(os.Getenv("EVERYLINE_USER_ACCESS_TOKEN")); accessToken != "" {
-			return Token{AccessToken: accessToken, ExpiresAt: provider.now().Add(24 * time.Hour)}, nil
-		}
 		if identityStore, ok := provider.store.(interface {
 			LoadForIdentity(string, config.IdentityKind) (Token, error)
 		}); ok {
@@ -95,53 +115,38 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 	}
 
 	if accessToken := strings.TrimSpace(os.Getenv("EVERYLINE_ACCESS_TOKEN")); accessToken != "" {
-		return Token{AccessToken: accessToken, ExpiresAt: provider.now().Add(24 * time.Hour)}, nil
+		return Token{AccessToken: accessToken, TokenType: "Bearer"}, nil
 	}
 	if cached, err := provider.store.Load(profile.Name); err == nil && cached.ValidAt(provider.now(), time.Minute) {
 		return cached, nil
 	}
 	secret := SecretFromEnvironment(profile.Name)
+	if secret == "" && provider.secretStore != nil {
+		storedSecret, secretErr := provider.secretStore.LoadAppSecret(profile.Name)
+		if secretErr == nil {
+			secret = storedSecret
+		} else if !errors.Is(secretErr, ErrAppSecretNotFound) {
+			return Token{}, fmt.Errorf("读取本地 app secret: %w", secretErr)
+		}
+	}
 	if secret == "" {
 		return Token{}, ErrCredentialsMissing
 	}
 	return provider.Login(ctx, profile, secret)
 }
 
-// LoginForIdentity 保存指定身份的 token；app 继续沿用 tenant token 流程，user 由自有认证页面注入。
-// 入参：ctx context.Context 控制请求；profile config.Profile 指定环境；identity config.IdentityKind 为业务身份；accessToken string 为用户页返回的 token。
-// 返回值：Token 为已缓存凭证；error 在身份、输入或落盘失败时非 nil。
-func (provider *Provider) LoginForIdentity(ctx context.Context, profile config.Profile, identity config.IdentityKind, accessToken string) (Token, error) {
-	if identity == config.IdentityApp {
-		return provider.Login(ctx, profile, accessToken)
-	}
-	if identity != config.IdentityUser {
-		return Token{}, fmt.Errorf("未知身份 %q", identity)
-	}
-	accessToken = strings.TrimSpace(accessToken)
-	if accessToken == "" {
-		return Token{}, ErrUserAuthentication
-	}
-	token := Token{AccessToken: accessToken, ExpiresAt: provider.now().Add(24 * time.Hour)}
-	identityStore, ok := provider.store.(interface {
-		SaveForIdentity(string, config.IdentityKind, Token) error
-	})
-	if !ok {
-		return Token{}, fmt.Errorf("token store 不支持 user 身份")
-	}
-	if err := identityStore.SaveForIdentity(profile.Name, identity, token); err != nil {
-		return Token{}, err
-	}
-	return token, nil
-}
-
 // Login 使用 appId/appSecret 获取 tenant token，并仅缓存 token 而不保存 app secret。
-// 入参：ctx context.Context 控制请求取消；profile config.Profile 提供 token URL 和 app ID；appSecret string 为仅驻留内存的密钥。
+// 入参：ctx context.Context 控制请求取消；profile config.Profile 提供 token URL 和默认 app ID；appSecret string 为仅驻留内存的密钥。
 // 返回值：Token 为新凭证；error 在协议或网络失败时非 nil。
 func (provider *Provider) Login(ctx context.Context, profile config.Profile, appSecret string) (Token, error) {
 	if strings.TrimSpace(appSecret) == "" {
 		return Token{}, ErrCredentialsMissing
 	}
-	contractInput := map[string]string{"appId": profile.AppID, "appSecret": appSecret}
+	appID := strings.TrimSpace(profile.AppID)
+	if environmentAppID := AppIDFromEnvironment(profile.Name); environmentAppID != "" {
+		appID = environmentAppID
+	}
+	contractInput := map[string]string{"appId": appID, "appSecret": appSecret}
 	if err := contracts.ValidateRequest(OperationTenantAccessTokenInternal, http.MethodPost, "profile.token_url", contractInput); err != nil {
 		return Token{}, err
 	}
@@ -185,11 +190,30 @@ func (provider *Provider) Login(ctx context.Context, profile config.Profile, app
 	if accessToken == "" || envelope.Expire <= 0 {
 		return Token{}, fmt.Errorf("%w: token 响应缺少 tenant_access_token 或 expire", ErrAuthentication)
 	}
-	token := Token{AccessToken: accessToken, ExpiresAt: provider.now().Add(time.Duration(envelope.Expire) * time.Second)}
+	issuedAt := provider.now()
+	token := Token{
+		AccessToken: accessToken,
+		TokenType:   "Bearer",
+		IssuedAt:    issuedAt,
+		ExpiresAt:   issuedAt.Add(time.Duration(envelope.Expire) * time.Second),
+	}
 	if err := provider.store.Save(profile.Name, token); err != nil {
 		return Token{}, err
 	}
 	return token, nil
+}
+
+// AppIDFromEnvironment 按 Profile 专用变量、通用变量的顺序读取 app ID。
+// 入参：profileName string 为 Profile 名称。
+// 返回值：string，仅驻留进程内存的 app ID；未配置时为空。
+func AppIDFromEnvironment(profileName string) string {
+	key := profileAppIDEnvironmentKey(profileName)
+	if key != "" {
+		if appID := strings.TrimSpace(os.Getenv(key)); appID != "" {
+			return appID
+		}
+	}
+	return strings.TrimSpace(os.Getenv("EVERYLINE_APP_ID"))
 }
 
 // SecretFromEnvironment 按 Profile 专用变量、通用变量的顺序读取 app secret。
@@ -205,10 +229,24 @@ func SecretFromEnvironment(profileName string) string {
 	return strings.TrimSpace(os.Getenv("EVERYLINE_APP_SECRET"))
 }
 
+// profileAppIDEnvironmentKey 将 Profile 名编码为 app ID 专用环境变量名。
+// 入参：profileName string 为配置中受限为字母、数字、点、下划线和连字符的名称。
+// 返回值：string，为 EVERYLINE_APP_ID_ 前缀加可逆后缀；空名称返回空字符串。
+func profileAppIDEnvironmentKey(profileName string) string {
+	return profileEnvironmentKey("EVERYLINE_APP_ID_", profileName)
+}
+
 // profileSecretEnvironmentKey 将 Profile 名编码为无碰撞的专用密钥环境变量名。
 // 入参：profileName string 为配置中受限为字母、数字、点、下划线和连字符的名称。
 // 返回值：string，为 EVERYLINE_APP_SECRET_ 前缀加可逆后缀；空名称返回空字符串。
 func profileSecretEnvironmentKey(profileName string) string {
+	return profileEnvironmentKey("EVERYLINE_APP_SECRET_", profileName)
+}
+
+// profileEnvironmentKey 将 Profile 名编码为指定前缀的无碰撞环境变量名。
+// 入参：prefix string 为环境变量前缀；profileName string 为 Profile 名称。
+// 返回值：string，为前缀加可逆后缀；空名称返回空字符串。
+func profileEnvironmentKey(prefix string, profileName string) string {
 	if profileName == "" {
 		return ""
 	}
@@ -225,5 +263,5 @@ func profileSecretEnvironmentKey(profileName string) string {
 		// 原始大写字母和所有符号都转为固定十六进制，既保留常见小写名称的可读性，也保持大小写可逆。
 		_, _ = fmt.Fprintf(&suffix, "_%02X", character)
 	}
-	return "EVERYLINE_APP_SECRET_" + suffix.String()
+	return prefix + suffix.String()
 }

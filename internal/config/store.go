@@ -71,7 +71,7 @@ func (store *FileStore) Add(profile Profile) error {
 	if profile.DefaultIdentity == "" {
 		profile.DefaultIdentity = IdentityApp
 	}
-	if err := profile.Validate(); err != nil {
+	if err := profile.ValidateForIdentity(profile.DefaultIdentity); err != nil {
 		return err
 	}
 	store.mu.Lock()

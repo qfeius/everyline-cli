@@ -3,9 +3,11 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -40,12 +42,34 @@ func TestProviderLoginContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token.AccessToken != "token-value" || !token.ExpiresAt.Equal(fixedNow.Add(2*time.Hour)) {
+	if token.AccessToken != "token-value" || token.TokenType != "Bearer" || !token.IssuedAt.Equal(fixedNow) || !token.ExpiresAt.Equal(fixedNow.Add(2*time.Hour)) {
 		t.Fatalf("token=%#v", token)
 	}
 	cached, err := store.Load("test")
 	if err != nil || cached.AccessToken != "token-value" {
 		t.Fatalf("cached=%#v err=%v", cached, err)
+	}
+}
+
+// TestProviderLoginUsesEnvironmentAppID 验证 app token 刷新链路也遵守环境变量优先于 Profile 的 app-id 规则。
+func TestProviderLoginUsesEnvironmentAppID(t *testing.T) {
+	t.Setenv("EVERYLINE_APP_ID", "env-app")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["appId"] != "env-app" || body["appSecret"] != "secret-value" {
+			t.Fatalf("token body=%#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"token-value","expire":7200}`))
+	}))
+	defer server.Close()
+
+	provider := NewProvider(NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json")), server.Client(), time.Now)
+	profile := config.Profile{Name: "test", TokenURL: server.URL + "/token", AppID: "profile-app"}
+	if _, err := provider.Login(context.Background(), profile, "secret-value"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -111,19 +135,34 @@ func TestIdentityTokenCacheIsolated(t *testing.T) {
 	}
 }
 
-// TestProviderUserTokenFromEnvironment 验证自有认证页面交接的 user token 可通过环境变量直接使用。
+// TestProviderUserTokenFromEnvironment 验证 user Provider 不再接受原始 token 环境变量。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestProviderUserTokenFromEnvironment(t *testing.T) {
 	t.Setenv("EVERYLINE_USER_ACCESS_TOKEN", "user-env-token")
-	fixedNow := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
-	provider := NewProvider(NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json")), http.DefaultClient, func() time.Time { return fixedNow })
-	token, err := provider.TokenForIdentity(context.Background(), config.Profile{Name: "dev"}, config.IdentityUser)
-	if err != nil {
+	provider := NewProvider(NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json")), http.DefaultClient, time.Now)
+	if _, err := provider.TokenForIdentity(context.Background(), config.Profile{Name: "dev"}, config.IdentityUser); !errors.Is(err, ErrUserAuthentication) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestFileTokenStoreLoadsLegacyTokenWithoutLifecycleFields 验证旧版 tokens.json 缺少生命周期字段时仍可读取。
+func TestFileTokenStoreLoadsLegacyTokenWithoutLifecycleFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tokens.json")
+	if err := os.WriteFile(path, []byte(`{"dev":{"access_token":"legacy-token"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if token.AccessToken != "user-env-token" || !token.ExpiresAt.Equal(fixedNow.Add(24*time.Hour)) {
-		t.Fatalf("token=%#v", token)
+	token, err := NewFileTokenStore(path).Load("dev")
+	if err != nil || token.AccessToken != "legacy-token" || !token.ValidAt(time.Now(), 0) {
+		t.Fatalf("token=%#v err=%v", token, err)
+	}
+}
+
+// TestAppIDFromEnvironmentFallback 验证没有 Profile 专用变量时使用通用 app-id 环境变量。
+func TestAppIDFromEnvironmentFallback(t *testing.T) {
+	t.Setenv("EVERYLINE_APP_ID", "generic-app")
+	if got := AppIDFromEnvironment("dev"); got != "generic-app" {
+		t.Fatalf("app id=%q, want generic-app", got)
 	}
 }
 

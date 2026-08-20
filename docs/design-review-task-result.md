@@ -44,14 +44,16 @@ review task start -> review task result <task-id>
 
 ```text
 review task start (--input file.json | --data '{...}')
-review task result --task-id [--business-id] [--app-type]
+review task result --task-id [--business-id]
                     [--visibility-scope contractResult]
                     [--interval 2s] [--deadline 10m]
-review task status --task-id [--business-id] [--app-type]
+review task status --task-id [--business-id]
                    [--visibility-scope contractResult]
-review task info --task-id [--business-id] [--app-type]
+review task info --task-id [--business-id]
                  [--visibility-scope contractResult]
 ```
+
+CLI 不再暴露 `--app-type`；任务查询不发送 appType。发起审查的 start/run 输入契约另行只保留 API 必填字段。
 
 命令提示：
 
@@ -81,7 +83,7 @@ CLI result
 
 - `Status` 返回 `success` 后只调用一次 `Info`。
 - 命令以退出码 `0` 结束。
-- 标准输出只包含最终结果；进度信息写入 stderr，并受 `--verbose` 控制。
+- 标准输出只包含最终结果；每次轮询收到的 status 默认写入 stderr，不污染 JSON stdout。
 
 ### 4.2 失败
 
@@ -103,7 +105,7 @@ CLI result
 
 ### 4.5 身份与查询上下文
 
-调用 `Info` 时必须复用 `result` 命令构造的同一个 `TaskQuery`，包括 `task-id`、业务标识、接入类型和可见性范围；不得因为内部编排而丢失 CLM/CR 的 `contractResult` 查询上下文。
+调用 `Info` 时必须复用 `result` 命令构造的同一个 `TaskQuery`，包括 `task-id`、业务标识、可选接入类型和可见性范围；不得因为内部编排而丢失 `contractResult` 查询上下文。
 
 ## 5. 测试契约
 
@@ -171,9 +173,3 @@ config add <name> [flags]
 帮助说明层次固定为：`Short` 表示动作，`Long` 表示语义，`Examples` 表示可复制用法，`Notes` 表示实际约束和特殊行为。Notes 不重复完整 API 文档，也不引入未实现的能力。
 命令与描述之间使用紧凑列宽；帮助末尾不再重复输出 `Use "... --help"` 引导，Notes 放在 Flags 和 Global Flags 之后。
 Short/Long 说明中的空行会被压缩为连续文本行，避免帮助顶部出现多余的多行空白。
-
-## 9. 就绪结论
-
-`READY_FOR_TDD`：本设计只涉及单仓 CLI 命令树和本地帮助展示行为；远端接口、数据结构、权限模型和发布配置均不变。目标行为、失败/超时/取消语义、测试场景、兼容决策、实现边界、帮助展示顺序、语法后缀和 Notes 约束已明确，可进入测试先行实现。
-
-设计状态：`READY_FOR_TDD`

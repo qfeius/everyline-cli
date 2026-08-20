@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 const everylineNotesAnnotation = "everyline.notes"
@@ -30,7 +32,7 @@ Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCo
   {{rpad (everylineCommandListSyntax .) 48}} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
 
 Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+{{everylineLocalFlagUsages .LocalFlags | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
 
 Global Flags:
 {{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
@@ -46,6 +48,48 @@ func init() {
 	cobra.AddTemplateFunc("everylineCommandSyntax", everylineCommandSyntax)
 	cobra.AddTemplateFunc("everylineCommandListSyntax", everylineCommandListSyntax)
 	cobra.AddTemplateFunc("everylineDescription", everylineDescription)
+	cobra.AddTemplateFunc("everylineLocalFlagUsages", everylineLocalFlagUsages)
+}
+
+// everylineLocalFlagUsages 将命令业务 flags 排在自动 help flag 之前，并保持业务 flags 的字母序。
+func everylineLocalFlagUsages(flags *pflag.FlagSet) string {
+	if flags == nil {
+		return ""
+	}
+	businessFlags := make([]*pflag.Flag, 0)
+	operationFlags := make([]*pflag.Flag, 0)
+	var helpFlag *pflag.Flag
+	flags.VisitAll(func(flag *pflag.Flag) {
+		if flag.Name == "help" {
+			helpFlag = flag
+			return
+		}
+		if flag.Name == "dry-run" || flag.Name == "print-input" {
+			operationFlags = append(operationFlags, flag)
+			return
+		}
+		businessFlags = append(businessFlags, flag)
+	})
+	sortFlags := func(flags []*pflag.Flag) {
+		sort.SliceStable(flags, func(left, right int) bool {
+			return flags[left].Name < flags[right].Name
+		})
+	}
+	sortFlags(businessFlags)
+	sortFlags(operationFlags)
+	ordered := make([]*pflag.Flag, 0, len(businessFlags)+len(operationFlags)+1)
+	ordered = append(ordered, businessFlags...)
+	ordered = append(ordered, operationFlags...)
+	if helpFlag != nil {
+		ordered = append(ordered, helpFlag)
+	}
+
+	orderedFlags := pflag.NewFlagSet(flags.Name(), pflag.ContinueOnError)
+	orderedFlags.SortFlags = false
+	for _, flag := range ordered {
+		orderedFlags.AddFlag(flag)
+	}
+	return orderedFlags.FlagUsages()
 }
 
 // everylineDescription 压缩命令说明中的空行，保留非空行的语义顺序。
@@ -76,11 +120,14 @@ func everylineCommandSyntax(command *cobra.Command) string {
 	return syntax
 }
 
-// everylineCommandListSyntax 构造命令列表中的相对命令语法，避免重复显示 CLI 程序名。
+// everylineCommandListSyntax 构造命令列表中的直属子命令语法，避免重复显示父命令路径。
 func everylineCommandListSyntax(command *cobra.Command) string {
 	syntax := everylineCommandSyntax(command)
-	rootName := command.Root().Name()
-	return strings.TrimSpace(strings.TrimPrefix(syntax, rootName+" "))
+	prefix := command.Root().Name()
+	if parent := command.Parent(); parent != nil {
+		prefix = parent.CommandPath()
+	}
+	return strings.TrimSpace(strings.TrimPrefix(syntax, prefix+" "))
 }
 
 // withNotes 为命令写入基于实际实现的使用约束，供自定义帮助模板渲染。

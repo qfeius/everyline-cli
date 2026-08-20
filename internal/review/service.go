@@ -78,9 +78,6 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 	if err := ValidateFileName(name); err != nil {
 		return nil, err
 	}
-	if err := ValidateAppType(appType); err != nil {
-		return nil, err
-	}
 	if err := ValidateUploadBusinessContext(appType, businessID); err != nil {
 		return nil, err
 	}
@@ -104,8 +101,10 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 	if err := writer.WriteField("name", name); err != nil {
 		return nil, fmt.Errorf("写入 name 字段: %w", err)
 	}
-	if err := writer.WriteField("appType", appType); err != nil {
-		return nil, fmt.Errorf("写入 appType 字段: %w", err)
+	if strings.TrimSpace(appType) != "" {
+		if err := writer.WriteField("appType", appType); err != nil {
+			return nil, fmt.Errorf("写入 appType 字段: %w", err)
+		}
 	}
 	if businessID != "" {
 		if err := writer.WriteField("businessId", businessID); err != nil {
@@ -161,9 +160,11 @@ func (service *Service) ExtractSubjects(ctx context.Context, request StartReques
 	}
 	input := map[string]any{
 		"businessId": request.BusinessID,
-		"appType":    request.AppType,
 		// 主体提取接口的 fileId 契约是字符串；StartRequest 内部仍保留 int64 便于复用校验和响应解析。
 		"fileId": strconv.FormatInt(request.FileID, 10),
+	}
+	if strings.TrimSpace(request.AppType) != "" {
+		input["appType"] = request.AppType
 	}
 	if strings.TrimSpace(request.FileHash) != "" {
 		input["fileHash"] = request.FileHash
@@ -289,17 +290,14 @@ func taskQueryValues(query TaskQuery) (url.Values, error) {
 		values.Set("businessId", query.BusinessID)
 	}
 	if query.AppType != "" {
-		if err := ValidateAppType(query.AppType); err != nil {
-			return nil, err
-		}
 		values.Set("appType", query.AppType)
 	}
 	if query.VisibilityScope != "" {
 		if query.VisibilityScope != VisibilityScopeContractResult {
 			return nil, fmt.Errorf("visibility-scope 必须是 %s", VisibilityScopeContractResult)
 		}
-		if query.BusinessID == "" || query.AppType == "" {
-			return nil, fmt.Errorf("visibility-scope=%s 必须同时提供 business-id 和 app-type", VisibilityScopeContractResult)
+		if query.BusinessID == "" {
+			return nil, fmt.Errorf("visibility-scope=%s 必须提供 business-id", VisibilityScopeContractResult)
 		}
 		values.Set("visibilityScope", query.VisibilityScope)
 	}
@@ -318,7 +316,10 @@ func normalizeTaskQuery(query TaskQuery) TaskQuery {
 // 入参：filePath/name/appType/businessID string 分别为本地文件、业务文件名、应用类型和可选业务 ID。
 // 返回值：map[string]any，为 review-upload.schema.json 对应的字段对象。
 func uploadFileContractInput(filePath string, name string, appType string, businessID string) map[string]any {
-	input := map[string]any{"file": filePath, "name": name, "appType": appType}
+	input := map[string]any{"file": filePath, "name": name}
+	if strings.TrimSpace(appType) != "" {
+		input["appType"] = appType
+	}
 	if businessID != "" {
 		input["businessId"] = businessID
 	}

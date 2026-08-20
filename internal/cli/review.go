@@ -69,8 +69,6 @@ func newReviewFileCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var filePath string
 	var name string
-	var appType string
-	var businessID string
 	var dryRun bool
 	var printInput bool
 	command := &cobra.Command{
@@ -85,13 +83,7 @@ func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 			if err := review.ValidateFileName(name); err != nil {
 				return err
 			}
-			if err := review.ValidateUploadBusinessContext(appType, businessID); err != nil {
-				return err
-			}
-			input := map[string]any{"file": filePath, "name": name, "appType": appType}
-			if businessID != "" {
-				input["businessId"] = businessID
-			}
+			input := map[string]any{"file": filePath, "name": name}
 			if dryRun || printInput {
 				return render(runtime, root, "json", input)
 			}
@@ -100,7 +92,7 @@ func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 				return err
 			}
 			progress(runtime, root, "正在上传合同文件...")
-			result, err := service.UploadFile(command.Context(), filePath, name, appType, businessID)
+			result, err := service.UploadFile(command.Context(), filePath, name, "", "")
 			if err != nil {
 				return err
 			}
@@ -109,8 +101,6 @@ func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 	}
 	command.Flags().StringVar(&filePath, "file", "", "本地合同路径")
 	command.Flags().StringVar(&name, "name", "", "业务文件名（含扩展名）")
-	command.Flags().StringVar(&appType, "app-type", review.AppTypeThirdParty, "接入类型：CLM|CR|THIRD_PARTY")
-	command.Flags().StringVar(&businessID, "business-id", "", "可选业务对象 ID")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "只校验并输出请求，不调用远端")
 	command.Flags().BoolVar(&printInput, "print-input", false, "输出规范化请求，不调用远端")
 	_ = command.MarkFlagRequired("file")
@@ -181,7 +171,7 @@ func newReviewSubjectCommand(runtime *Runtime, root *rootOptions) *cobra.Command
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
 // 返回值：*cobra.Command，支持 dry-run 和实际调用。
 func newReviewSubjectExtractCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
-	var request review.StartRequest
+	request := review.StartRequest{}
 	var dryRun bool
 	var printInput bool
 	command := &cobra.Command{
@@ -194,7 +184,10 @@ func newReviewSubjectExtractCommand(runtime *Runtime, root *rootOptions) *cobra.
 				return err
 			}
 			// dry-run/print-input 必须展示与真实主体提取请求一致的字符串 fileId。
-			input := map[string]any{"businessId": request.BusinessID, "appType": request.AppType, "fileId": strconv.FormatInt(request.FileID, 10)}
+			input := map[string]any{"businessId": request.BusinessID, "fileId": strconv.FormatInt(request.FileID, 10)}
+			if request.AppType != "" {
+				input["appType"] = request.AppType
+			}
 			if request.FileHash != "" {
 				input["fileHash"] = request.FileHash
 			}
@@ -213,7 +206,6 @@ func newReviewSubjectExtractCommand(runtime *Runtime, root *rootOptions) *cobra.
 		},
 	}
 	command.Flags().StringVar(&request.BusinessID, "business-id", "", "业务对象 ID")
-	command.Flags().StringVar(&request.AppType, "app-type", review.AppTypeThirdParty, "接入类型")
 	command.Flags().Int64Var(&request.FileID, "file-id", 0, "平台文件 ID")
 	command.Flags().StringVar(&request.FileHash, "file-hash", "", "服务端文件指纹")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "只校验并输出请求，不调用远端")
@@ -239,7 +231,7 @@ func newReviewTaskCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		"result 会轮询任务状态，成功后自动获取最终审查详情。",
 		"status 只查询一次当前状态，不等待任务完成。",
 		"info 只查询一次任务详情，不负责轮询。",
-		"使用 visibility-scope=contractResult 时，需要同时提供 business-id 和 app-type。",
+		"使用 visibility-scope=contractResult 时，CLI 使用默认接入类型查询。",
 	)
 	command.AddCommand(
 		newReviewTaskStartCommand(runtime, root),
@@ -261,14 +253,29 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use:   "start",
 		Short: "发起智审任务",
-		Long:  "使用 JSON 请求发起智审任务；本命令不会上传文件。",
-		Args:  cobra.NoArgs,
+		Long: `使用 JSON 请求发起智审任务；本命令不会上传文件。
+
+请求字段（仅支持以下字段）：
+- businessId string（必填）：上传接口返回的业务对象 ID。
+- fileId integer（必填）：平台文件 ID；保持当前 CLI 输入方式。
+- fileHash string（必填，使用上传接口返回值）：文件指纹。
+- config object（必填）：审查配置。
+- config.selectedPosition string（必填）：审查立场。
+- config.selectedAuditRole string（必填）：审查角色。
+- config.reviewStrength integer（必填，0|1|2）：审查强度。
+- config.selectedCheckListIds array<string>（可选）：指定审查清单 ID，非空时优先级最高。
+- config.matchContractTypeRulePackage boolean（可选）：是否匹配合同类型规则包；仅 true 生效。
+
+CLI 仅接受以上字段，其他字段会按未知字段拒绝。`,
+		Example: `  everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}' --dry-run
+  everyline-cli review task start --input review-start.json --output json`,
+		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			var request review.StartRequest
-			if err := readJSONInput(inputPath, inline, &request); err != nil {
+			var input review.StartInput
+			if err := readJSONInput(inputPath, inline, &input); err != nil {
 				return err
 			}
-			request = request.Normalize()
+			request := input.ToRequest().Normalize()
 			if err := request.Validate(); err != nil {
 				return err
 			}
@@ -286,7 +293,12 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
-	withNotes(command, "需要通过 --input 或 --data 提供 JSON 请求；本命令不会上传文件。")
+	withNotes(command,
+		"需要通过 --input 或 --data 提供 JSON 请求；本命令不会上传文件。",
+		"fileHash 应直接填写上传接口返回的文件指纹。",
+		"config 及 selectedPosition、selectedAuditRole、reviewStrength 均为必填。",
+		"selectedCheckListIds 和 matchContractTypeRulePackage 为可选规则来源参数。",
+	)
 	addJSONInputFlags(command, &inputPath, &inline)
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "只校验并输出请求，不调用远端")
 	command.Flags().BoolVar(&printInput, "print-input", false, "输出规范化请求，不调用远端")
@@ -366,7 +378,18 @@ func newReviewTaskResultCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 			if err != nil {
 				return err
 			}
-			workflow := review.NewWorkflow(service, review.RealClock{}, review.WorkflowOptions{Interval: interval, Deadline: deadline})
+			workflow := review.NewWorkflow(service, review.RealClock{}, review.WorkflowOptions{
+				Interval: interval,
+				Deadline: deadline,
+				OnStatus: func(snapshot review.Document) {
+					status, ok := review.StringValue(snapshot, "status")
+					if !ok {
+						status = "unknown"
+					}
+					_, _ = fmt.Fprintf(runtime.Error, "[review task result] status=%s\n", status)
+				},
+			})
+			_, _ = fmt.Fprintln(runtime.Error, "[review task result] waiting for task status...")
 			progress(runtime, root, "正在等待审查任务完成并获取最终结果...")
 			result, err := workflow.WaitForResult(command.Context(), query)
 			if err != nil {
@@ -404,9 +427,22 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		Long: `一键执行完整合同审查流程。
 
 根据 JSON 输入上传本地文件或 URL 文件，发起审查任务，
-并根据 wait 配置决定是否等待任务进入终态。`,
+并根据 wait 配置决定是否等待任务进入终态。
+
+请求字段：
+- source object（必填）：type=file 时提供 path/name；type=url 时提供 fileUrl/name。
+- config object（必填）：审查配置。
+  - config.selectedPosition string（必填）：审查立场。
+  - config.selectedAuditRole string（必填）：审查角色。
+  - config.reviewStrength integer（必填，0、1、2）：审查强度。
+  - config.selectedCheckListIds array<string>（可选）：指定审查清单 ID，非空时优先级最高。
+  - config.matchContractTypeRulePackage boolean（可选）：是否匹配合同类型规则包；仅 true 生效。
+- businessId string：URL 来源必填；文件来源优先使用上传接口返回值。
+- fileHash string：URL 来源必填；fileHash 使用上传接口返回值。
+- extractSubjects boolean：可选，是否先提取合同参与方。
+- wait boolean：可选，是否等待任务完成并获取最终详情。`,
 		Example: `  everyline-cli review run --input review-run.json --output json
-  everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"businessId":"biz-001"}' --dry-run`,
+  everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true},"wait":true}' --dry-run`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var spec review.RunSpec
@@ -451,7 +487,9 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	}
 	withNotes(command,
 		"输入中的 wait=true 才会等待任务终态并返回最终详情。",
-		"URL 来源需要额外提供 businessId 和文件内容 SHA-256 fileHash。",
+		"config 及其三个必填子字段必须提供。",
+		"URL 来源需要额外提供 businessId 和上传接口返回的 fileHash。",
+		"CLI 仅接受以上字段，其他字段会按未知字段拒绝。",
 	)
 	addJSONInputFlags(command, &inputPath, &inline)
 	command.Flags().DurationVar(&interval, "interval", 2*time.Second, "轮询间隔")
@@ -473,7 +511,7 @@ func buildReviewService(runtime *Runtime, root *rootOptions) (*review.Service, c
 	if err != nil {
 		return nil, config.Profile{}, err
 	}
-	provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now)
+	provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now, runtime.Secrets)
 	client := openplatform.NewClientForIdentity(profile, provider, runtime.HTTP, identity)
 	return review.NewService(client, root.Timeout), profile, nil
 }
@@ -492,7 +530,6 @@ func addJSONInputFlags(command *cobra.Command, inputPath *string, inline *string
 func addTaskQueryFlags(command *cobra.Command, query *review.TaskQuery) {
 	command.Flags().Int64Var(&query.TaskID, "task-id", 0, "审查任务 ID")
 	command.Flags().StringVar(&query.BusinessID, "business-id", "", "业务对象 ID")
-	command.Flags().StringVar(&query.AppType, "app-type", "", "可选接入类型")
 	command.Flags().StringVar(&query.VisibilityScope, "visibility-scope", "", "可选可见性范围：contractResult")
 	_ = command.MarkFlagRequired("task-id")
 }

@@ -38,11 +38,11 @@
 
 批量删除命令对外仍接受重复 `--id` 或 JSON ID 数组，但 HTTP 请求体统一包装为 `{"ids":[...]}`，以匹配平台批量删除接口契约。
 
-任务 `status/info/result` 查询默认只要求 `taskId`；使用 `visibilityScope=contractResult` 时，必须同时提供 `businessId` 与 `appType`，该范围当前只接受 `contractResult`。
+任务 `status/info/result` 查询默认只要求 `taskId`；使用 `visibilityScope=contractResult` 时，当前服务端兼容契约只要求 `businessId`，不再要求 `appType`。CLI 已移除 `--app-type`，查询请求不会自动补入 appType。
 
-`review task start` 仅接受 V3 `startReview` 定义的 `businessId`、`appType`、`fileId`、`fileHash`、`config`、`allowInvalidSelectedChecklists` 和 `triggerScene`。内部自动触发链路的 `usageReportContext` 不属于开放接口入参，CLI 会在 JSON 解码阶段拒绝该字段。`review subject extract` 的 `fileHash` 仍按文档作为可选链路追踪字段透传。
+`review task start` 与 `review run` 的发起审查契约只保留 `businessId`、`fileId`、`fileHash` 和 `config`；`config` 必须包含 `selectedPosition`、`selectedAuditRole`、`reviewStrength`，其中 `reviewStrength` 取值为 `0`、`1`、`2`。`fileHash` 使用上传接口返回的文件指纹；CLI 不接收文档中其他非必填字段，未知字段会在 JSON 解码阶段拒绝。`fileId` 本次仍保持 CLI 当前输入和内部类型行为，不纳入字符串化改造。`review subject extract` 的 `fileHash` 仍按文档作为可选链路追踪字段透传。
 
-`review run` 的数据流为：上传 -> 可选主体提取 -> 发起 -> 可选轮询 -> 详情。文件上传响应优先提供 `businessId/fileId/fileHash`；标准 URL 上传接口只返回文件对象，因此 URL 来源需要在 RunSpec 中额外提供 `businessId` 和文件内容 SHA-256 的 `fileHash`。
+`review run` 的数据流为：上传 -> 可选主体提取 -> 发起 -> 可选轮询 -> 详情。文件上传响应提供 `businessId/fileId/fileHash`；标准 URL 上传接口只返回文件 ID，因此 URL 来源需要在 RunSpec 中额外提供 `businessId` 和上传接口返回的 `fileHash`。
 
 清单创建与更新请求按公开接口说明要求 `name`、`reviewRuleIds`；`contractCategory`、`reviewStage` 为可选兼容字段。
 

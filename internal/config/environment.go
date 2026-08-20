@@ -7,22 +7,37 @@ import (
 
 // EnvironmentPreset 保存一个预设环境的公开连接地址，不包含 app ID 或 app secret。
 type EnvironmentPreset struct {
-	BaseURL  string
-	AuthURL  string
-	TokenURL string
+	BaseURL           string
+	AuthURL           string
+	TokenURL          string
+	OAuthMetadataURL  string
+	OAuthBusinessType string
+	OAuthClientID     string
+	OAuthRedirectURL  string
+	OAuthScopes       []string
 }
 
 // environmentPresets 是环境名到公开连接地址的唯一映射，凭证字段由调用方提供。
 var environmentPresets = map[string]EnvironmentPreset{
 	"dev": {
-		BaseURL:  "https://dev-open.qtech.cn",
-		AuthURL:  "https://dev-contract-agent.qtech.cn",
-		TokenURL: "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
+		BaseURL:           "https://dev-open.qtech.cn",
+		AuthURL:           "https://dev-contract-agent.qtech.cn",
+		TokenURL:          "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
+		OAuthMetadataURL:  "https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
+		OAuthBusinessType: "contract-review",
+		OAuthClientID:     "zscli_a9f2a3ce87fa5bb6",
+		OAuthRedirectURL:  "http://127.0.0.1:8000/login",
+		OAuthScopes:       []string{"contract-review:full"},
 	},
 	"test": {
-		BaseURL:  "https://test-open.qtech.cn",
-		AuthURL:  "https://test-contract-agent.qtech.cn",
-		TokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
+		BaseURL:           "https://test-open.qtech.cn",
+		AuthURL:           "https://test-contract-agent.qtech.cn",
+		TokenURL:          "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
+		OAuthMetadataURL:  "https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
+		OAuthBusinessType: "contract-review",
+		OAuthClientID:     "zscli_a94c9aa398389bd7",
+		OAuthRedirectURL:  "http://127.0.0.1:8000/login",
+		OAuthScopes:       []string{"contract-review:full"},
 	},
 	"blue": {
 		BaseURL:  "https://blue-open.qtech.cn",
