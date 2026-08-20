@@ -73,18 +73,3 @@ func readSecret(reader io.Reader) (string, error) {
 	}
 	return secret, nil
 }
-
-// readAccessToken 从 stdin 读取用户认证页面交接的访问 token，并剥离首尾空白。
-// 入参：reader io.Reader 为 stdin。
-// 返回值：string 为内存中的用户 token；error 为读取失败或空 token。
-func readAccessToken(reader io.Reader) (string, error) {
-	content, err := io.ReadAll(io.LimitReader(reader, 64<<10))
-	if err != nil {
-		return "", fmt.Errorf("读取用户 access token: %w", err)
-	}
-	token := strings.TrimSpace(string(content))
-	if token == "" {
-		return "", fmt.Errorf("用户 access token 不能为空")
-	}
-	return token, nil
-}

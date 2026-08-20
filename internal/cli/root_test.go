@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ func testRuntime(t *testing.T) (*Runtime, *bytes.Buffer, *bytes.Buffer) {
 	runtime := NewRuntime(directory, strings.NewReader(""), stdout, stderr)
 	runtime.Profiles = config.NewFileStore(filepath.Join(directory, "config.json"))
 	runtime.Tokens = auth.NewFileTokenStore(filepath.Join(directory, "tokens.json"))
+	runtime.Secrets = auth.NewFileSecretStore(filepath.Join(directory, "secrets.json"))
 	return runtime, stdout, stderr
 }
 
@@ -89,26 +91,87 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if profile.AuthURL == "" {
 			t.Fatalf("environment=%s 缺少自有认证页面: %#v", test.name, profile)
 		}
+		if test.name == "test" && !profile.HasOAuthConfiguration() {
+			t.Fatalf("environment=%s 缺少 OAuth 预设: %#v", test.name, profile)
+		}
 	}
 }
 
-// TestAuthUserLoginAndUse 验证 user token 从 stdin 缓存后可切换为 Profile 默认身份。
+// TestConfigAddStoresOAuthConfiguration 验证自定义 Profile 可保存用户 OAuth 所需的非敏感配置。
+func TestConfigAddStoresOAuthConfiguration(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{
+		"config", "add", "oauth-dev",
+		"--base-url", "https://api.example.com",
+		"--token-url", "https://api.example.com/token",
+		"--app-id", "cli-oauth",
+		"--oauth-metadata-url", "https://auth.example.com/.well-known/oauth-authorization-server/contract-review",
+		"--oauth-business-type", "contract-review",
+		"--oauth-client-id", "oauth-client",
+		"--oauth-redirect-url", "http://127.0.0.1:8000/login",
+		"--oauth-scope", "contract-review:full",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := runtime.Profiles.Get("oauth-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.OAuthMetadataURL == "" || profile.OAuthBusinessType != "contract-review" || profile.OAuthClientID != "oauth-client" || profile.OAuthRedirectURL != "http://127.0.0.1:8000/login" || strings.Join(profile.OAuthScopes, " ") != "contract-review:full" {
+		t.Fatalf("profile=%#v", profile)
+	}
+}
+
+// TestConfigAddUserProfileDoesNotRequireAppID 验证 user Profile 可以只配置 OAuth 和环境信息。
+func TestConfigAddUserProfileDoesNotRequireAppID(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{
+		"config", "add", "user-dev",
+		"--env", "dev",
+		"--default-identity", "user",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := runtime.Profiles.Get("user-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.DefaultIdentity != config.IdentityUser || profile.AppID != "" {
+		t.Fatalf("profile=%#v", profile)
+	}
+}
+
+// TestConfigAddAppProfileStillRequiresAppID 验证 app Profile 仍然必须提供 app-id。
+func TestConfigAddAppProfileStillRequiresAppID(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	err := Execute(context.Background(), runtime, []string{
+		"config", "add", "app-dev",
+		"--env", "dev",
+		"--default-identity", "app",
+	})
+	if err == nil || !strings.Contains(err.Error(), "app-id 不能为空") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestAuthUserUseAndStatus 验证已缓存的 OAuth user token 可切换为 Profile 默认身份并查询状态。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
-func TestAuthUserLoginAndUse(t *testing.T) {
+func TestAuthUserUseAndStatus(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	runtime.Input = strings.NewReader("user-token\n")
 	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", AuthURL: "https://dev-contract-agent.qtech.cn", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
 	if err := runtime.Profiles.Add(profile); err != nil {
 		t.Fatal(err)
 	}
-	if err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user", "--access-token-stdin", "--output", "json"}); err != nil {
+	identityStore, ok := runtime.Tokens.(interface {
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	if !ok {
+		t.Fatal("token store 不支持 user 身份")
+	}
+	if err := identityStore.SaveForIdentity("dev", config.IdentityUser, auth.Token{AccessToken: "oauth-user-token"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"identity": "user"`) {
-		t.Fatalf("login output=%s", stdout.String())
-	}
-	stdout.Reset()
 	if err := Execute(context.Background(), runtime, []string{"auth", "use", "--as", "user", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +185,485 @@ func TestAuthUserLoginAndUse(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"authenticated": true`) {
 		t.Fatalf("status output=%s", stdout.String())
+	}
+}
+
+// TestAuthUserLoginIgnoresLegacyEnvironmentToken 验证 user 登录不再接受原始 token 环境变量。
+func TestAuthUserLoginIgnoresLegacyEnvironmentToken(t *testing.T) {
+	t.Setenv("EVERYLINE_USER_ACCESS_TOKEN", "legacy-user-token")
+	runtime, _, _ := testRuntime(t)
+	profile := config.Profile{
+		Name:            "dev",
+		BaseURL:         "https://api.example.com",
+		AuthURL:         "https://dev-contract-agent.qtech.cn",
+		TokenURL:        "https://api.example.com/token",
+		AppID:           "app",
+		DefaultIdentity: config.IdentityUser,
+		DefaultOutput:   "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user"})
+	if err == nil || !strings.Contains(err.Error(), "OAuth") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestAuthUserRejectsRemovedAccessTokenStdin 验证已删除的 user raw token flag 不再被命令接受。
+func TestAuthUserRejectsRemovedAccessTokenStdin(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", AuthURL: "https://dev-contract-agent.qtech.cn", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user", "--access-token-stdin"})
+	if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestAuthStatusIgnoresLegacyEnvironmentToken 验证 user 状态不再把原始 token 环境变量报告为已认证。
+func TestAuthStatusIgnoresLegacyEnvironmentToken(t *testing.T) {
+	t.Setenv("EVERYLINE_USER_ACCESS_TOKEN", "legacy-user-token")
+	runtime, stdout, _ := testRuntime(t)
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", AuthURL: "https://dev-contract-agent.qtech.cn", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--as", "user", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "legacy-user-token") || strings.Contains(stdout.String(), `"authenticated": true`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestAuthAppLoginAcceptsCredentialFlagsAndPersistsAppID 验证 app 登录支持直接传入 app-id/app-secret，且成功后保存非敏感 app-id。
+func TestAuthAppLoginAcceptsCredentialFlagsAndPersistsAppID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["appId"] != "flag-app" || body["appSecret"] != "flag-secret" {
+			t.Fatalf("token body=%#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"flag-token","expire":7200}`))
+	}))
+	defer server.Close()
+
+	runtime, stdout, stderr := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "old-app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), runtime, []string{
+		"auth", "login", "--as", "app", "--app-id", "flag-app", "--app-secret", "flag-secret", "--output", "json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "flag-secret") || strings.Contains(stderr.String(), "flag-secret") {
+		t.Fatalf("secret leaked to output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	updated, err := runtime.Profiles.Get("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AppID != "flag-app" {
+		t.Fatalf("app id=%q, want flag-app", updated.AppID)
+	}
+	token, err := runtime.Tokens.Load("dev")
+	if err != nil || token.AccessToken != "flag-token" {
+		t.Fatalf("token=%#v err=%v", token, err)
+	}
+}
+
+// TestAuthAppLoginResolvesProfileSpecificEnvironmentAppID 验证 app-id 支持 Profile 专用环境变量，并优先于 Profile 中的旧值。
+func TestAuthAppLoginResolvesProfileSpecificEnvironmentAppID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["appId"] != "env-app" || body["appSecret"] != "env-secret" {
+			t.Fatalf("token body=%#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"env-token","expire":7200}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("EVERYLINE_APP_ID_DEV_2DEU", "env-app")
+	t.Setenv("EVERYLINE_APP_SECRET_PROD_2DEU", "wrong-secret")
+	t.Setenv("EVERYLINE_APP_SECRET_DEV_2DEU", "env-secret")
+	runtime, _, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "dev-eu", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "old-app", DefaultIdentity: config.IdentityApp, DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "app"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAuthAppLoginRejectsConflictingSecretInputs 验证 app-secret flag 与 stdin 输入不能同时使用。
+func TestAuthAppLoginRejectsConflictingSecretInputs(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	err := Execute(context.Background(), runtime, []string{
+		"auth", "login", "--as", "app", "--app-secret", "flag-secret", "--app-secret-stdin",
+	})
+	if err == nil || !strings.Contains(err.Error(), "只能选择一个") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestAuthUserLoginRejectsAppCredentialFlags 验证 user 登录不会静默接受 app 专用参数。
+func TestAuthUserLoginRejectsAppCredentialFlags(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", AuthURL: "https://auth.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user", "--app-id", "app"})
+	if err == nil || !strings.Contains(err.Error(), "user 身份不能使用 app 凭证") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestAuthUserLoginRequiresOAuthConfiguration 验证缺少 OAuth 配置时返回可操作的配置错误。
+func TestAuthUserLoginRequiresOAuthConfiguration(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	profile := config.Profile{
+		Name:            "dev",
+		BaseURL:         "https://api.example.com",
+		AuthURL:         "https://auth.example.com",
+		TokenURL:        "https://api.example.com/token",
+		AppID:           "app",
+		DefaultIdentity: config.IdentityUser,
+		DefaultOutput:   "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user"})
+	if err == nil || !strings.Contains(err.Error(), "OAuth") || !strings.Contains(err.Error(), "https://auth.example.com") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestAuthUserLoginUsesBrowserOAuth 验证 user 登录会打开 PKCE 授权链接、接收 loopback callback 并缓存 token。
+func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
+	callbackListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackPort := callbackListener.Addr().(*net.TCPAddr).Port
+	_ = callbackListener.Close()
+
+	var tokenRequest url.Values
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/metadata":
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","code_challenge_methods_supported":["S256"]}`))
+		case "/token":
+			if err := request.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			tokenRequest = request.Form
+			_, _ = writer.Write([]byte(`{"access_token":"oauth-token","token_type":"Bearer","expires_in":3600,"refresh_token":"refresh-token","scope":"contract-review:full"}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	runtime, stdout, stderr := testRuntime(t)
+	runtime.HTTP = server.Client()
+	runtime.OpenBrowser = func(authorizationURL string) error {
+		parsed, err := url.Parse(authorizationURL)
+		if err != nil {
+			return err
+		}
+		redirectURL, err := url.Parse(parsed.Query().Get("redirect_uri"))
+		if err != nil {
+			return err
+		}
+		query := redirectURL.Query()
+		query.Set("code", "authorization-code")
+		query.Set("state", parsed.Query().Get("state"))
+		redirectURL.RawQuery = query.Encode()
+		go func() {
+			response, requestErr := http.Get(redirectURL.String())
+			if requestErr == nil {
+				_ = response.Body.Close()
+			}
+		}()
+		return nil
+	}
+	profile := config.Profile{
+		Name:              "dev",
+		BaseURL:           "https://api.example.com",
+		AuthURL:           "https://auth.example.com",
+		TokenURL:          "https://api.example.com/token",
+		OAuthMetadataURL:  server.URL + "/metadata",
+		OAuthBusinessType: "contract-review",
+		OAuthClientID:     "oauth-client",
+		OAuthRedirectURL:  fmt.Sprintf("http://127.0.0.1:%d/login", callbackPort),
+		OAuthScopes:       []string{"contract-review:full"},
+		DefaultIdentity:   config.IdentityUser,
+		DefaultOutput:     "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if tokenRequest.Get("code") != "authorization-code" || tokenRequest.Get("client_id") != "oauth-client" || tokenRequest.Get("grant_type") != "authorization_code" {
+		t.Fatalf("token request=%v", tokenRequest)
+	}
+	if tokenRequest.Get("code_verifier") == "" || tokenRequest.Get("redirect_uri") != profile.OAuthRedirectURL {
+		t.Fatalf("token request=%v", tokenRequest)
+	}
+	if !strings.Contains(stderr.String(), "请在浏览器中完成用户授权") || !strings.Contains(stderr.String(), "code_challenge") {
+		t.Fatalf("stderr=%s", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "oauth-token") || strings.Contains(stderr.String(), "oauth-token") {
+		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	identityStore := runtime.Tokens.(interface {
+		LoadForIdentity(string, config.IdentityKind) (auth.Token, error)
+	})
+	cached, err := identityStore.LoadForIdentity("dev", config.IdentityUser)
+	if err != nil || cached.AccessToken != "oauth-token" || cached.RefreshToken != "refresh-token" {
+		t.Fatalf("cached=%#v err=%v", cached, err)
+	}
+}
+
+// TestAuthAppLoginFailureDoesNotPersistFlagAppID 验证 token 交换失败时不污染 Profile 中原有 app-id。
+func TestAuthAppLoginFailureDoesNotPersistFlagAppID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(`{"code":999,"msg":"invalid app"}`))
+	}))
+	defer server.Close()
+
+	runtime, _, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "old-app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	err := Execute(context.Background(), runtime, []string{
+		"auth", "login", "--as", "app", "--app-id", "new-app", "--app-secret", "secret",
+	})
+	if err == nil || !strings.Contains(err.Error(), "code=999") {
+		t.Fatalf("err=%v", err)
+	}
+	unchanged, err := runtime.Profiles.Get("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.AppID != "old-app" {
+		t.Fatalf("app id=%q, want old-app", unchanged.AppID)
+	}
+}
+
+// TestAuthAppLoginExplicitlySavesSecret 验证只有显式 --save-app-secret 且授权成功后才写入本地 secret 文件。
+func TestAuthAppLoginExplicitlySavesSecret(t *testing.T) {
+	t.Setenv("EVERYLINE_APP_SECRET", "")
+	t.Setenv("EVERYLINE_APP_SECRET_DEV_2DEU", "")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["appId"] != "app" || body["appSecret"] != "saved-secret" {
+			t.Fatalf("token body=%#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"saved-token","expire":7200}`))
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runtime := NewRuntime(directory, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	runtime.Secrets = auth.NewFileSecretStore(filepath.Join(directory, "secrets.json"))
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout := runtime.Output.(*bytes.Buffer)
+	stderr := runtime.Error.(*bytes.Buffer)
+	if err := Execute(context.Background(), runtime, []string{
+		"auth", "login", "--as", "app", "--app-secret", "saved-secret", "--save-app-secret", "--output", "json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "saved-secret") || strings.Contains(stderr.String(), "saved-secret") {
+		t.Fatalf("secret leaked to output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	content, err := os.ReadFile(filepath.Join(directory, "secrets.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored struct {
+		AppSecrets map[string]string `json:"app_secrets"`
+	}
+	if err := json.Unmarshal(content, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.AppSecrets["dev"] != "saved-secret" {
+		t.Fatalf("stored secrets=%#v", stored.AppSecrets)
+	}
+	secretInfo, err := os.Stat(filepath.Join(directory, "secrets.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secretInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("secret file mode=%o, want 600", secretInfo.Mode().Perm())
+	}
+	if configInfo, err := os.Stat(directory); err != nil {
+		t.Fatal(err)
+	} else if configInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("config directory mode=%o, want 700", configInfo.Mode().Perm())
+	}
+	for _, path := range []string{"config.json", "tokens.json"} {
+		content, readErr := os.ReadFile(filepath.Join(directory, path))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if strings.Contains(string(content), "saved-secret") {
+			t.Fatalf("secret leaked to %s: %s", path, content)
+		}
+	}
+}
+
+// TestAuthAppLoginUsesSavedSecret 验证没有当前进程凭证时，app 登录会复用当前 Profile 的本地 secret。
+func TestAuthAppLoginUsesSavedSecret(t *testing.T) {
+	t.Setenv("EVERYLINE_APP_SECRET", "")
+	t.Setenv("EVERYLINE_APP_SECRET_DEV_2DEU", "")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["appSecret"] != "stored-secret" {
+			t.Fatalf("token body=%#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"stored-token","expire":7200}`))
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "secrets.json"), []byte(`{"app_secrets":{"dev":"stored-secret"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := NewRuntime(directory, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	runtime.Secrets = auth.NewFileSecretStore(filepath.Join(directory, "secrets.json"))
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "app"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAuthAppLoginFailureDoesNotSaveSecret 验证 token endpoint 失败时 --save-app-secret 不创建本地 secret 文件。
+func TestAuthAppLoginFailureDoesNotSaveSecret(t *testing.T) {
+	t.Setenv("EVERYLINE_APP_SECRET", "")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(`{"code":999,"msg":"invalid app"}`))
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runtime := NewRuntime(directory, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	runtime.Secrets = auth.NewFileSecretStore(filepath.Join(directory, "secrets.json"))
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute(context.Background(), runtime, []string{
+		"auth", "login", "--as", "app", "--app-secret", "new-secret", "--save-app-secret",
+	})
+	if err == nil || !strings.Contains(err.Error(), "code=999") {
+		t.Fatalf("err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "secrets.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("secret file should not exist, stat err=%v", err)
+	}
+}
+
+// TestAuthUserLoginRejectsSaveAppSecret 验证 user 身份不能使用 app secret 持久化开关，也不会发起网络请求。
+func TestAuthUserLoginRejectsSaveAppSecret(t *testing.T) {
+	directory := t.TempDir()
+	runtime := NewRuntime(directory, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	runtime.Secrets = auth.NewFileSecretStore(filepath.Join(directory, "secrets.json"))
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		writer.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	runtime.HTTP = server.Client()
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", AuthURL: "https://auth.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user", "--save-app-secret"})
+	if err == nil || !strings.Contains(err.Error(), "user 身份") {
+		t.Fatalf("err=%v", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("unexpected request count=%d", requestCount)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "secrets.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("secret file should not exist, stat err=%v", err)
+	}
+}
+
+// TestAuthStatusReportsSavedSecretWithoutValue 验证 status 只报告本地 secret 是否存在，不泄漏 secret 内容。
+func TestAuthStatusReportsSavedSecretWithoutValue(t *testing.T) {
+	t.Setenv("EVERYLINE_APP_SECRET", "")
+	t.Setenv("EVERYLINE_APP_SECRET_DEV_2DEU", "")
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "secrets.json"), []byte(`{"app_secrets":{"dev":"status-secret"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime := NewRuntime(directory, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	runtime.Secrets = auth.NewFileSecretStore(filepath.Join(directory, "secrets.json"))
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--as", "app", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	stdout := runtime.Output.(*bytes.Buffer)
+	if !strings.Contains(stdout.String(), `"appSecretConfigured": true`) {
+		t.Fatalf("status output=%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "status-secret") {
+		t.Fatalf("secret leaked to status: %s", stdout.String())
 	}
 }
 
@@ -170,6 +712,64 @@ func TestAuthStatusTrimsEnvironmentToken(t *testing.T) {
 	}
 }
 
+// TestAuthStatusUnknownExpiryDoesNotRenderFakeTime 验证未知过期的 token 不输出零时间或虚构剩余时长。
+func TestAuthStatusUnknownExpiryDoesNotRenderFakeTime(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	if identityStore, ok := runtime.Tokens.(interface {
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	}); ok {
+		if err := identityStore.SaveForIdentity("dev", config.IdentityUser, auth.Token{AccessToken: "user-token"}); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		t.Fatal("test token store 不支持 user 身份")
+	}
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--as", "user", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"authenticated": true`) || !strings.Contains(stdout.String(), `"expiresKnown": false`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "expiresAt") || strings.Contains(stdout.String(), "expiresInSeconds") || strings.Contains(stdout.String(), "0001-01-01") {
+		t.Fatalf("stdout contains fake expiry: %s", stdout.String())
+	}
+}
+
+// TestAuthStatusKnownExpiryReportsServerTime 验证已知过期 token 的 status 输出服务端生命周期和真实剩余时间。
+func TestAuthStatusKnownExpiryReportsServerTime(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	fixedNow := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	runtime.Now = func() time.Time { return fixedNow }
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	identityStore, ok := runtime.Tokens.(interface {
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	if !ok {
+		t.Fatal("test token store 不支持 user 身份")
+	}
+	if err := identityStore.SaveForIdentity("dev", config.IdentityUser, auth.Token{
+		AccessToken: "user-token",
+		ExpiresAt:   fixedNow.Add(2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--as", "user", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"authenticated": true`, `"expiresKnown": true`, `"expiresInSeconds": 7200`, `"2026-08-20T12:00:00Z"`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("stdout 缺少 %q: %s", expected, stdout.String())
+		}
+	}
+}
+
 // TestAuthLoginHonorsRootTimeout 验证 auth login 的网络请求受 --timeout 约束。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -205,13 +805,36 @@ func TestAuthLoginHonorsRootTimeout(t *testing.T) {
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestReviewStartDryRun(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run", "--output", "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"fileId": "12"`) || !strings.Contains(stdout.String(), `"config": {}`) {
+	if !strings.Contains(stdout.String(), `"fileId": "12"`) || !strings.Contains(stdout.String(), `"selectedPosition": "甲方"`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewStartRejectsRemovedOptionalField 验证 start CLI 契约不接受未纳入 CLI 的可选字段。
+func TestReviewStartRejectsRemovedOptionalField(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"appType":"THIRD_PARTY"}`
+	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run", "--output", "json"})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("err=%v stdout=%s", err, stdout.String())
+	}
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("exit=%d err=%v", ExitCode(err), err)
+	}
+}
+
+// TestReviewStartRequiresConfigFields 验证 start CLI 要求 API 文档定义的 config 必填字段。
+func TestReviewStartRequiresConfigFields(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{}}`
+	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
+	if err == nil || !strings.Contains(err.Error(), "selectedPosition") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -229,8 +852,47 @@ func TestReviewSubjectExtractDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"fileId": "12"`) {
+	if !strings.Contains(stdout.String(), `"fileId": "12"`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewFileUploadDryRunOmitsOptionalAppType 验证本地上传不再强制输出 appType。
+func TestReviewFileUploadDryRunOmitsOptionalAppType(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	filePath := filepath.Join(t.TempDir(), "contract.pdf")
+	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), runtime, []string{
+		"review", "file", "upload", "--file", filePath, "--name", "合同.pdf", "--dry-run", "--output", "json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), `"appType"`) || strings.Contains(stdout.String(), `"businessId"`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewFileUploadRejectsRemovedAppTypeFlag 验证旧 app-type flag 在参数解析阶段即被拒绝。
+func TestReviewFileUploadRejectsRemovedAppTypeFlag(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	err := Execute(context.Background(), runtime, []string{
+		"review", "file", "upload", "--file", "missing.pdf", "--name", "合同.pdf", "--app-type", "CLM",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestReviewFileUploadRejectsRemovedBusinessIDFlag 验证上传命令已删除的 business-id flag 在参数解析阶段被拒绝。
+func TestReviewFileUploadRejectsRemovedBusinessIDFlag(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	err := Execute(context.Background(), runtime, []string{
+		"review", "file", "upload", "--file", "missing.pdf", "--name", "合同.pdf", "--business-id", "biz-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -239,7 +901,7 @@ func TestReviewSubjectExtractDryRun(t *testing.T) {
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestReviewStartRejectsUnknownField(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{},"typo":true}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"typo":true}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("err=%v", err)
@@ -254,7 +916,7 @@ func TestReviewStartRejectsUnknownField(t *testing.T) {
 // 返回值：无；字段出现在 CLI 请求时通过未知字段错误阻断。
 func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","appType":"THIRD_PARTY","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","usageReportContext":{}}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"usageReportContext":{}}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("err=%v", err)
@@ -264,12 +926,22 @@ func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 // TestReviewRunURLDryRunDefaultsConfig 验证 URL 工作流的身份字段和默认配置在 CLI 层可见。
 func TestReviewRunURLDryRunDefaultsConfig(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`
+	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"config": {}`) {
+	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"selectedAuditRole": "甲方"`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewRunRejectsRemovedOptionalField 验证 review run 不接受已排除的发起审查可选字段。
+func TestReviewRunRejectsRemovedOptionalField(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"appType":"THIRD_PARTY"}`
+	err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run"})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -475,11 +1147,11 @@ func TestReviewRunDryRunValidatesLocalFile(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.PDF"},"config":{},"wait":true}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.PDF"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"wait":true}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"appType": "THIRD_PARTY"`) {
+	if strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
@@ -491,7 +1163,7 @@ func TestReviewRunDryRunAllowsExtensionlessLocalPath(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{}}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +1200,7 @@ func TestReviewRunRendersPartialResultOnFailure(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"businessId":"biz-1","appType":"THIRD_PARTY","wait":true}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"businessId":"biz-1","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"wait":true}`
 	err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--interval", "1ms", "--deadline", "1s", "--output", "json"})
 	if !errors.Is(err, review.ErrTaskFailed) {
 		t.Fatalf("err=%v", err)
@@ -548,6 +1220,9 @@ func TestReviewTaskResultPollsAndRendersInfo(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/open-apis/contract-review/v3/smartAudit/task/status":
+			if request.URL.Query().Get("appType") != "" || request.URL.Query().Get("visibilityScope") != review.VisibilityScopeContractResult {
+				t.Errorf("status query=%s", request.URL.RawQuery)
+			}
 			statusCalls++
 			if statusCalls == 1 {
 				_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"running"}}`))
@@ -555,6 +1230,9 @@ func TestReviewTaskResultPollsAndRendersInfo(t *testing.T) {
 			}
 			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"success"}}`))
 		case "/open-apis/contract-review/v3/smartAudit/task/info":
+			if request.URL.Query().Get("appType") != "" || request.URL.Query().Get("visibilityScope") != review.VisibilityScopeContractResult {
+				t.Errorf("info query=%s", request.URL.RawQuery)
+			}
 			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"success","result":{"riskCount":0}}}`))
 		default:
 			http.NotFound(writer, request)
@@ -562,7 +1240,7 @@ func TestReviewTaskResultPollsAndRendersInfo(t *testing.T) {
 	}))
 	defer server.Close()
 	t.Setenv("EVERYLINE_ACCESS_TOKEN", "test-token")
-	runtime, stdout, _ := testRuntime(t)
+	runtime, stdout, stderr := testRuntime(t)
 	runtime.HTTP = server.Client()
 	profile := config.Profile{Name: "local", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app", DefaultOutput: "json"}
 	if err := runtime.Profiles.Add(profile); err != nil {
@@ -571,7 +1249,7 @@ func TestReviewTaskResultPollsAndRendersInfo(t *testing.T) {
 
 	err := Execute(context.Background(), runtime, []string{
 		"review", "task", "result", "--task-id", "88", "--business-id", "biz-1",
-		"--app-type", "CLM", "--visibility-scope", "contractResult",
+		"--visibility-scope", "contractResult",
 		"--interval", "1ms", "--deadline", "1s", "--output", "json",
 	})
 	if err != nil {
@@ -583,6 +1261,11 @@ func TestReviewTaskResultPollsAndRendersInfo(t *testing.T) {
 	for _, expected := range []string{`"status": "success"`, `"riskCount": 0`} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
+		}
+	}
+	for _, expected := range []string{"status=running", "status=success"} {
+		if !strings.Contains(stderr.String(), expected) {
+			t.Fatalf("stderr=%s，缺少轮询状态 %s", stderr.String(), expected)
 		}
 	}
 }

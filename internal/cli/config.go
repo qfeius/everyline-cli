@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 
@@ -18,10 +19,10 @@ func newConfigCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		Short: "管理多环境 Profile",
 		Long: `管理多环境 Profile。
 
-		Profile 保存环境地址、应用 ID、默认身份和默认输出格式，不保存 app secret 或 access token。`,
+		Profile 保存环境地址、可选的 app ID、默认身份和默认输出格式，不保存 app secret 或 access token。`,
 	}
 	withNotes(command,
-		"Profile 保存环境地址、应用 ID、默认身份和默认输出格式。",
+		"Profile 保存环境地址、可选的 app ID、默认身份和默认输出格式。",
 		"Profile 不保存 app secret 或 access token。",
 		"config use 会修改当前默认 Profile。",
 	)
@@ -43,13 +44,18 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var authURL string
 	var tokenURL string
 	var appID string
+	var oauthMetadataURL string
+	var oauthBusinessType string
+	var oauthClientID string
+	var oauthRedirectURL string
+	var oauthScopes []string
 	var userBaseURL string
 	var defaultIdentity string
 	var defaultOutput string
 	command := &cobra.Command{
 		Use:   "add <name>",
 		Short: "新增或更新 Profile",
-		Long:  "新增或更新 Profile。使用 --env 创建预设环境配置，或同时提供 --base-url 和 --token-url。",
+		Long:  "新增或更新 Profile。使用 --env 创建预设环境配置，或同时提供 --base-url 和 --token-url；默认身份为 app 时必须提供 app-id，user 身份可省略。",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
 			if environment != "" {
@@ -66,19 +72,39 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 					authURL = preset.AuthURL
 				}
 				tokenURL = preset.TokenURL
+				if !command.Flags().Changed("oauth-metadata-url") {
+					oauthMetadataURL = preset.OAuthMetadataURL
+				}
+				if !command.Flags().Changed("oauth-business-type") {
+					oauthBusinessType = preset.OAuthBusinessType
+				}
+				if !command.Flags().Changed("oauth-client-id") {
+					oauthClientID = preset.OAuthClientID
+				}
+				if !command.Flags().Changed("oauth-redirect-url") {
+					oauthRedirectURL = preset.OAuthRedirectURL
+				}
+				if !command.Flags().Changed("oauth-scope") {
+					oauthScopes = slices.Clone(preset.OAuthScopes)
+				}
 			}
 			if baseURL == "" || tokenURL == "" {
 				return fmt.Errorf("必须指定 --env，或同时指定 --base-url 和 --token-url")
 			}
 			profile := config.Profile{
-				Name:            args[0],
-				BaseURL:         baseURL,
-				UserBaseURL:     userBaseURL,
-				AuthURL:         authURL,
-				TokenURL:        tokenURL,
-				AppID:           appID,
-				DefaultIdentity: config.IdentityApp,
-				DefaultOutput:   defaultOutput,
+				Name:              args[0],
+				BaseURL:           baseURL,
+				UserBaseURL:       userBaseURL,
+				AuthURL:           authURL,
+				TokenURL:          tokenURL,
+				AppID:             appID,
+				OAuthMetadataURL:  oauthMetadataURL,
+				OAuthBusinessType: oauthBusinessType,
+				OAuthClientID:     oauthClientID,
+				OAuthRedirectURL:  oauthRedirectURL,
+				OAuthScopes:       oauthScopes,
+				DefaultIdentity:   config.IdentityApp,
+				DefaultOutput:     defaultOutput,
 			}
 			if existing, existingErr := runtime.Profiles.Get(profile.Name); existingErr == nil {
 				profile.DefaultIdentity = existing.DefaultIdentity
@@ -87,6 +113,21 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				}
 				if profile.AuthURL == "" {
 					profile.AuthURL = existing.AuthURL
+				}
+				if profile.OAuthMetadataURL == "" {
+					profile.OAuthMetadataURL = existing.OAuthMetadataURL
+				}
+				if profile.OAuthBusinessType == "" {
+					profile.OAuthBusinessType = existing.OAuthBusinessType
+				}
+				if profile.OAuthClientID == "" {
+					profile.OAuthClientID = existing.OAuthClientID
+				}
+				if profile.OAuthRedirectURL == "" {
+					profile.OAuthRedirectURL = existing.OAuthRedirectURL
+				}
+				if len(profile.OAuthScopes) == 0 {
+					profile.OAuthScopes = slices.Clone(existing.OAuthScopes)
 				}
 			} else if !errors.Is(existingErr, config.ErrProfileNotFound) {
 				return existingErr
@@ -98,7 +139,7 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				}
 				profile.DefaultIdentity = identity
 			}
-			if err := profile.Validate(); err != nil {
+			if err := profile.ValidateForIdentity(profile.DefaultIdentity); err != nil {
 				return err
 			}
 			// 同名 Profile 切换了凭据身份时，先清除旧 token，避免把它发送给新环境。
@@ -122,10 +163,14 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().StringVar(&userBaseURL, "user-base-url", "", "用户身份业务基础 URL；为空时复用 base-url")
 	command.Flags().StringVar(&authURL, "auth-url", "", "智审用户认证页面基础 URL")
 	command.Flags().StringVar(&tokenURL, "token-url", "", "tenant token 完整 URL")
-	command.Flags().StringVar(&appID, "app-id", "", "开放平台 app ID")
+	command.Flags().StringVar(&appID, "app-id", "", "开放平台 app ID；app 身份必需，user 身份可省略")
+	command.Flags().StringVar(&oauthMetadataURL, "oauth-metadata-url", "", "用户 OAuth authorization server metadata URL")
+	command.Flags().StringVar(&oauthBusinessType, "oauth-business-type", "", "用户 OAuth business type")
+	command.Flags().StringVar(&oauthClientID, "oauth-client-id", "", "用户 OAuth public client ID")
+	command.Flags().StringVar(&oauthRedirectURL, "oauth-redirect-url", "", "用户 OAuth loopback 回调 URL")
+	command.Flags().StringSliceVar(&oauthScopes, "oauth-scope", nil, "用户 OAuth scope，可重复传入")
 	command.Flags().StringVar(&defaultIdentity, "default-identity", "", "默认业务身份：app|user")
 	command.Flags().StringVar(&defaultOutput, "default-output", "table", "默认输出格式")
-	_ = command.MarkFlagRequired("app-id")
 	return command
 }
 
@@ -133,7 +178,9 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 // 入参：before/after config.Profile 分别为现有与新配置。
 // 返回值：bool，app/user 业务基址、token 地址或 app ID 任一变化时为 true。
 func profileCredentialIdentityChanged(before config.Profile, after config.Profile) bool {
-	return before.BaseURL != after.BaseURL || before.UserBaseURL != after.UserBaseURL || before.TokenURL != after.TokenURL || before.AppID != after.AppID
+	return before.BaseURL != after.BaseURL || before.UserBaseURL != after.UserBaseURL || before.TokenURL != after.TokenURL || before.AppID != after.AppID ||
+		before.OAuthMetadataURL != after.OAuthMetadataURL || before.OAuthBusinessType != after.OAuthBusinessType || before.OAuthClientID != after.OAuthClientID ||
+		before.OAuthRedirectURL != after.OAuthRedirectURL || !slices.Equal(before.OAuthScopes, after.OAuthScopes)
 }
 
 // deleteProfileTokens 清理 Profile 下 app/user 两套 token，防止连接配置更新后残留旧身份凭证。

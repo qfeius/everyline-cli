@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -37,6 +38,159 @@ func TestHelpExplainsReviewTaskResultIsLocalOrchestration(t *testing.T) {
 	}
 }
 
+func TestHelpExplainsReviewStartInputContract(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+
+	help := stdout.String()
+	for _, expected := range []string{
+		"businessId string（必填）",
+		"fileId integer（必填）",
+		"fileHash string（必填，使用上传接口返回值）",
+		"config.selectedPosition string（必填）",
+		"config.selectedAuditRole string（必填）",
+		"config.reviewStrength integer（必填，0|1|2）",
+		"config.selectedCheckListIds array<string>（可选）",
+		"config.matchContractTypeRulePackage boolean（可选）",
+		`selectedCheckListIds":["2001001"]`,
+		`matchContractTypeRulePackage":true`,
+		"--data '{",
+	} {
+		if !strings.Contains(help, expected) {
+			t.Fatalf("review task start 帮助缺少 %q: %s", expected, help)
+		}
+	}
+	for _, unexpected := range []string{"appType", "triggerScene", "reviewRules", "auditerName"} {
+		if strings.Contains(help, unexpected) {
+			t.Fatalf("review task start 帮助不应出现 %q: %s", unexpected, help)
+		}
+	}
+}
+
+func TestHelpExplainsReviewRunInputContract(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{"review", "run", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+
+	help := stdout.String()
+	for _, expected := range []string{
+		"source object（必填）",
+		"config object（必填）",
+		"config.selectedPosition",
+		"config.selectedAuditRole",
+		"config.reviewStrength",
+		"config.selectedCheckListIds array<string>（可选）",
+		"config.matchContractTypeRulePackage boolean（可选）",
+		`selectedCheckListIds":["2001001"]`,
+		`matchContractTypeRulePackage":true`,
+		"fileHash 使用上传接口返回值",
+	} {
+		if !strings.Contains(help, expected) {
+			t.Fatalf("review run 帮助缺少 %q: %s", expected, help)
+		}
+	}
+	if strings.Contains(help, "appType") {
+		t.Fatalf("review run 帮助不应出现 appType: %s", help)
+	}
+}
+
+// TestReviewHelpDoesNotExposeAppTypeFlag 验证 app-type 已从所有相关命令的 CLI 参数中移除。
+func TestReviewHelpDoesNotExposeAppTypeFlag(t *testing.T) {
+	tests := [][]string{
+		{"review", "file", "upload", "--help"},
+		{"review", "subject", "extract", "--help"},
+		{"review", "task", "status", "--help"},
+		{"review", "task", "info", "--help"},
+		{"review", "task", "result", "--help"},
+	}
+
+	for _, args := range tests {
+		runtime, stdout, _ := testRuntime(t)
+		if err := Execute(context.Background(), runtime, args); err != nil {
+			t.Fatalf("args=%v err=%v", args, err)
+		}
+		if strings.Contains(stdout.String(), "app-type") {
+			t.Fatalf("args=%v 帮助不应出现 app-type: %s", args, stdout.String())
+		}
+	}
+}
+
+// TestReviewFileUploadHelpDoesNotExposeBusinessIDFlag 验证本地上传命令不再暴露无效的业务对象参数。
+func TestReviewFileUploadHelpDoesNotExposeBusinessIDFlag(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{"review", "file", "upload", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+
+	help := stdout.String()
+	if strings.Contains(help, "--business-id") {
+		t.Fatalf("review file upload 帮助不应出现 business-id: %s", help)
+	}
+	for _, expected := range []string{"--file", "--name", "--dry-run", "--print-input"} {
+		if !strings.Contains(help, expected) {
+			t.Fatalf("review file upload 帮助缺少 %q: %s", expected, help)
+		}
+	}
+}
+
+// TestReviewBusinessIDFlagsKeepContractBoundaries 验证仍有契约依据的命令继续保留 business-id。
+func TestReviewBusinessIDFlagsKeepContractBoundaries(t *testing.T) {
+	tests := []struct {
+		args            []string
+		shouldBePresent bool
+	}{
+		{args: []string{"review", "file", "upload", "--help"}, shouldBePresent: false},
+		{args: []string{"review", "subject", "extract", "--help"}, shouldBePresent: true},
+		{args: []string{"review", "task", "status", "--help"}, shouldBePresent: true},
+		{args: []string{"review", "task", "info", "--help"}, shouldBePresent: true},
+		{args: []string{"review", "task", "result", "--help"}, shouldBePresent: true},
+	}
+	for _, test := range tests {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			runtime, stdout, _ := testRuntime(t)
+			if err := Execute(context.Background(), runtime, test.args); err != nil {
+				t.Fatalf("args=%v err=%v", test.args, err)
+			}
+			present := strings.Contains(stdout.String(), "--business-id")
+			if present != test.shouldBePresent {
+				t.Fatalf("args=%v business-id present=%v, help=%s", test.args, present, stdout.String())
+			}
+		})
+	}
+}
+
+// TestCommandReferenceDoesNotExposeAppTypeFlag 验证命令参考中的 CLI 语法与参数实现保持一致。
+func TestCommandReferenceDoesNotExposeAppTypeFlag(t *testing.T) {
+	content, err := os.ReadFile("../../docs/command-reference.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, legacySyntax := range []string{
+		"review file upload --file --name [--app-type]",
+		"review file upload --file --name [--business-id] [--dry-run|--print-input]",
+		"review subject extract --business-id --app-type --file-id",
+		"review task status --task-id [--business-id] [--app-type]",
+		"review task info --task-id [--business-id] [--app-type]",
+		"review task result --task-id [--business-id] [--app-type]",
+	} {
+		if strings.Contains(text, legacySyntax) {
+			t.Fatalf("命令参考不应保留旧语法 %q", legacySyntax)
+		}
+	}
+	for _, expectedSyntax := range []string{
+		"review file upload --file --name [--dry-run|--print-input]",
+		"checklist list [--name] [--review-stage] [--contract-category] [--start-time] [--end-time] [--enabled] [--create-employee-id] [--update-employee-id] [--sort] [--page-index] [--page-size]",
+	} {
+		if !strings.Contains(text, expectedSyntax) {
+			t.Fatalf("命令参考缺少实际支持的语法 %q", expectedSyntax)
+		}
+	}
+}
+
 func TestHelpExplainsResourceBoundaries(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -65,9 +219,10 @@ func TestHelpExplainsResourceBoundaries(t *testing.T) {
 // TestHelpUsesWorkflowCommandOrder 验证命令帮助按用户流程、资源生命周期和风险顺序展示。
 func TestHelpUsesWorkflowCommandOrder(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		expected []string
+		name       string
+		args       []string
+		expected   []string
+		unexpected []string
 	}{
 		{
 			name:     "root",
@@ -130,6 +285,69 @@ func TestHelpUsesWorkflowCommandOrder(t *testing.T) {
 	}
 }
 
+// TestHelpListsDirectChildSyntaxOnly 验证 Available Commands 只展示当前命令的直属子命令名称。
+func TestHelpListsDirectChildSyntaxOnly(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		expected   []string
+		unexpected []string
+	}{
+		{
+			name: "review",
+			args: []string{"review", "--help"},
+			expected: []string{
+				"  run [flags]",
+				"  file [command] [flags]",
+				"  subject [command] [flags]",
+				"  task [command] [flags]",
+			},
+			unexpected: []string{
+				"  review run [flags]",
+				"  review file [command] [flags]",
+				"  review subject [command] [flags]",
+				"  review task [command] [flags]",
+			},
+		},
+		{
+			name: "review task",
+			args: []string{"review", "task", "--help"},
+			expected: []string{
+				"  start [flags]",
+				"  result [flags]",
+				"  status [flags]",
+				"  info [flags]",
+			},
+			unexpected: []string{
+				"  review task start [flags]",
+				"  review task result [flags]",
+				"  review task status [flags]",
+				"  review task info [flags]",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime, stdout, _ := testRuntime(t)
+			if err := Execute(context.Background(), runtime, test.args); err != nil {
+				t.Fatal(err)
+			}
+			help := stdout.String()
+			for _, expected := range test.expected {
+				if !strings.Contains(help, "\n"+expected) {
+					t.Fatalf("直属子命令展示缺少 %q: %s", expected, help)
+				}
+			}
+			for _, unexpected := range test.unexpected {
+				if strings.Contains(help, "\n"+unexpected) {
+					t.Fatalf("命令列表不应显示完整父路径 %q: %s", unexpected, help)
+				}
+			}
+		})
+	}
+}
+
 // TestHelpGroupsTopLevelCommands 验证根帮助按职责分组，同时命令路径仍保持一级顶层结构。
 func TestHelpGroupsTopLevelCommands(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
@@ -182,9 +400,10 @@ func TestHelpGroupsTopLevelCommands(t *testing.T) {
 // TestHelpRendersCommandSyntaxAndNotes 验证帮助显示完整命令语法和实现约束 Notes。
 func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		expected []string
+		name       string
+		args       []string
+		expected   []string
+		unexpected []string
 	}{
 		{
 			name: "root",
@@ -209,6 +428,24 @@ func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 			expected: []string{
 				"everyline-cli config add <name> [flags]",
 				"Profile 不保存 app secret 或 access token。",
+				"user 身份可省略",
+				"--oauth-metadata-url string",
+				"--oauth-redirect-url string",
+			},
+		},
+		{
+			name: "auth login",
+			args: []string{"auth", "login", "--help"},
+			expected: []string{
+				"everyline-cli auth login [flags]",
+				"--app-id string",
+				"--app-secret string",
+				"--app-secret-stdin",
+				"--save-app-secret",
+				"--no-open-browser",
+			},
+			unexpected: []string{
+				"--access-token-stdin",
 			},
 		},
 	}
@@ -224,8 +461,97 @@ func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 					t.Fatalf("帮助缺少 %q: %s", expected, stdout.String())
 				}
 			}
+			for _, unexpected := range test.unexpected {
+				if strings.Contains(stdout.String(), unexpected) {
+					t.Fatalf("帮助不应包含 %q: %s", unexpected, stdout.String())
+				}
+			}
 		})
 	}
+}
+
+// TestHelpPlacesCommandFlagsBeforeHelpFlag 验证命令业务 flags 连续显示在自动 help flag 之前。
+func TestHelpPlacesCommandFlagsBeforeHelpFlag(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		business  []string
+		operation []string
+	}{
+		{
+			name:      "review file upload",
+			args:      []string{"review", "file", "upload", "--help"},
+			business:  []string{"--file", "--name"},
+			operation: []string{"--dry-run", "--print-input"},
+		},
+		{
+			name:      "review task start",
+			args:      []string{"review", "task", "start", "--help"},
+			business:  []string{"--data", "--input"},
+			operation: []string{"--dry-run", "--print-input"},
+		},
+		{
+			name:     "config add",
+			args:     []string{"config", "add", "--help"},
+			business: []string{"--app-id", "--base-url", "--env", "--oauth-client-id", "--token-url"},
+		},
+		{
+			name:     "auth login",
+			args:     []string{"auth", "login", "--help"},
+			business: []string{"--app-id", "--app-secret", "--app-secret-stdin", "--no-open-browser", "--save-app-secret"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime, stdout, _ := testRuntime(t)
+			if err := Execute(context.Background(), runtime, test.args); err != nil {
+				t.Fatal(err)
+			}
+			flags := helpFlagsSection(stdout.String())
+			helpIndex := strings.Index(flags, "-h, --help")
+			if helpIndex < 0 {
+				t.Fatalf("Flags 区域缺少 help flag: %s", flags)
+			}
+			assertOrder := func(flagNames []string) {
+				previous := -1
+				for _, flagName := range flagNames {
+					current := strings.Index(flags, flagName)
+					if current < 0 {
+						t.Fatalf("Flags 区域缺少 %q: %s", flagName, flags)
+					}
+					if current > helpIndex {
+						t.Fatalf("业务 flag %q 出现在 help 之后: %s", flagName, flags)
+					}
+					if current < previous {
+						t.Fatalf("同组 flags 未保持字母序: %s", flags)
+					}
+					previous = current
+				}
+			}
+			assertOrder(test.business)
+			assertOrder(test.operation)
+			if len(test.business) > 0 && len(test.operation) > 0 && strings.Index(flags, test.business[len(test.business)-1]) > strings.Index(flags, test.operation[0]) {
+				t.Fatalf("通用操作 flags 不应出现在业务 flags 之前: %s", flags)
+			}
+			if globalIndex := strings.Index(stdout.String(), "Global Flags:"); globalIndex < strings.Index(stdout.String(), "Flags:") {
+				t.Fatalf("Global Flags 不应出现在 Flags 之前: %s", stdout.String())
+			}
+		})
+	}
+}
+
+func helpFlagsSection(help string) string {
+	start := strings.Index(help, "Flags:\n")
+	if start < 0 {
+		return ""
+	}
+	start += len("Flags:\n")
+	end := strings.Index(help[start:], "\n\nGlobal Flags:")
+	if end < 0 {
+		return help[start:]
+	}
+	return help[start : start+end]
 }
 
 func helpCommandNames(help string) []string {

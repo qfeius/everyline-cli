@@ -34,13 +34,22 @@ func (client *recordingClient) Do(_ context.Context, request openplatform.Reques
 	return openplatform.Response{Data: json.RawMessage(client.data)}, nil
 }
 
-// TestServiceStartContract 验证 startReview 的 operation、method、path 和 JSON 字段。
+// TestServiceStartContract 验证 startReview 的 operation、method、path 和必填 JSON 字段。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestServiceStartContract(t *testing.T) {
 	client := &recordingClient{data: `{"taskId":88,"status":"running"}`}
 	service := NewService(client, 5*time.Second)
-	request := StartRequest{BusinessID: "biz-1", AppType: AppTypeThirdParty, FileID: 11, FileHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TriggerScene: "manual"}
+	request := StartRequest{
+		BusinessID: "biz-1",
+		FileID:     11,
+		FileHash:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Config: map[string]any{
+			"selectedPosition":  "甲方",
+			"selectedAuditRole": "甲方",
+			"reviewStrength":    1,
+		},
+	}
 	if _, err := service.Start(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +60,24 @@ func TestServiceStartContract(t *testing.T) {
 	if err := json.Unmarshal(client.request.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["businessId"] != "biz-1" || body["appType"] != AppTypeThirdParty || body["fileId"] != "11" || body["fileHash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if body["businessId"] != "biz-1" || body["fileId"] != "11" || body["fileHash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("body=%#v", body)
+	}
+	if _, exists := body["appType"]; exists {
+		t.Fatalf("body=%#v，不应发送 appType", body)
+	}
+}
+
+// TestServiceStartRequiresReviewConfig 验证 startReview 缺少 API 必填 config 时拒绝发送请求。
+func TestServiceStartRequiresReviewConfig(t *testing.T) {
+	client := &recordingClient{data: `{"taskId":88,"status":"running"}`}
+	service := NewService(client, 5*time.Second)
+	request := StartRequest{BusinessID: "biz-1", FileID: 11, FileHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	if _, err := service.Start(context.Background(), request); err == nil || !strings.Contains(err.Error(), "selectedPosition") {
+		t.Fatalf("err=%v", err)
+	}
+	if client.request.OperationID != "" {
+		t.Fatalf("缺少 config 时不应发送请求: %#v", client.request)
 	}
 }
 
@@ -145,6 +170,18 @@ func TestServiceTaskQueryExtensions(t *testing.T) {
 	}
 }
 
+// TestServiceTaskQueryAllowsContractResultWithoutAppType 验证 contractResult 查询只依赖业务对象，不再要求 appType。
+func TestServiceTaskQueryAllowsContractResultWithoutAppType(t *testing.T) {
+	client := &recordingClient{data: `{"status":"running"}`}
+	service := NewService(client, time.Second)
+	if _, err := service.Status(context.Background(), TaskQuery{TaskID: 88, BusinessID: "biz-1", VisibilityScope: VisibilityScopeContractResult}); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.request.Query.Get("appType"); got != "" {
+		t.Fatalf("appType=%q，不应发送 appType", got)
+	}
+}
+
 // TestTaskQueriesAllowMissingBusinessID 验证后端允许仅用 taskId 查询状态和详情。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -186,7 +223,7 @@ func TestTaskQueryRejectsUnknownVisibilityScope(t *testing.T) {
 func TestTaskQueryRequiresContextForContractResult(t *testing.T) {
 	client := &recordingClient{data: `{"ok":true}`}
 	_, err := NewService(client, time.Second).Status(context.Background(), TaskQuery{TaskID: 88, VisibilityScope: VisibilityScopeContractResult})
-	if err == nil || !strings.Contains(err.Error(), "必须同时提供 business-id 和 app-type") {
+	if err == nil || !strings.Contains(err.Error(), "必须提供 business-id") {
 		t.Fatalf("err=%v", err)
 	}
 	if client.request.OperationID != "" {

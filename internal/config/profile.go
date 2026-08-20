@@ -36,17 +36,22 @@ func ParseIdentityKind(value string) (IdentityKind, error) {
 
 // Profile 保存一个智审开放平台环境的非敏感连接信息。
 type Profile struct {
-	Name            string       `json:"name" yaml:"name"`
-	BaseURL         string       `json:"base_url" yaml:"base_url"`
-	UserBaseURL     string       `json:"user_base_url,omitempty" yaml:"user_base_url,omitempty"`
-	AuthURL         string       `json:"auth_url,omitempty" yaml:"auth_url,omitempty"`
-	TokenURL        string       `json:"token_url" yaml:"token_url"`
-	AppID           string       `json:"app_id" yaml:"app_id"`
-	DefaultIdentity IdentityKind `json:"default_identity,omitempty" yaml:"default_identity,omitempty"`
-	DefaultOutput   string       `json:"default_output" yaml:"default_output"`
+	Name              string       `json:"name" yaml:"name"`
+	BaseURL           string       `json:"base_url" yaml:"base_url"`
+	UserBaseURL       string       `json:"user_base_url,omitempty" yaml:"user_base_url,omitempty"`
+	AuthURL           string       `json:"auth_url,omitempty" yaml:"auth_url,omitempty"`
+	TokenURL          string       `json:"token_url" yaml:"token_url"`
+	AppID             string       `json:"app_id" yaml:"app_id"`
+	OAuthMetadataURL  string       `json:"oauth_metadata_url,omitempty" yaml:"oauth_metadata_url,omitempty"`
+	OAuthBusinessType string       `json:"oauth_business_type,omitempty" yaml:"oauth_business_type,omitempty"`
+	OAuthClientID     string       `json:"oauth_client_id,omitempty" yaml:"oauth_client_id,omitempty"`
+	OAuthRedirectURL  string       `json:"oauth_redirect_url,omitempty" yaml:"oauth_redirect_url,omitempty"`
+	OAuthScopes       []string     `json:"oauth_scopes,omitempty" yaml:"oauth_scopes,omitempty"`
+	DefaultIdentity   IdentityKind `json:"default_identity,omitempty" yaml:"default_identity,omitempty"`
+	DefaultOutput     string       `json:"default_output" yaml:"default_output"`
 }
 
-// Validate 校验 Profile 的名称、URL、应用 ID 和默认输出格式。
+// Validate 校验 Profile 的公共字段、URL、默认身份和默认输出格式。
 // 入参：无，接收者 Profile 为待校验配置。
 // 返回值：error，配置有效时为 nil。
 func (profile Profile) Validate() error {
@@ -69,8 +74,19 @@ func (profile Profile) Validate() error {
 	if err := validateHTTPURL("token-url", profile.TokenURL); err != nil {
 		return err
 	}
-	if strings.TrimSpace(profile.AppID) == "" {
-		return fmt.Errorf("app-id 不能为空")
+	if profile.OAuthMetadataURL != "" {
+		if err := validateHTTPURL("oauth-metadata-url", profile.OAuthMetadataURL); err != nil {
+			return err
+		}
+	}
+	if profile.OAuthRedirectURL != "" {
+		if err := validateHTTPURL("oauth-redirect-url", profile.OAuthRedirectURL); err != nil {
+			return err
+		}
+		parsed, err := url.ParseRequestURI(profile.OAuthRedirectURL)
+		if err != nil || !isLoopbackHost(parsed.Hostname()) || parsed.Port() == "" || parsed.Path == "" {
+			return fmt.Errorf("oauth-redirect-url 必须指向 localhost 或回环 IP")
+		}
 	}
 	identity, err := ParseIdentityKind(string(profile.DefaultIdentity))
 	if err != nil {
@@ -86,6 +102,33 @@ func (profile Profile) Validate() error {
 	default:
 		return fmt.Errorf("default-output 必须是 json、yaml、table 或 raw")
 	}
+}
+
+// ValidateForIdentity 在公共 Profile 校验之上校验指定身份的凭证前置条件。
+// 入参：identity IdentityKind 为本次使用的业务身份。
+// 返回值：error，身份配置有效时为 nil。
+func (profile Profile) ValidateForIdentity(identity IdentityKind) error {
+	parsedIdentity, err := ParseIdentityKind(string(identity))
+	if err != nil {
+		return err
+	}
+	if err := profile.Validate(); err != nil {
+		return err
+	}
+	if parsedIdentity == IdentityApp && strings.TrimSpace(profile.AppID) == "" {
+		return fmt.Errorf("app-id 不能为空")
+	}
+	return nil
+}
+
+// HasOAuthConfiguration 判断 Profile 是否具备启动 user OAuth 所需的最小非敏感配置。
+// 入参：无，接收者 Profile 为当前环境配置。
+// 返回值：bool，metadata、业务类型、client ID 和回调地址均非空时为 true。
+func (profile Profile) HasOAuthConfiguration() bool {
+	return strings.TrimSpace(profile.OAuthMetadataURL) != "" &&
+		strings.TrimSpace(profile.OAuthBusinessType) != "" &&
+		strings.TrimSpace(profile.OAuthClientID) != "" &&
+		strings.TrimSpace(profile.OAuthRedirectURL) != ""
 }
 
 // BaseURLFor 返回指定身份的业务 API 基址；user 未单独配置时复用 app 基址。

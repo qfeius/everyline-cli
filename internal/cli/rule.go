@@ -497,7 +497,7 @@ func buildRuleService(runtime *Runtime, root *rootOptions) (*rule.Service, confi
 	if err != nil {
 		return nil, config.Profile{}, err
 	}
-	provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now)
+	provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now, runtime.Secrets)
 	client := openplatform.NewClientForIdentity(profile, provider, runtime.HTTP, identity)
 	return rule.NewService(client, root.Timeout), profile, nil
 }

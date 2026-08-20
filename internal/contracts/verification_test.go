@@ -60,7 +60,7 @@ func validContractInput(schema string) any {
 	case "review-subject.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1"}
 	case "review-start.schema.json":
-		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{}}
+		return map[string]any{"businessId": "biz", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{"selectedPosition": "甲方", "selectedAuditRole": "甲方", "reviewStrength": 1}}
 	case "review-task-query.schema.json":
 		return map[string]any{"taskId": 1, "businessId": "biz"}
 	case "checklist.schema.json":
@@ -126,11 +126,50 @@ func TestTaskQuerySchemaAllowsOptionalContext(t *testing.T) {
 	}
 }
 
-// TestStartSchemaAllowsDefaultConfig 验证发起接口可省略配置，CLI 会在发送前补为空对象。
-func TestStartSchemaAllowsDefaultConfig(t *testing.T) {
-	input := map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+// TestStartSchemaRequiresReviewConfig 验证发起接口要求 config 及其三个必填字段。
+func TestStartSchemaRequiresReviewConfig(t *testing.T) {
+	input := map[string]any{
+		"businessId": "biz",
+		"fileId":     "1",
+		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"config": map[string]any{
+			"selectedPosition":  "甲方",
+			"selectedAuditRole": "甲方",
+			"reviewStrength":    1,
+		},
+	}
 	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); err != nil {
 		t.Fatal(err)
+	}
+	for _, missing := range []string{"selectedPosition", "selectedAuditRole", "reviewStrength"} {
+		incomplete := map[string]any{
+			"businessId": "biz",
+			"fileId":     "1",
+			"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"config":     map[string]any{},
+		}
+		incomplete["config"].(map[string]any)[missing] = nil
+		if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", incomplete); !errors.Is(err, ErrContractMismatch) {
+			t.Fatalf("missing=%s err=%v，缺少 config 必填字段时应失败", missing, err)
+		}
+	}
+}
+
+// TestStartSchemaRejectsExcludedFields 验证 startReview CLI 契约不接受文档中的非必填字段。
+func TestStartSchemaRejectsExcludedFields(t *testing.T) {
+	input := map[string]any{
+		"businessId": "biz",
+		"fileId":     "1",
+		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"config": map[string]any{
+			"selectedPosition":  "甲方",
+			"selectedAuditRole": "甲方",
+			"reviewStrength":    1,
+		},
+		"appType": "THIRD_PARTY",
+	}
+	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("err=%v，appType 不应进入 CLI 发起契约", err)
 	}
 }
 
@@ -139,10 +178,14 @@ func TestStartSchemaAllowsDefaultConfig(t *testing.T) {
 // 返回值：无；Schema 漂移时通过测试失败暴露。
 func TestStartSchemaRejectsInternalUsageContext(t *testing.T) {
 	input := map[string]any{
-		"businessId":         "biz",
-		"appType":            "THIRD_PARTY",
-		"fileId":             "1",
-		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"businessId": "biz",
+		"fileId":     "1",
+		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"config": map[string]any{
+			"selectedPosition":  "甲方",
+			"selectedAuditRole": "甲方",
+			"reviewStrength":    1,
+		},
 		"usageReportContext": map[string]any{},
 	}
 	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); !errors.Is(err, ErrContractMismatch) {
@@ -158,18 +201,49 @@ func TestReviewRunSchemaIsExecutable(t *testing.T) {
 		"source":     map[string]any{"type": "url", "fileUrl": "https://files.example.com/contract.pdf", "name": "合同.pdf"},
 		"businessId": "biz-url",
 		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"appType":    "THIRD_PARTY",
-		"config":     map[string]any{},
-		"wait":       true,
+		"config": map[string]any{
+			"selectedPosition":             "甲方",
+			"selectedAuditRole":            "甲方",
+			"reviewStrength":               1,
+			"selectedCheckListIds":         []string{"2001001"},
+			"matchContractTypeRulePackage": true,
+		},
+		"wait": true,
 	}
 	if err := ValidateSchema("review-run.schema.json", valid); err != nil {
 		t.Fatal(err)
 	}
+	withAppType := map[string]any{}
+	for key, value := range valid {
+		withAppType[key] = value
+	}
+	withAppType["appType"] = "THIRD_PARTY"
+	if err := ValidateSchema("review-run.schema.json", withAppType); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("err=%v，review run 不应接受 appType", err)
+	}
 	invalid := map[string]any{
-		"source":  map[string]any{"type": "file", "path": "contract.pdf", "name": "合同.pdf"},
-		"appType": "CLM",
+		"source": map[string]any{"type": "file", "path": "contract.pdf", "name": "合同.pdf"},
 	}
 	if err := ValidateSchema("review-run.schema.json", invalid); !errors.Is(err, ErrContractMismatch) {
-		t.Fatalf("err=%v，CLM 文件输入缺少 businessId 应由 review-run Schema 拒绝", err)
+		t.Fatalf("err=%v，review run 缺少必填 config 应被拒绝", err)
+	}
+}
+
+// TestReviewStartSchemaAcceptsRuleSelectionOptions 验证审查规则来源参数可在 CLI 契约中传递。
+func TestReviewStartSchemaAcceptsRuleSelectionOptions(t *testing.T) {
+	input := map[string]any{
+		"businessId": "biz",
+		"fileId":     "1",
+		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"config": map[string]any{
+			"selectedPosition":             "甲方",
+			"selectedAuditRole":            "甲方",
+			"reviewStrength":               1,
+			"selectedCheckListIds":         []string{"2001001"},
+			"matchContractTypeRulePackage": true,
+		},
+	}
+	if err := ValidateSchema("review-start.schema.json", input); err != nil {
+		t.Fatalf("err=%v，规则来源参数应被 CLI 契约接受", err)
 	}
 }

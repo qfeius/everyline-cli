@@ -19,6 +19,14 @@ type fakeAPI struct {
 	contexts map[string]context.Context
 }
 
+func validReviewConfig() map[string]any {
+	return map[string]any{
+		"selectedPosition":  "甲方",
+		"selectedAuditRole": "甲方",
+		"reviewStrength":    1,
+	}
+}
+
 // recordContext 保存每个工作流阶段收到的上下文，便于验证 deadline 沿链路传递。
 // 入参：name string 为阶段名；ctx context.Context 为阶段上下文。
 // 返回值：无。
@@ -134,8 +142,7 @@ func TestWorkflowRun(t *testing.T) {
 	result, err := workflow.Run(context.Background(), RunSpec{
 		Source:          RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
 		BusinessID:      "biz-1",
-		AppType:         AppTypeCLM,
-		Config:          map[string]any{},
+		Config:          validReviewConfig(),
 		ExtractSubjects: true,
 		Wait:            true,
 	})
@@ -155,8 +162,8 @@ func TestWorkflowRun(t *testing.T) {
 		}
 	}
 	for _, query := range api.queries {
-		if query.VisibilityScope != VisibilityScopeContractResult {
-			t.Fatalf("query=%#v，CLM/CR 链路应使用 contractResult", query)
+		if query.VisibilityScope != "" || query.AppType != "" {
+			t.Fatalf("query=%#v，review run 不应注入 appType 或 contractResult", query)
 		}
 	}
 }
@@ -194,14 +201,13 @@ func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
 	}
 }
 
-// TestRunSpecCLMRequiresBusinessID 验证 review-run Schema 在上传前拦截缺少业务对象 ID 的输入。
-func TestRunSpecCLMRequiresBusinessID(t *testing.T) {
+// TestRunSpecRequiresReviewConfig 验证 review-run Schema 要求发起审查配置完整。
+func TestRunSpecRequiresReviewConfig(t *testing.T) {
 	spec := RunSpec{
-		Source:  RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
-		AppType: AppTypeCLM,
-		Config:  map[string]any{},
+		Source: RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
+		Config: map[string]any{},
 	}
-	if err := spec.Validate(); err == nil || !strings.Contains(err.Error(), "businessId") {
+	if err := spec.Validate(); err == nil || !strings.Contains(err.Error(), "selectedPosition") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -212,8 +218,7 @@ func TestRunSpecURLRejectsInvalidFileHash(t *testing.T) {
 		Source:     RunSource{Type: "url", FileURL: "https://files.example.com/contract.pdf", Name: "合同.pdf"},
 		BusinessID: "biz-url",
 		FileHash:   "not-a-sha256",
-		AppType:    AppTypeThirdParty,
-		Config:     map[string]any{},
+		Config:     validReviewConfig(),
 	}
 	if err := spec.Validate(); err == nil || !strings.Contains(err.Error(), "fileHash") {
 		t.Fatalf("err=%v", err)
@@ -227,9 +232,8 @@ func TestWorkflowRunRequiresUploadedFileHash(t *testing.T) {
 	api := &missingFileHashAPI{}
 	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
 	result, err := workflow.Run(context.Background(), RunSpec{
-		Source:  RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
-		AppType: AppTypeThirdParty,
-		Config:  map[string]any{},
+		Source: RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
+		Config: validReviewConfig(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "上传响应缺少 businessId 或 fileHash") {
 		t.Fatalf("err=%v，期望上传响应缺少 fileHash 时失败", err)
@@ -252,8 +256,7 @@ func TestWorkflowRunPreservesStatusWhenInfoFails(t *testing.T) {
 	result, err := workflow.Run(context.Background(), RunSpec{
 		Source:     RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
 		BusinessID: "biz-1",
-		AppType:    AppTypeThirdParty,
-		Config:     map[string]any{},
+		Config:     validReviewConfig(),
 		Wait:       true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "info unavailable") {
@@ -271,8 +274,7 @@ func TestWorkflowRunSharesDeadlineAcrossStages(t *testing.T) {
 	_, err := workflow.Run(context.Background(), RunSpec{
 		Source:     RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
 		BusinessID: "biz-1",
-		AppType:    AppTypeThirdParty,
-		Config:     map[string]any{},
+		Config:     validReviewConfig(),
 		Wait:       true,
 	})
 	if err != nil {
@@ -336,8 +338,7 @@ func TestWorkflowRunURLUsesExplicitFileIdentity(t *testing.T) {
 		Source:     RunSource{Type: "url", FileURL: "https://files.example.com/contract.pdf", Name: "合同.pdf"},
 		BusinessID: "biz-url",
 		FileHash:   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		AppType:    AppTypeThirdParty,
-		Config:     map[string]any{},
+		Config:     validReviewConfig(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -361,9 +362,8 @@ func TestWorkflowRunURLRequiresFileIdentity(t *testing.T) {
 	api := &urlUploadAPI{}
 	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
 	_, err := workflow.Run(context.Background(), RunSpec{
-		Source:  RunSource{Type: "url", FileURL: "https://files.example.com/contract.pdf", Name: "合同.pdf"},
-		AppType: AppTypeThirdParty,
-		Config:  map[string]any{},
+		Source: RunSource{Type: "url", FileURL: "https://files.example.com/contract.pdf", Name: "合同.pdf"},
+		Config: validReviewConfig(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "businessId") {
 		t.Fatalf("err=%v", err)
@@ -382,8 +382,7 @@ func TestWorkflowRunReturnsFailedSnapshot(t *testing.T) {
 	result, err := workflow.Run(context.Background(), RunSpec{
 		Source:     RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
 		BusinessID: "biz-1",
-		AppType:    AppTypeThirdParty,
-		Config:     map[string]any{},
+		Config:     validReviewConfig(),
 		Wait:       true,
 	})
 	if !errors.Is(err, ErrTaskFailed) {

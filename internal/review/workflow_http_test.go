@@ -65,7 +65,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 						t.Errorf("file content=%q err=%v", content, readErr)
 					}
 				}
-				if request.FormValue("name") != "合同.pdf" || request.FormValue("appType") != AppTypeCLM || request.FormValue("businessId") != "biz-1" {
+				if request.FormValue("name") != "合同.pdf" || request.FormValue("appType") != "" || request.FormValue("businessId") != "biz-1" {
 					t.Errorf("upload fields name=%q appType=%q businessId=%q", request.FormValue("name"), request.FormValue("appType"), request.FormValue("businessId"))
 				}
 			}
@@ -76,7 +76,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				t.Errorf("subjects body: %v", err)
 			}
-			if body["businessId"] != "biz-1" || body["appType"] != AppTypeCLM || body["fileId"] != "11" {
+			if body["businessId"] != "biz-1" || body["fileId"] != "11" {
 				t.Errorf("subjects body=%#v", body)
 			}
 			calls = append(calls, "subjects")
@@ -86,7 +86,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				t.Errorf("start body: %v", err)
 			}
-			if body["businessId"] != "biz-1" || body["appType"] != AppTypeCLM || body["fileId"] != "11" || body["fileHash"] != hash {
+			if body["businessId"] != "biz-1" || body["fileId"] != "11" || body["fileHash"] != hash {
 				t.Errorf("start body=%#v", body)
 			}
 			calls = append(calls, "start")
@@ -120,7 +120,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 	result, err := workflow.Run(context.Background(), RunSpec{
 		Source:          RunSource{Type: "file", Path: filePath, Name: "合同.pdf"},
 		BusinessID:      "biz-1",
-		AppType:         AppTypeCLM,
+		Config:          validReviewConfig(),
 		ExtractSubjects: true,
 		Wait:            true,
 	})
@@ -141,7 +141,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 // 返回值：无；失败通过 t.Errorf 报告。
 func assertIntegrationTaskQuery(t *testing.T, request *http.Request) {
 	query := request.URL.Query()
-	if query.Get("taskId") != "88" || query.Get("businessId") != "biz-1" || query.Get("appType") != AppTypeCLM || query.Get("visibilityScope") != VisibilityScopeContractResult {
+	if query.Get("taskId") != "88" || query.Get("businessId") != "biz-1" || query.Get("appType") != "" || query.Get("visibilityScope") != "" {
 		t.Errorf("task query=%s", request.URL.RawQuery)
 	}
 }

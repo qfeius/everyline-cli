@@ -22,13 +22,32 @@ type Document map[string]any
 
 // StartRequest 对应 operation smartAuditTaskStartReview 的冻结请求契约。
 type StartRequest struct {
-	BusinessID                     string         `json:"businessId" yaml:"businessId"`
+	BusinessID string `json:"businessId" yaml:"businessId"`
+	// AppType、TriggerScene 等字段保留在内部类型中供已有领域调用兼容；CLI start/run 输入不再暴露或透传这些字段。
 	AppType                        string         `json:"appType" yaml:"appType"`
 	FileID                         int64          `json:"fileId" yaml:"fileId"`
 	FileHash                       string         `json:"fileHash" yaml:"fileHash"`
 	Config                         map[string]any `json:"config" yaml:"config"`
 	AllowInvalidSelectedChecklists bool           `json:"allowInvalidSelectedChecklists,omitempty" yaml:"allowInvalidSelectedChecklists,omitempty"`
 	TriggerScene                   string         `json:"triggerScene,omitempty" yaml:"triggerScene,omitempty"`
+}
+
+// StartInput 是 review task start 的 CLI 输入契约，只保留发起审查所需的必填字段。
+type StartInput struct {
+	BusinessID string         `json:"businessId" yaml:"businessId"`
+	FileID     int64          `json:"fileId" yaml:"fileId"`
+	FileHash   string         `json:"fileHash" yaml:"fileHash"`
+	Config     map[string]any `json:"config" yaml:"config"`
+}
+
+// ToRequest 将 CLI 输入转换为内部发起请求；fileId 继续保持当前 CLI 的 int64 输入行为。
+func (input StartInput) ToRequest() StartRequest {
+	return StartRequest{
+		BusinessID: input.BusinessID,
+		FileID:     input.FileID,
+		FileHash:   input.FileHash,
+		Config:     input.Config,
+	}
 }
 
 // ContractPayload 将内部发起请求转换为开放接口边界格式。
@@ -38,35 +57,28 @@ func (request StartRequest) ContractPayload() map[string]any {
 	request = request.Normalize()
 	payload := map[string]any{
 		"businessId": request.BusinessID,
-		"appType":    request.AppType,
 		// startReview 接口要求 fileId 以 JSON 字符串传输；内部保留 int64 便于解析上传响应和任务数据。
 		"fileId":   strconv.FormatInt(request.FileID, 10),
 		"fileHash": request.FileHash,
 		"config":   request.Config,
 	}
-	if request.AllowInvalidSelectedChecklists {
-		payload["allowInvalidSelectedChecklists"] = true
-	}
-	if request.TriggerScene != "" {
-		payload["triggerScene"] = request.TriggerScene
-	}
 	return payload
 }
 
-// Validate 校验普通发起审查的必填字段、应用类型和触发场景。
+// Validate 校验普通发起审查的 API 必填字段和 config 子字段。
 // 入参：无，接收者 StartRequest 为待校验请求。
 // 返回值：error，请求满足后端 V3 契约时为 nil。
 func (request StartRequest) Validate() error {
 	if err := ValidateReviewIdentity(request); err != nil {
 		return err
 	}
-	if request.TriggerScene != "" && request.TriggerScene != "manual" && request.TriggerScene != "auto" {
-		return fmt.Errorf("triggerScene 必须是 manual 或 auto")
+	if err := contracts.ValidateSchema("review-start.schema.json", request.ContractPayload()); err != nil {
+		return err
 	}
 	return nil
 }
 
-// Normalize 将后端默认的空配置显式编码为对象，保证 dry-run 和真实请求一致。
+// Normalize 将缺失配置规范化为空对象，以便 Schema 返回明确的必填字段错误。
 func (request StartRequest) Normalize() StartRequest {
 	request.BusinessID = strings.TrimSpace(request.BusinessID)
 	request.FileHash = normalizeSHA256(request.FileHash)
@@ -76,15 +88,12 @@ func (request StartRequest) Normalize() StartRequest {
 	return request
 }
 
-// ValidateReviewIdentity 校验普通 V3 发起审查所需的 businessId/appType/fileId/fileHash 身份。
+// ValidateReviewIdentity 校验普通 V3 发起审查所需的 businessId/fileId/fileHash 身份。
 // 入参：request StartRequest 提供文件与业务上下文，config 不参与本校验。
 // 返回值：error，身份字段完整有效时为 nil。
 func ValidateReviewIdentity(request StartRequest) error {
 	if strings.TrimSpace(request.BusinessID) == "" {
 		return fmt.Errorf("businessId 不能为空")
-	}
-	if err := ValidateAppType(request.AppType); err != nil {
-		return err
 	}
 	if request.FileID <= 0 {
 		return fmt.Errorf("fileId 必须大于 0")
@@ -100,9 +109,6 @@ func ValidateSubjectIdentity(request StartRequest) error {
 	if strings.TrimSpace(request.BusinessID) == "" {
 		return fmt.Errorf("businessId 不能为空")
 	}
-	if err := ValidateAppType(request.AppType); err != nil {
-		return err
-	}
 	if request.FileID <= 0 {
 		return fmt.Errorf("fileId 必须大于 0")
 	}
@@ -112,9 +118,6 @@ func ValidateSubjectIdentity(request StartRequest) error {
 // ValidateUploadBusinessContext 校验上传阶段按 appType 要求的业务上下文。
 // CLM 上传接口在创建业务文件快照前必须拿到 businessId；其他类型允许由服务端生成。
 func ValidateUploadBusinessContext(appType string, businessID string) error {
-	if err := ValidateAppType(appType); err != nil {
-		return err
-	}
 	if appType == AppTypeCLM && strings.TrimSpace(businessID) == "" {
 		return fmt.Errorf("CLM 上传必须提供 businessId")
 	}
@@ -134,21 +137,17 @@ type RunSpec struct {
 	Source          RunSource      `json:"source" yaml:"source"`
 	BusinessID      string         `json:"businessId,omitempty" yaml:"businessId,omitempty"`
 	FileHash        string         `json:"fileHash,omitempty" yaml:"fileHash,omitempty"`
-	AppType         string         `json:"appType,omitempty" yaml:"appType,omitempty"`
 	Config          map[string]any `json:"config" yaml:"config"`
 	ExtractSubjects bool           `json:"extractSubjects,omitempty" yaml:"extractSubjects,omitempty"`
 	Wait            bool           `json:"wait" yaml:"wait"`
 }
 
-// Normalize 补齐一键工作流的安全默认值，且不改变调用方提供的业务字段。
+// Normalize 规范化一键工作流输入，且不改变调用方提供的业务字段。
 // 入参：无，接收者 RunSpec 为待归一化输入。
-// 返回值：RunSpec，默认 appType=THIRD_PARTY 且 config 至少为空对象。
+// 返回值：RunSpec，保证 config 至少为空对象；空对象仍不满足发起审查契约。
 func (spec RunSpec) Normalize() RunSpec {
 	spec.BusinessID = strings.TrimSpace(spec.BusinessID)
 	spec.FileHash = normalizeSHA256(spec.FileHash)
-	if spec.AppType == "" {
-		spec.AppType = AppTypeThirdParty
-	}
 	if spec.Config == nil {
 		spec.Config = map[string]any{}
 	}
@@ -194,18 +193,6 @@ type TaskQuery struct {
 	BusinessID      string `json:"businessId,omitempty"`
 	AppType         string `json:"appType,omitempty"`
 	VisibilityScope string `json:"visibilityScope,omitempty"`
-}
-
-// ValidateAppType 校验后端冻结的三种接入应用类型。
-// 入参：appType string 为待校验值。
-// 返回值：error，值为 CLM、CR 或 THIRD_PARTY 时为 nil。
-func ValidateAppType(appType string) error {
-	switch appType {
-	case AppTypeCLM, AppTypeCR, AppTypeThirdParty:
-		return nil
-	default:
-		return fmt.Errorf("appType 必须是 CLM、CR 或 THIRD_PARTY")
-	}
 }
 
 // DecodeDocument 用 UseNumber 解码平台 data，避免 int64 标识被 float64 破坏精度。

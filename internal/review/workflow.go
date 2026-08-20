@@ -37,6 +37,7 @@ func (RealClock) After(ctx context.Context, delay time.Duration) error {
 type WorkflowOptions struct {
 	Interval time.Duration
 	Deadline time.Duration
+	OnStatus func(Document)
 }
 
 // ReviewWorkflow 是面向 CLI 的高阶深接口。
@@ -81,7 +82,7 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 	var upload Document
 	var err error
 	if spec.Source.Type == "file" {
-		upload, err = workflow.api.UploadFile(workflowContext, spec.Source.Path, spec.Source.Name, spec.AppType, spec.BusinessID)
+		upload, err = workflow.api.UploadFile(workflowContext, spec.Source.Path, spec.Source.Name, "", spec.BusinessID)
 	} else {
 		upload, err = workflow.api.UploadURL(workflowContext, spec.Source.FileURL, spec.Source.Name)
 	}
@@ -114,12 +115,10 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 		return result, fmt.Errorf("上传响应中的 fileHash 无效: %w", err)
 	}
 	startRequest := StartRequest{
-		BusinessID:   businessID,
-		AppType:      spec.AppType,
-		FileID:       fileID,
-		FileHash:     fileHash,
-		Config:       spec.Config,
-		TriggerScene: "manual",
+		BusinessID: businessID,
+		FileID:     fileID,
+		FileHash:   fileHash,
+		Config:     spec.Config,
 	}
 	if spec.ExtractSubjects {
 		result.Subjects, err = workflow.api.ExtractSubjects(workflowContext, startRequest)
@@ -139,10 +138,8 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 		return result, fmt.Errorf("发起审查响应缺少有效 taskId")
 	}
 	query := TaskQuery{
-		TaskID:          taskID,
-		BusinessID:      businessID,
-		AppType:         spec.AppType,
-		VisibilityScope: workflowVisibilityScope(spec.AppType),
+		TaskID:     taskID,
+		BusinessID: businessID,
 	}
 	result.Final, err = workflow.WaitForResult(workflowContext, query)
 	if err != nil {
@@ -169,6 +166,9 @@ func (workflow *Workflow) Wait(ctx context.Context, query TaskQuery) (Document, 
 		snapshot, err := workflow.api.Status(waitContext, query)
 		if err != nil {
 			return nil, err
+		}
+		if workflow.options.OnStatus != nil {
+			workflow.options.OnStatus(snapshot)
 		}
 		status, _ := StringValue(snapshot, "status")
 		if status == "success" {
