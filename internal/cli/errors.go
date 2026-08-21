@@ -20,7 +20,7 @@ const (
 	ExitNetwork = 5
 )
 
-// ExitCode 将领域错误映射为技术方案冻结的稳定进程退出码。
+// ExitCode 将领域错误映射为稳定的进程退出码。
 // 入参：err error 为命令执行错误。
 // 返回值：int，0/2/3/4/5 之一。
 func ExitCode(err error) int {

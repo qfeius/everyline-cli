@@ -222,6 +222,35 @@ review task result 会在 stderr 输出 running 等任务状态，最终审查�
 
 CLI 已移除 --app-type 参数；文件上传也不再接受 --business-id。发起审查输入只接受当前契约声明的字段，未知字段会被拒绝。
 
+## 自更新
+
+独立二进制可以通过显式 HTTPS manifest 检查和更新当前平台制品：
+
+~~~bash
+everyline-cli update \
+  --manifest-url https://example.com/everyline-cli/manifest.json \
+  --dry-run
+
+everyline-cli update \
+  --manifest-url https://example.com/everyline-cli/manifest.json
+~~~
+
+manifest 需要声明版本、当前平台的制品 URL 和 SHA-256。CLI 只有在新版本、平台匹配且摘要校验通过时才替换二进制；下载失败或校验失败会保留原文件。通过 npm/npx 薄包装启动时不会修改包内二进制，请使用 npm 更新包。
+
+manifest 示例：
+
+~~~json
+{
+  "version": "1.2.3",
+  "platforms": {
+    "darwin-arm64": {
+      "url": "https://example.com/everyline-cli/1.2.3/darwin-arm64/everyline-cli",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  }
+}
+~~~
+
 ## 输出与安全
 
 - 结构化结果使用 --output json 或 --raw，便于 Agent 和脚本解析。

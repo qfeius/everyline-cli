@@ -237,7 +237,7 @@ func newConfigListCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	}
 }
 
-// identityName 返回 Profile 的可读身份，空值按历史默认 app 处理。
+// identityName 返回 Profile 的可读身份，空值按兼容默认 app 处理。
 // 入参：identity config.IdentityKind 为 Profile 默认身份。
 // 返回值：string，为稳定输出文本。
 func identityName(identity config.IdentityKind) string {

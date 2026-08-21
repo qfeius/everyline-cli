@@ -85,7 +85,9 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	command.InitDefaultCompletionCmd()
 	versionCommand := newVersionCommand(runtime, options)
 	versionCommand.GroupID = "cli"
-	command.AddCommand(versionCommand)
+	updateCommand := newUpdateCommand(runtime, options)
+	updateCommand.GroupID = "cli"
+	command.AddCommand(versionCommand, updateCommand)
 	return command
 }
 

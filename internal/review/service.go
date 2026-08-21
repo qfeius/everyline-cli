@@ -78,9 +78,6 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 	if err := ValidateFileName(name); err != nil {
 		return nil, err
 	}
-	if err := ValidateUploadBusinessContext(appType, businessID); err != nil {
-		return nil, err
-	}
 	businessID = strings.TrimSpace(businessID)
 	content, err := os.ReadFile(filePath)
 	if err != nil {

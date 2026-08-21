@@ -272,19 +272,19 @@ func TestServiceUploadMultipartContract(t *testing.T) {
 	}
 }
 
-// TestServiceUploadCLMRequiresBusinessID 验证 CLM 上传在本地就拒绝缺少业务对象 ID 的请求。
-func TestServiceUploadCLMRequiresBusinessID(t *testing.T) {
+// TestServiceUploadCLMAllowsMissingBusinessID 验证 appType 非必填时 CLM 上传不再被本地业务上下文校验拦截。
+func TestServiceUploadCLMAllowsMissingBusinessID(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "contract.pdf")
 	if err := os.WriteFile(filePath, []byte("pdf-content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	client := &recordingClient{data: `{"fileId":"12","businessId":"biz-1","fileHash":"hash"}`}
 	service := NewService(client, time.Second)
-	if _, err := service.UploadFile(context.Background(), filePath, "合同.pdf", AppTypeCLM, " "); err == nil || !strings.Contains(err.Error(), "CLM 上传必须提供 businessId") {
-		t.Fatalf("err=%v", err)
+	if _, err := service.UploadFile(context.Background(), filePath, "合同.pdf", AppTypeCLM, " "); err != nil {
+		t.Fatal(err)
 	}
-	if client.request.OperationID != "" {
-		t.Fatalf("缺少 businessId 时不应发送请求: %#v", client.request)
+	if client.request.OperationID != OperationUploadFile {
+		t.Fatalf("应发送上传请求: %#v", client.request)
 	}
 }
 

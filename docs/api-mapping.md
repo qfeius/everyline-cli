@@ -2,7 +2,7 @@
 
 基础 URL 来自 Profile。下表路径均为 CLI HTTP Adapter 中的相对路径。
 
-当前接口清单尚未给出四个批量写操作的字段级请求体：`batchCreateReviewChecklists`、`batchUpdateReviewChecklists`、`batchCreateReviewRules`、`batchUpdateReviewRules`。对应命令支持 `--dry-run` 做本地校验，但真实调用会显式拒绝；补齐详情页并完成契约测试后方可解除保护。
+四个批量创建/更新操作属于非必需能力：`batchCreateReviewChecklists`、`batchUpdateReviewChecklists`、`batchCreateReviewRules`、`batchUpdateReviewRules`。对应命令支持 `--dry-run` 做本地校验，真实调用在 HTTP 请求前显式拒绝；单项写入和批量删除可正常使用。
 
 | Operation ID | CLI 命令 | 方法与路径 |
 |---|---|---|

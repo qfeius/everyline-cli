@@ -82,6 +82,7 @@ rule batch-delete --group-id ID (--id ID... | --input ids.json | --data '[...]')
 
 completion bash|fish|powershell|zsh
 version
+update --manifest-url HTTPS_URL [--dry-run]
 ```
 
 所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端；两者当前行为一致。`review task result` 是 CLI 本地编排，不对应新的远端接口；它会轮询任务状态，默认把每次 `status` 输出到 stderr，成功后自动获取并输出最终详情，stdout 仍只承载最终业务结果。
@@ -97,7 +98,9 @@ everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fi
 everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"wait":true}' --dry-run
 ```
 
-`checklist batch-create`、`checklist batch-update`、`rule batch-create`、`rule batch-update` 的字段级详情页尚未发布，因此只允许 `--dry-run`/`--print-input`；真实调用会在发送 HTTP 请求前失败关闭。`update` 自更新命令属于技术方案 M5，需待制品下载地址和签名校验机制冻结后实现。
+`checklist batch-create`、`checklist batch-update`、`rule batch-create`、`rule batch-update` 属于非必需批量写能力。它们支持本地 `--dry-run`/`--print-input`，真实调用会在发送 HTTP 请求前失败关闭；单项写入和批量删除不受此限制。
+
+`update` 只支持独立二进制。命令从 `--manifest-url` 指定的 HTTPS manifest 选择当前平台制品，比较 SemVer，下载后校验 SHA-256，再原子替换当前二进制。`--dry-run` 只做 manifest、平台和版本校验。通过 npm/npx 薄包装启动时不会修改包内二进制，应使用 npm 更新包。
 
 ## 退出码
 

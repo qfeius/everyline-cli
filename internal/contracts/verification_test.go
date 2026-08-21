@@ -100,16 +100,15 @@ func TestRequestSchemaRejectsDrift(t *testing.T) {
 	}
 }
 
-// TestUploadSchemaRequiresBusinessIDForCLM 验证上传契约把 CLM 的业务身份要求下沉到通用校验层。
-func TestUploadSchemaRequiresBusinessIDForCLM(t *testing.T) {
-	err := ValidateRequest(
+// TestUploadSchemaAllowsCLMWithoutBusinessID 验证 appType 非必填时上传契约不追加业务对象校验。
+func TestUploadSchemaAllowsCLMWithoutBusinessID(t *testing.T) {
+	if err := ValidateRequest(
 		"uploadContractFileV3",
 		"POST",
 		"/open-apis/contract-review/v3/file/contract/upload",
 		map[string]any{"file": "contract.pdf", "name": "contract.pdf", "appType": "CLM"},
-	)
-	if !errors.Is(err, ErrContractMismatch) {
-		t.Fatalf("err=%v，CLM 缺少 businessId 应被拒绝", err)
+	); err != nil {
+		t.Fatalf("err=%v，CLM 缺少 businessId 仍应通过契约校验", err)
 	}
 }
 

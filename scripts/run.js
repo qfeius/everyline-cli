@@ -26,7 +26,10 @@ function resolveBinary() {
 }
 
 try {
-  const result = spawnSync(resolveBinary(), process.argv.slice(2), { stdio: "inherit" });
+  const result = spawnSync(resolveBinary(), process.argv.slice(2), {
+    stdio: "inherit",
+    env: { ...process.env, EVERYLINE_CLI_WRAPPER: "1" },
+  });
   if (result.error) {
     throw result.error;
   }

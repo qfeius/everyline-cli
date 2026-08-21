@@ -1,4 +1,4 @@
-# 设计：以 `review task result` 替换 `review task wait`
+# `review task result` 行为契约
 
 ## 1. 目标与范围
 
@@ -29,16 +29,16 @@ review task start -> review task result <task-id>
 - 不改变 `review run` 从文件上传到最终结果的业务目标。
 - 不增加本地缓存、后台守护进程或新的异步任务存储。
 
-### 1.4 兼容决策
+### 1.4 命令兼容边界
 
-当前 CLI 处于开发阶段，直接删除 `review task wait`，不保留废弃别名或兼容开关。
+`review task` 命令树只提供 `start`、`result`、`status` 和 `info`；不提供 `wait` 别名或兼容开关。
 
-## 2. 当前实现证据
+## 2. 运行契约
 
-- `internal/review/workflow.go` 的 `Workflow.Run` 已在轮询成功后调用 `Info`，说明“等待终态并获取详情”已有领域编排能力。
-- `internal/review/workflow.go` 的 `Workflow.Wait` 当前只轮询 `Status` 并返回终态快照。
-- `internal/cli/review.go` 当前注册 `review task wait`，该命令只输出 `Workflow.Wait` 的状态快照。
-- `review task status` 与 `review task info` 已分别承载单次状态和详情查询。
+- `Workflow.Wait` 轮询 `Status` 并返回最后状态快照。
+- `Workflow.WaitForResult` 在 `success` 后调用一次 `Info`。
+- `review task result` 注册等待与详情编排；`review task status` 和 `review task info` 保持单次查询。
+- 每次轮询状态默认写入 stderr，最终业务结果写入 stdout。
 
 ## 3. 目标命令契约
 
@@ -103,9 +103,16 @@ CLI result
 - `Info` 失败时保留成功状态快照，并返回错误。
 - 命令不得以成功退出码或“结果完整”语义结束。
 
-### 4.5 身份与查询上下文
+### 4.5 状态边界
 
-调用 `Info` 时必须复用 `result` 命令构造的同一个 `TaskQuery`，包括 `task-id`、业务标识、可选接入类型和可见性范围；不得因为内部编排而丢失 `contractResult` 查询上下文。
+- `running` 是唯一允许继续轮询的中间态。
+- `success` 是成功终态，`fail` 是失败终态。
+- 空状态按任务不存在或当前用户无权访问处理。
+- 其他状态保留快照并返回未知状态错误。仓库没有后端完整状态枚举，因此不把 `queued`、`pending` 或其他未确认值静默转换为可等待状态。
+
+### 4.6 身份与查询上下文
+
+调用 `Info` 时必须复用 `result` 命令构造的同一个 `TaskQuery`，包括 `task-id`、业务标识和可见性范围；不得因为内部编排而丢失 `contractResult` 查询上下文。
 
 ## 5. 测试契约
 
@@ -115,19 +122,18 @@ CLI result
 | REQ-RESULT-001 | SC-RESULT-002 | TC-RESULT-002 | `fail` 时停止轮询、不调用 `Info`，保留失败快照并返回错误 |
 | REQ-RESULT-001 | SC-RESULT-003 | TC-RESULT-003 | 轮询取消/截止时保留最后快照并返回非成功错误 |
 | REQ-RESULT-001 | SC-RESULT-004 | TC-RESULT-004 | `Info` 失败时保留成功状态并返回详情错误 |
-| REQ-RESULT-001 | SC-RESULT-005 | TC-RESULT-005 | CLM/CR 查询上下文完整传递到 `Status` 与 `Info` |
-| REQ-RESULT-002 | SC-RESULT-006 | TC-RESULT-006 | 命令树不再注册 `review task wait`，注册 `review task result` |
+| REQ-RESULT-001 | SC-RESULT-005 | TC-RESULT-005 | `contractResult` 查询上下文完整传递到 `Status` 与 `Info` |
+| REQ-RESULT-002 | SC-RESULT-006 | TC-RESULT-006 | 命令树只注册 `review task result` 作为等待并获取详情的命令 |
 | REQ-RESULT-002 | SC-RESULT-007 | TC-RESULT-007 | `review task result --help` 说明会等待并自动获取最终结果 |
-| REQ-RESULT-002 | SC-RESULT-008 | TC-RESULT-008 | 命令参考文档使用 `result`，不再引导 `wait` |
+| REQ-RESULT-002 | SC-RESULT-008 | TC-RESULT-008 | 命令参考文档使用 `result` 作为等待并获取详情的命令 |
 | REQ-RESULT-003 | SC-RESULT-009 | TC-RESULT-009 | 根帮助中的命令条目显示相对命令路径及 `[command]`/`[flags]` 语法后缀，Usage 保留完整程序名 |
 | REQ-RESULT-003 | SC-RESULT-010 | TC-RESULT-010 | 根帮助显示基于实际实现的 `Notes` 使用提示 |
 | REQ-RESULT-003 | SC-RESULT-011 | TC-RESULT-011 | `review task` 帮助显示结果编排、单次查询和可见性范围约束 |
 
 ## 6. 实现边界
 
-- 复用现有 `Workflow.Wait` 的状态轮询和错误语义。
+- 复用 `Workflow.Wait` 的状态轮询和错误语义。
 - 在领域层增加“等待并获取详情”的最小组合能力，供 `review run` 和 `review task result` 共用，避免命令层互相调用。
-- 删除 CLI 层 `newReviewTaskWaitCommand` 及其注册点。
 - 新增 CLI 层 `newReviewTaskResultCommand`，参数和输出约定与现有任务查询命令保持一致。
 - 同步更新帮助测试、命令参考和 API 映射中的本地编排说明。
 - 使用自定义帮助渲染显示完整命令语法；不改变 Cobra 命令路径和参数解析。

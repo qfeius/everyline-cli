@@ -10,14 +10,5 @@
     "name": {"type": "string", "pattern": "(?i)\\.(doc|docx|pdf)$"},
     "appType": {"type": "string"},
     "businessId": {"type": "string", "minLength": 1}
-  },
-  "allOf": [
-    {
-      "if": {
-        "properties": {"appType": {"const": "CLM"}},
-        "required": ["appType"]
-      },
-      "then": {"required": ["businessId"]}
-    }
-  ]
+  }
 }

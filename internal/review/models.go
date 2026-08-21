@@ -115,15 +115,6 @@ func ValidateSubjectIdentity(request StartRequest) error {
 	return nil
 }
 
-// ValidateUploadBusinessContext 校验上传阶段按 appType 要求的业务上下文。
-// CLM 上传接口在创建业务文件快照前必须拿到 businessId；其他类型允许由服务端生成。
-func ValidateUploadBusinessContext(appType string, businessID string) error {
-	if appType == AppTypeCLM && strings.TrimSpace(businessID) == "" {
-		return fmt.Errorf("CLM 上传必须提供 businessId")
-	}
-	return nil
-}
-
 // RunSource 描述一键工作流的本地文件或 URL 输入。
 type RunSource struct {
 	Type    string `json:"type" yaml:"type"`

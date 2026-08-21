@@ -38,6 +38,16 @@ func TestHelpExplainsReviewTaskResultIsLocalOrchestration(t *testing.T) {
 	}
 }
 
+func TestHelpIncludesUpdateCommand(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{"--help"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "update") {
+		t.Fatalf("根帮助缺少 update 命令: %s", stdout.String())
+	}
+}
+
 func TestHelpExplainsReviewStartInputContract(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
 	if err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--help"}); err != nil {
@@ -227,7 +237,7 @@ func TestHelpUsesWorkflowCommandOrder(t *testing.T) {
 		{
 			name:     "root",
 			args:     []string{"--help"},
-			expected: []string{"review", "checklist", "rule", "config", "auth", "completion", "version", "help"},
+			expected: []string{"review", "checklist", "rule", "config", "auth", "completion", "version", "update", "help"},
 		},
 		{
 			name:     "review",

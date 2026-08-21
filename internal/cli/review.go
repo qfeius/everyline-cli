@@ -231,7 +231,6 @@ func newReviewTaskCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		"result 会轮询任务状态，成功后自动获取最终审查详情。",
 		"status 只查询一次当前状态，不等待任务完成。",
 		"info 只查询一次任务详情，不负责轮询。",
-		"使用 visibility-scope=contractResult 时，CLI 使用默认接入类型查询。",
 	)
 	command.AddCommand(
 		newReviewTaskStartCommand(runtime, root),

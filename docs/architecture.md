@@ -19,10 +19,10 @@ Shell / Agent / CI
 - `app` 身份使用 tenant token；`user` 身份统一走 authorization code + PKCE、loopback callback 和浏览器授权。OpenPlatform Client 在 Service 请求前按身份选择 token 和业务基址；未声明专用 user 路由的接口暂复用已验证的相对路径。
 - token 过期时间只使用服务端返回的 `expire`/`expires_in`；app 环境变量 token 的过期时间未知但可用，CLI 不伪造固定 24 小时，也不在服务端未声明支持前发送 refresh grant。
 - Profile、token 和 secret 缓存目录权限为 `0700`、文件权限为 `0600`；跨进程文件锁保护完整的读改写事务。app secret 只有在 token endpoint 成功后才落盘，`auth logout` 不删除它。
-- 业务 HTTP Adapter 只接受 `/open-apis/` 相对路径，防止 Bearer token 被转发到任意主机。
+- 业务 HTTP Adapter 只接受 `/open-apis/` 相对路径，防止 Bearer token 被转发到任意主机；自更新模块仅接受显式 HTTPS manifest 和制品地址。
 - GET 可对网络错误、429 和 5xx 做至多三次退避重试；POST 不自动重试；token、请求和退避共享一次 `--timeout` 总预算。
 - stdout 只承载业务结果，轮询 status 和 `--verbose` 进度只写 stderr。
 
 ## 兼容策略
 
-合同审查请求使用后端 V3.1.9 已确认字段；文件快照和字段捷径接口按当前范围不纳入 CLI。M3 清单与 M4 规则命令已实现。清单创建按公开说明要求 `name` 和 `reviewRuleIds`。四个仍缺字段级详情页的批量创建/更新操作只允许本地 `--dry-run`，真实请求会返回“接口契约尚未核验”，避免猜测 DTO。响应 `data` 保留对象、数组或标量原始形状，平台增加展示字段时不会截断 JSON/YAML/Raw 输出。
+合同审查请求使用已确认的字段；文件快照和字段捷径接口不纳入 CLI。清单创建按公开说明要求 `name` 和 `reviewRuleIds`。四个批量创建/更新操作属于非必需能力，只允许本地 `--dry-run`，真实请求在发送前返回能力错误，避免猜测请求体。响应 `data` 保留对象、数组或标量原始形状，平台增加展示字段时不会截断 JSON/YAML/Raw 输出。自更新独立于业务 Profile，使用 HTTPS manifest、平台制品和 SHA-256 校验，并在校验成功后原子替换本地二进制。
