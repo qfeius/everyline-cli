@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-run.schema.json",
+  "title": "reviewRun",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "config"],
+  "properties": {
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path", "name"],
+          "properties": {
+            "type": {"const": "file"},
+            "path": {"type": "string", "minLength": 1},
+            "name": {"type": "string", "pattern": "(?i)\\.(doc|docx|pdf)$"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "fileUrl", "name"],
+          "properties": {
+            "type": {"const": "url"},
+            "fileUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
+            "name": {"type": "string", "pattern": "(?i)\\.(doc|docx|pdf)$"}
+          }
+        }
+      ]
+    },
+    "businessId": {"type": "string", "minLength": 1},
+    "fileHash": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selectedPosition", "selectedAuditRole", "reviewStrength"],
+      "properties": {
+        "selectedPosition": {"type": "string", "minLength": 1},
+        "selectedAuditRole": {"type": "string", "minLength": 1},
+        "reviewStrength": {"type": "integer", "enum": [0, 1, 2]},
+        "selectedCheckListIds": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "matchContractTypeRulePackage": {"type": "boolean"}
+      }
+    },
+    "extractSubjects": {"type": "boolean", "default": false},
+    "wait": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "properties": {"type": {"const": "url"}},
+            "required": ["type"]
+          }
+        }
+      },
+      "then": {"required": ["businessId", "fileHash"]}
+    }
+  ]
+}
