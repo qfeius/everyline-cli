@@ -165,8 +165,8 @@ func Run(ctx context.Context, currentVersion string, manifestURL string, options
 }
 
 // RunDeferredReplacement 执行 Windows 替换助手参数；其他平台拒绝该内部入口。
-// 入参：args []string 为临时文件、目标文件、父进程 PID 和 helper 路径。
-// 返回值：error，为参数、父进程等待或替换失败原因。
+// 入参：args []string 为临时文件、目标文件和 helper 路径。
+// 返回值：error，为参数或替换失败原因。
 func RunDeferredReplacement(args []string) error {
 	return runDeferredReplacement(args)
 }
