@@ -18,6 +18,7 @@ func main() {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		_, _ = fmt.Fprintln(os.Stderr, "Windows 更新助手已完成二进制替换。")
 		return
 	}
 	os.Exit(app.Run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr))

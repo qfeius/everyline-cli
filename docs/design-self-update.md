@@ -51,7 +51,7 @@ update command
 
 更新使用根命令的 `--timeout` 作为 manifest 与制品下载的总时间预算。临时文件位于目标文件同一目录，保证 Unix 系统上的替换保持同一文件系统；校验失败、取消、超时或替换失败均保留原二进制。
 
-Windows 无法覆盖正在运行的可执行文件时，由同一二进制启动等待进程退出的替换助手，再完成替换；助手不是公开命令。
+Windows 无法覆盖正在运行的可执行文件时，CLI 先复制出独立 helper，再由该副本等待父进程退出并完成替换。helper 不占用目标文件，最终成功或失败通过继承的 stderr 输出；helper 副本登记为系统重启时清理。助手不是公开命令。
 
 通过 npm/npx 薄包装启动时，包装器设置 `EVERYLINE_CLI_WRAPPER=1`。此时 `update` 不下载、不修改 npm 包内二进制，直接提示使用 npm 更新包，避免把 npm 安装目录当作独立安装目标。
 
@@ -65,7 +65,8 @@ Windows 无法覆盖正在运行的可执行文件时，由同一二进制启动
 | 当前平台没有制品 | 返回错误，原二进制不变 |
 | 制品下载失败或 SHA-256 不匹配 | 返回错误，原二进制不变 |
 | `--dry-run` | 完成 manifest、平台和版本校验，不下载制品、不替换 |
-| 独立二进制下载并校验成功 | 原子替换并返回 `updated=true` |
+| Unix 独立二进制下载并同步替换成功 | 返回 `updated=true, scheduled=false` |
+| Windows 制品已交给独立 helper | 返回 `updated=false, scheduled=true`；最终结果由 helper 写入 stderr |
 | npm/npx 薄包装调用 | 返回安装方式提示，不执行更新 |
 
 ## `review task result` 当前边界
@@ -83,4 +84,3 @@ Windows 无法覆盖正在运行的可执行文件时，由同一二进制启动
 ## checklist/rule 批量写能力
 
 四个批量创建/更新操作属于非必需能力。它们保留输入校验和 `--dry-run`/`--print-input`，真实请求在 HTTP 发送前失败关闭；该保护是当前能力边界，不阻塞单项清单、规则及批量删除链路。
-

@@ -3,6 +3,7 @@ package update
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -133,6 +135,9 @@ func TestRunDryRunValidatesButDoesNotReplace(t *testing.T) {
 	}
 }
 
+// TestRunDownloadsVerifiesAndReplacesBinary 验证同步替换会写入新制品、保留权限，并返回 updated 而非 scheduled。
+// 入参：t *testing.T 为测试上下文和临时目录管理器。
+// 返回值：无；下载、替换、权限或结果状态不符合预期时通过 t.Fatal 报告。
 func TestRunDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows 由替换助手异步完成，独立集成测试另行覆盖")
@@ -152,7 +157,7 @@ func TestRunDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Updated {
+	if !result.Updated || result.Scheduled {
 		t.Fatalf("result=%#v", result)
 	}
 	content, err := os.ReadFile(target)
@@ -168,6 +173,86 @@ func TestRunDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o700 {
 		t.Fatalf("mode=%o，更新后应保留原文件权限", info.Mode().Perm())
+	}
+}
+
+// TestRunDeferredReplacementReturnsScheduled 验证异步替换只标记 scheduled，不会在 helper 完成前宣称 updated。
+// 入参：t *testing.T 为测试上下文和临时目录管理器。
+// 返回值：无；状态语义、原文件或临时制品不符合预期时通过 t.Fatal 报告。
+func TestRunDeferredReplacementReturnsScheduled(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "everyline-cli")
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := testHTTPClient(func(request *http.Request) (*http.Response, error) {
+		if strings.Contains(request.URL.Path, "manifest") {
+			return response(http.StatusOK, manifest("1.1.0", runtime.GOOS+"-"+runtime.GOARCH, "https://updates.example.test/everyline-cli", checksum("new"))), nil
+		}
+		return response(http.StatusOK, "new"), nil
+	})
+	var scheduledArtifact string
+	result, err := Run(t.Context(), "1.0.0", "https://updates.example.test/manifest.json", Options{
+		HTTPClient:     client,
+		ExecutablePath: target,
+		replaceBinary: func(temporaryPath string, targetPath string) (bool, error) {
+			if targetPath != resolvedTarget {
+				t.Fatalf("targetPath=%q", targetPath)
+			}
+			scheduledArtifact = temporaryPath
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Updated || !result.Scheduled {
+		t.Fatalf("result=%#v", result)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "old" {
+		t.Fatalf("target=%q，scheduled 状态下原文件尚未替换", content)
+	}
+	if scheduledArtifact == "" {
+		t.Fatal("未捕获交给 helper 的临时制品")
+	}
+	t.Cleanup(func() { _ = os.Remove(scheduledArtifact) })
+	if content, err := os.ReadFile(scheduledArtifact); err != nil || string(content) != "new" {
+		t.Fatalf("scheduled artifact=%q err=%v", content, err)
+	}
+}
+
+// TestReplaceWithRetryCoversSuccessAndFailure 验证 deferred helper 会重试瞬时失败，并保留耗尽重试后的最终错误。
+// 入参：t *testing.T 为断言上下文。
+// 返回值：无；重试次数、等待次数或错误链不符合预期时通过 t.Fatal 报告。
+func TestReplaceWithRetryCoversSuccessAndFailure(t *testing.T) {
+	attempts := 0
+	waits := 0
+	err := replaceWithRetry("temporary", "target", 3, 0, func(string, string) error {
+		attempts++
+		if attempts < 3 {
+			return errors.New("target locked")
+		}
+		return nil
+	}, func(time.Duration) {
+		waits++
+	})
+	if err != nil || attempts != 3 || waits != 2 {
+		t.Fatalf("err=%v attempts=%d waits=%d", err, attempts, waits)
+	}
+
+	lastErr := errors.New("rename failed")
+	err = replaceWithRetry("temporary", "target", 2, 0, func(string, string) error {
+		return lastErr
+	}, func(time.Duration) {})
+	if !errors.Is(err, lastErr) {
+		t.Fatalf("err=%v，期望保留最后一次 rename 错误", err)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -45,6 +46,8 @@ type Options struct {
 	Platform       string
 	DryRun         bool
 	Wrapper        bool
+	// replaceBinary 仅用于测试注入 deferred replacement；生产环境使用平台实现。
+	replaceBinary func(string, string) (bool, error)
 }
 
 // Result 是 update 命令的稳定输出结构。
@@ -53,6 +56,7 @@ type Result struct {
 	LatestVersion  string `json:"latestVersion" yaml:"latestVersion"`
 	Platform       string `json:"platform" yaml:"platform"`
 	Updated        bool   `json:"updated" yaml:"updated"`
+	Scheduled      bool   `json:"scheduled" yaml:"scheduled"`
 	DryRun         bool   `json:"dryRun" yaml:"dryRun"`
 }
 
@@ -66,8 +70,8 @@ type version struct {
 }
 
 // Run 获取 manifest、校验当前平台制品并在需要时完成独立二进制更新。
-// 入参：ctx 控制 manifest 与制品下载；currentVersion 为当前构建版本；manifestURL 为显式 HTTPS manifest 地址；options 为更新边界。
-// 返回值：Result 为更新结果；error 为校验、下载或替换失败。
+// 入参：ctx context.Context 控制 manifest 与制品下载；currentVersion/manifestURL string 分别为当前构建版本和显式 HTTPS manifest 地址；options Options 为更新边界。
+// 返回值：Result 为更新结果；error 为校验、下载、替换调度或同步替换失败。
 func Run(ctx context.Context, currentVersion string, manifestURL string, options Options) (Result, error) {
 	if options.Wrapper {
 		return Result{}, ErrNPMWrapper
@@ -142,22 +146,50 @@ func Run(ctx context.Context, currentVersion string, manifestURL string, options
 	if err := temporary.Close(); err != nil {
 		return Result{}, fmt.Errorf("关闭更新文件失败: %w", err)
 	}
-	deferred, err := replaceBinary(temporaryPath, target)
+	replacer := options.replaceBinary
+	if replacer == nil {
+		replacer = replaceBinary
+	}
+	deferred, err := replacer(temporaryPath, target)
 	if err != nil {
 		return Result{}, fmt.Errorf("替换当前二进制失败: %w", err)
 	}
 	if deferred {
+		// Windows helper 尚未完成最终替换；保留下载文件并明确返回 scheduled，不能提前宣称 updated。
 		deferredCleanup = false
+		result.Scheduled = true
+		return result, nil
 	}
 	result.Updated = true
 	return result, nil
 }
 
 // RunDeferredReplacement 执行 Windows 替换助手参数；其他平台拒绝该内部入口。
-// 入参：args 为临时文件、目标文件和父进程参数。
-// 返回值：error，为替换失败原因。
+// 入参：args []string 为临时文件、目标文件、父进程 PID 和 helper 路径。
+// 返回值：error，为参数、父进程等待或替换失败原因。
 func RunDeferredReplacement(args []string) error {
 	return runDeferredReplacement(args)
+}
+
+// replaceWithRetry 在 deferred helper 中重试替换目标文件，并保留最后一次失败原因。
+// 入参：temporaryPath/targetPath string 为制品临时路径和目标路径；attempts int 为最大尝试次数；delay time.Duration 为重试间隔；rename func 执行单次替换；sleep func 执行等待。
+// 返回值：error，替换成功时为 nil，参数无效或重试耗尽时返回最后一次替换错误。
+func replaceWithRetry(temporaryPath string, targetPath string, attempts int, delay time.Duration, rename func(string, string) error, sleep func(time.Duration)) error {
+	if attempts <= 0 {
+		return errors.New("替换重试次数必须大于 0")
+	}
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := rename(temporaryPath, targetPath); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if attempt+1 < attempts {
+			sleep(delay)
+		}
+	}
+	return fmt.Errorf("替换目标文件失败: %w", lastErr)
 }
 
 func fetchManifest(ctx context.Context, client *http.Client, manifestURL string) (Manifest, error) {

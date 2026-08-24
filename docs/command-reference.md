@@ -100,7 +100,7 @@ everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf
 
 `checklist batch-create`、`checklist batch-update`、`rule batch-create`、`rule batch-update` 属于非必需批量写能力。它们支持本地 `--dry-run`/`--print-input`，真实调用会在发送 HTTP 请求前失败关闭；单项写入和批量删除不受此限制。
 
-`update` 只支持独立二进制。命令从 `--manifest-url` 指定的 HTTPS manifest 选择当前平台制品，比较 SemVer，下载后校验 SHA-256，再原子替换当前二进制。`--dry-run` 只做 manifest、平台和版本校验。通过 npm/npx 薄包装启动时不会修改包内二进制，应使用 npm 更新包。
+`update` 只支持独立二进制。命令从 `--manifest-url` 指定的 HTTPS manifest 选择当前平台制品，比较 SemVer，下载后校验 SHA-256，再替换当前二进制。同步替换完成时输出 `updated=true, scheduled=false`；Windows 需要等待当前进程退出时输出 `updated=false, scheduled=true`，独立 helper 的最终成功或失败写入 stderr。`--dry-run` 只做 manifest、平台和版本校验。通过 npm/npx 薄包装启动时不会修改包内二进制，应使用 npm 更新包。
 
 ## 退出码
 

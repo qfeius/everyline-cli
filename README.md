@@ -235,7 +235,7 @@ everyline-cli update \
   --manifest-url https://example.com/everyline-cli/manifest.json
 ~~~
 
-manifest 需要声明版本、当前平台的制品 URL 和 SHA-256。CLI 只有在新版本、平台匹配且摘要校验通过时才替换二进制；下载失败或校验失败会保留原文件。通过 npm/npx 薄包装启动时不会修改包内二进制，请使用 npm 更新包。
+manifest 需要声明版本、当前平台的制品 URL 和 SHA-256。CLI 只有在新版本、平台匹配且摘要校验通过时才替换二进制；下载失败或校验失败会保留原文件。Windows 需要延后替换时返回 `updated=false, scheduled=true`，独立 helper 的最终结果写入 stderr。通过 npm/npx 薄包装启动时不会修改包内二进制，请使用 npm 更新包。
 
 manifest 示例：
 
