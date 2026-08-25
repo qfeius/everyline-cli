@@ -18,6 +18,7 @@ go build ./cmd/everyline-cli
 - user OAuth metadata 读取、PKCE authorization URL、loopback callback、state/error 拒绝、token form exchange、浏览器打开失败降级、user token 缓存和 raw token 入口删除。
 - token 生命周期：服务端 `expire`/`expires_in`、`issued_at`、未知过期 token、status 的 `expiresKnown` 和旧缓存兼容；在服务端契约未支持前不发送 refresh grant。
 - HTTP method/path/query/header/body、普通接口 `code=200` 和结构化 APIError。
+- `startReview` 请求固定携带 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，且 CLI 输入不能覆盖该值。
 - 本地上传业务文件名扩展名、无扩展名路径、2 MiB 边界与 multipart 字段。
 - 普通 V3 工作流的统一 deadline、上传、发起、多次轮询、详情顺序和失败阶段结果输出。
 - CLI 严格 JSON 输入、dry-run、stdout/stderr 与退出码。

@@ -443,7 +443,7 @@ CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自�
 | 2 | `review file upload` | `uploadContractFileV3` | `POST /open-apis/contract-review/v3/file/contract/upload` | multipart `file/name` | 对象；工作流依赖 `fileId/businessId/fileHash` |
 | 3 | `review file upload-url` | `uploadContractFileByURLV3` | `POST /open-apis/contract-review/v1/file/contract/uploadByUrl` | `fileUrl/fileName` | 对象；至少可读取 `fileId` |
 | 4 | `review subject extract` | `smartAuditContractSubjects` | `POST /open-apis/contract-review/v3/smartAudit/contract/subjects` | `businessId/fileId/fileHash?` | 主体信息对象，字段透传 |
-| 5 | `review task start` | `smartAuditTaskStartReview` | `POST /open-apis/contract-review/v3/smartAudit/task/startReview` | Start body | 对象；等待流程依赖 `taskId` |
+| 5 | `review task start` | `smartAuditTaskStartReview` | `POST /open-apis/contract-review/v3/smartAudit/task/startReview` | Start body + 固定 `usageReportContext` | 对象；等待流程依赖 `taskId` |
 | 6 | `review task status` | `smartAuditTaskStatus` | `GET /open-apis/contract-review/v3/smartAudit/task/status` | Task query | 对象；轮询依赖 `status/message?` |
 | 7 | `review task info` | `smartAuditTaskInfo` | `GET /open-apis/contract-review/v3/smartAudit/task/info` | Task query | 完整详情对象，字段透传 |
 | 8 | `checklist create` | `createReviewChecklist` | `POST /open-apis/review-rules/review-checklists` | Checklist | `data` 原形透传 |
@@ -540,7 +540,7 @@ everyline-cli review subject extract \
 
 ### 7.4 发起审查任务
 
-CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串。
+CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，并固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`。该上下文不是 CLI 输入字段，也不能通过 Profile 或 JSON 覆盖。
 
 ```json
 {
@@ -567,6 +567,17 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串。
 | `config.reviewStrength` | integer | 是 | `0`、`1` 或 `2` |
 | `config.selectedCheckListIds` | string[] | 否 | 每项非空 |
 | `config.matchContractTypeRulePackage` | boolean | 否 | 仅 `true` 具有业务意义 |
+| `usageReportContext.reportBusinessCode` | string | CLI 固定 | `everyLine_100_openApi_cli` |
+
+实际 HTTP 请求固定包含：
+
+```json
+{
+  "usageReportContext": {
+    "reportBusinessCode": "everyLine_100_openApi_cli"
+  }
+}
+```
 
 响应为任务对象；`review run` 的等待链路要求响应包含正整数 `taskId`。
 

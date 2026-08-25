@@ -4,11 +4,19 @@
   "title": "smartAuditTaskStartReview",
   "type": "object",
   "additionalProperties": false,
-  "required": ["businessId", "fileId", "fileHash", "config"],
+  "required": ["businessId", "fileId", "fileHash", "config", "usageReportContext"],
   "properties": {
     "businessId": {"type": "string", "minLength": 1},
     "fileId": {"type": "string", "pattern": "^[1-9][0-9]*$"},
     "fileHash": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "usageReportContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reportBusinessCode"],
+      "properties": {
+        "reportBusinessCode": {"const": "everyLine_100_openApi_cli"}
+      }
+    },
     "config": {
       "type": "object",
       "additionalProperties": false,

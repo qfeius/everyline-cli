@@ -63,6 +63,10 @@ func TestServiceStartContract(t *testing.T) {
 	if body["businessId"] != "biz-1" || body["fileId"] != "11" || body["fileHash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("body=%#v", body)
 	}
+	usageReportContext, ok := body["usageReportContext"].(map[string]any)
+	if !ok || usageReportContext["reportBusinessCode"] != usageReportBusinessCodeEverylineCLI {
+		t.Fatalf("body=%#v，usageReportContext.reportBusinessCode 应为固定 CLI 业务编码", body)
+	}
 	if _, exists := body["appType"]; exists {
 		t.Fatalf("body=%#v，不应发送 appType", body)
 	}

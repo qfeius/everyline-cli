@@ -89,6 +89,10 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 			if body["businessId"] != "biz-1" || body["fileId"] != "11" || body["fileHash"] != hash {
 				t.Errorf("start body=%#v", body)
 			}
+			usageReportContext, ok := body["usageReportContext"].(map[string]any)
+			if !ok || usageReportContext["reportBusinessCode"] != usageReportBusinessCodeEverylineCLI {
+				t.Errorf("start body=%#v，缺少固定用量上报业务编码", body)
+			}
 			calls = append(calls, "start")
 			writeIntegrationEnvelope(writer, `{"taskId":88,"status":"running"}`)
 		case pathTaskStatus:

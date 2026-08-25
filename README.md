@@ -173,7 +173,7 @@ everyline-cli review run \
   > result.json 2> progress.log
 ~~~
 
-config.selectedPosition、config.selectedAuditRole 和 config.reviewStrength 是发起审查必填字段。文件来源通常由上传接口补充文件身份；URL 来源还需要提供 businessId 和上传接口返回的 fileHash。
+config.selectedPosition、config.selectedAuditRole 和 config.reviewStrength 是发起审查必填字段。文件来源通常由上传接口补充文件身份；URL 来源还需要提供 businessId 和上传接口返回的 fileHash。发起审查的实际 HTTP 请求会固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。
 
 ### 分步流程
 
@@ -220,7 +220,7 @@ everyline-cli review task result \
 
 review task result 会在 stderr 输出 running 等任务状态，最终审查结果仍输出到 stdout。
 
-CLI 已移除 --app-type 参数；文件上传也不再接受 --business-id。发起审查输入只接受当前契约声明的字段，未知字段会被拒绝。
+CLI 已移除 --app-type 参数；文件上传也不再接受 --business-id。发起审查输入只接受当前契约声明的字段，未知字段会被拒绝；`usageReportContext` 仅由 CLI 在 HTTP 边界固定生成。
 
 ## 自更新
 
