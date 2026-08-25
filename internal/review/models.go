@@ -15,6 +15,8 @@ const (
 	AppTypeCR                     = "CR"
 	AppTypeThirdParty             = "THIRD_PARTY"
 	VisibilityScopeContractResult = "contractResult"
+	// usageReportBusinessCodeEverylineCLI 是 startReview 固定上报的 CLI 业务编码，不接受调用方覆盖。
+	usageReportBusinessCodeEverylineCLI = "everyLine_100_openApi_cli"
 )
 
 // Document 保存平台 data 对象并保留未来新增字段，避免 CLI 因响应扩展而丢数据。
@@ -52,7 +54,7 @@ func (input StartInput) ToRequest() StartRequest {
 
 // ContractPayload 将内部发起请求转换为开放接口边界格式。
 // 入参：无，接收者 StartRequest 为内部使用 int64 表示文件 ID 的请求。
-// 返回值：map[string]any，为 startReview 接口使用字符串 fileId 的规范化请求体。
+// 返回值：map[string]any，为 startReview 接口使用字符串 fileId 并固定携带用量上报业务编码的规范化请求体。
 func (request StartRequest) ContractPayload() map[string]any {
 	request = request.Normalize()
 	payload := map[string]any{
@@ -61,6 +63,10 @@ func (request StartRequest) ContractPayload() map[string]any {
 		"fileId":   strconv.FormatInt(request.FileID, 10),
 		"fileHash": request.FileHash,
 		"config":   request.Config,
+		// 用量归因字段只在 HTTP 边界生成，避免 CLI 输入或 Profile 改写固定业务编码。
+		"usageReportContext": map[string]string{
+			"reportBusinessCode": usageReportBusinessCodeEverylineCLI,
+		},
 	}
 	return payload
 }

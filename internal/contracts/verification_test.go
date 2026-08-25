@@ -60,7 +60,7 @@ func validContractInput(schema string) any {
 	case "review-subject.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1"}
 	case "review-start.schema.json":
-		return map[string]any{"businessId": "biz", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{"selectedPosition": "甲方", "selectedAuditRole": "甲方", "reviewStrength": 1}}
+		return map[string]any{"businessId": "biz", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{"selectedPosition": "甲方", "selectedAuditRole": "甲方", "reviewStrength": 1}, "usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"}}
 	case "review-task-query.schema.json":
 		return map[string]any{"taskId": 1, "businessId": "biz"}
 	case "checklist.schema.json":
@@ -128,9 +128,10 @@ func TestTaskQuerySchemaAllowsOptionalContext(t *testing.T) {
 // TestStartSchemaRequiresReviewConfig 验证发起接口要求 config 及其三个必填字段。
 func TestStartSchemaRequiresReviewConfig(t *testing.T) {
 	input := map[string]any{
-		"businessId": "biz",
-		"fileId":     "1",
-		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"businessId":         "biz",
+		"fileId":             "1",
+		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		"config": map[string]any{
 			"selectedPosition":  "甲方",
 			"selectedAuditRole": "甲方",
@@ -142,10 +143,11 @@ func TestStartSchemaRequiresReviewConfig(t *testing.T) {
 	}
 	for _, missing := range []string{"selectedPosition", "selectedAuditRole", "reviewStrength"} {
 		incomplete := map[string]any{
-			"businessId": "biz",
-			"fileId":     "1",
-			"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			"config":     map[string]any{},
+			"businessId":         "biz",
+			"fileId":             "1",
+			"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"config":             map[string]any{},
+			"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		}
 		incomplete["config"].(map[string]any)[missing] = nil
 		if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", incomplete); !errors.Is(err, ErrContractMismatch) {
@@ -157,9 +159,10 @@ func TestStartSchemaRequiresReviewConfig(t *testing.T) {
 // TestStartSchemaRejectsExcludedFields 验证 startReview CLI 契约不接受文档中的非必填字段。
 func TestStartSchemaRejectsExcludedFields(t *testing.T) {
 	input := map[string]any{
-		"businessId": "biz",
-		"fileId":     "1",
-		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"businessId":         "biz",
+		"fileId":             "1",
+		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		"config": map[string]any{
 			"selectedPosition":  "甲方",
 			"selectedAuditRole": "甲方",
@@ -172,23 +175,20 @@ func TestStartSchemaRejectsExcludedFields(t *testing.T) {
 	}
 }
 
-// TestStartSchemaRejectsInternalUsageContext 验证 startReview Schema 不会放行内部计量上下文字段。
+// TestStartSchemaRequiresFixedUsageContext 验证 startReview 契约要求 CLI 固定生成用量上报业务编码。
 // 入参：t *testing.T 为测试上下文。
-// 返回值：无；Schema 漂移时通过测试失败暴露。
-func TestStartSchemaRejectsInternalUsageContext(t *testing.T) {
-	input := map[string]any{
-		"businessId": "biz",
-		"fileId":     "1",
-		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"config": map[string]any{
-			"selectedPosition":  "甲方",
-			"selectedAuditRole": "甲方",
-			"reviewStrength":    1,
-		},
-		"usageReportContext": map[string]any{},
+// 返回值：无；Schema 接受缺失或被覆盖的固定业务编码时通过 t.Fatal 报告。
+func TestStartSchemaRequiresFixedUsageContext(t *testing.T) {
+	missing := validContractInput("review-start.schema.json").(map[string]any)
+	delete(missing, "usageReportContext")
+	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", missing); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("缺少 usageReportContext 时 err=%v", err)
 	}
-	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); !errors.Is(err, ErrContractMismatch) {
-		t.Fatalf("err=%v，startReview 不应接受 usageReportContext", err)
+
+	overridden := validContractInput("review-start.schema.json").(map[string]any)
+	overridden["usageReportContext"] = map[string]any{"reportBusinessCode": "other-client"}
+	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", overridden); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("覆盖 reportBusinessCode 时 err=%v", err)
 	}
 }
 
@@ -231,9 +231,10 @@ func TestReviewRunSchemaIsExecutable(t *testing.T) {
 // TestReviewStartSchemaAcceptsRuleSelectionOptions 验证审查规则来源参数可在 CLI 契约中传递。
 func TestReviewStartSchemaAcceptsRuleSelectionOptions(t *testing.T) {
 	input := map[string]any{
-		"businessId": "biz",
-		"fileId":     "1",
-		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"businessId":         "biz",
+		"fileId":             "1",
+		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		"config": map[string]any{
 			"selectedPosition":             "甲方",
 			"selectedAuditRole":            "甲方",
