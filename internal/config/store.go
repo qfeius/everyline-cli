@@ -66,7 +66,7 @@ func DefaultDir() (string, error) {
 // 返回值：error，校验或落盘失败时非 nil。
 func (store *FileStore) Add(profile Profile) error {
 	if profile.DefaultOutput == "" {
-		profile.DefaultOutput = "table"
+		profile.DefaultOutput = "json"
 	}
 	if profile.DefaultIdentity == "" {
 		profile.DefaultIdentity = IdentityApp

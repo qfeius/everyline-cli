@@ -56,6 +56,23 @@ func TestFileStoreMissingProfile(t *testing.T) {
 	}
 }
 
+// TestFileStoreDefaultsOutputToJSON 验证新 Profile 未指定输出格式时持久化为 json。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；默认值不是 json 时通过 t.Fatal 报告。
+func TestFileStoreDefaultsOutputToJSON(t *testing.T) {
+	store := NewFileStore(filepath.Join(t.TempDir(), "config.json"))
+	if err := store.Add(Profile{Name: "dev", BaseURL: "https://dev-open.qtech.cn", TokenURL: "https://dev-open.qtech.cn/token", AppID: "cli-dev"}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := store.Get("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.DefaultOutput != "json" {
+		t.Fatalf("default_output=%q，期望 json", profile.DefaultOutput)
+	}
+}
+
 // TestFileStoreConcurrentInstances 验证多个独立仓库实例并发读改写时不会丢失 Profile。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

@@ -12,7 +12,7 @@
 --no-color
 ```
 
-参数优先级：`--profile` 覆盖当前 Profile，仅对本次命令生效；身份选择优先级为 `--as` > Profile 默认身份 > `app`；输出格式优先级为 `--output` > Profile 默认输出 > `table`。
+参数优先级：`--profile` 覆盖当前 Profile，仅对本次命令生效；身份选择优先级为 `--as` > Profile 默认身份 > `app`；输出格式优先级为 `--output` > Profile 默认输出 > `json`。用户显式配置的 `table/yaml/raw` 不会被覆盖。
 
 ## Profile 与鉴权
 
@@ -81,26 +81,28 @@ rule delete --group-id ID --rule-id ID --yes [--dry-run|--print-input]
 rule batch-delete --group-id ID (--id ID... | --input ids.json | --data '[...]') --yes [--dry-run|--print-input]
 
 completion bash|fish|powershell|zsh
-version
-update --manifest-url HTTPS_URL [--dry-run]
+version [--manifest-url HTTPS_URL]
+update [--manifest-url HTTPS_URL] [--dry-run]
 ```
 
-所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端；两者当前行为一致。`review task result` 是 CLI 本地编排，不对应新的远端接口；它会轮询任务状态，默认把每次 `status` 输出到 stderr，成功后自动获取并输出最终详情，stdout 仍只承载最终业务结果。
+所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端；两者当前行为一致。`review task result` 是 CLI 本地编排，不对应新的远端接口；它会轮询任务状态，默认把每次 `status` 输出到 stderr，成功后自动获取最终详情；后端提供顶层 `url` 时补充规范化的 `reviewDetailUrl`。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。
 
 `review run` 使用 URL 来源时，上传接口只返回 `fileId`；输入还需提供 `businessId` 和上传接口返回的 `fileHash`，工作流才会继续发起审查。需要完整闭环时在输入中显式设置 `"wait": true`；省略或设置为 `false` 时命令在发起任务后返回。
 
-`review task start` 和 `review run` 的发起审查输入只保留必填审查字段：`businessId`、`fileId`、`fileHash`、`config.selectedPosition`、`config.selectedAuditRole`、`config.reviewStrength`。实际调用 `startReview` 时固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。`fileHash` 使用上传接口返回值；`fileId` 本次保持当前 CLI 输入类型，不进行全局字符串化。未列出的字段会被严格 JSON 输入拒绝。`review file upload` 也不接受 `--business-id`。主体提取仍必须提供 `--business-id`；任务 status/info/result 默认只需 `--task-id`，使用 `--visibility-scope contractResult` 时仍必须提供 `--business-id`，不再要求 appType。
+`review task start` 和 `review run` 的发起审查输入只保留必填审查字段：`businessId`、`fileId`、`fileHash`、`config.selectedPosition`、`config.selectedAuditRole`、`config.reviewStrength`；立场和角色填写合同主体公司名称。审查强度推荐“弱势/中立/强势”，并兼容旧版 `0/1/2`；CLI 统一转换为后端 `0/1/2`。规则来源要求非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；同时提供时组合执行，没有覆盖或优先级。实际调用 `startReview` 时固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。`fileHash` 使用上传接口返回值；`fileId` 本次保持当前 CLI 输入类型，不进行全局字符串化。未列出的字段会被严格 JSON 输入拒绝。`review file upload` 也不接受 `--business-id`。主体提取仍必须提供 `--business-id`；任务 status/info/result 默认只需 `--task-id`，使用 `--visibility-scope contractResult` 时仍必须提供 `--business-id`，不再要求 appType。
 
 发起审查示例：
 
 ```bash
-everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1}}' --dry-run
-everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"wait":true}' --dry-run
+everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true}}' --dry-run
+everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}' --dry-run
 ```
 
 `checklist batch-create`、`checklist batch-update`、`rule batch-create`、`rule batch-update` 属于非必需批量写能力。它们支持本地 `--dry-run`/`--print-input`，真实调用会在发送 HTTP 请求前失败关闭；单项写入和批量删除不受此限制。
 
-`update` 只支持独立二进制。命令从 `--manifest-url` 指定的 HTTPS manifest 选择当前平台制品，比较 SemVer，下载后校验 SHA-256，再替换当前二进制。同步替换完成时输出 `updated=true, scheduled=false`；Windows 需要等待当前进程退出时输出 `updated=false, scheduled=true`，独立 helper 的最终成功或失败写入 stderr。`--dry-run` 只做 manifest、平台和版本校验。通过 npm/npx 薄包装启动时不会修改包内二进制，应使用 npm 更新包。
+`version` 返回当前构建信息及 `latestVersion/isLatest/updateCommand`；检查失败时 `isLatest=null` 并携带 `checkError`，退出码仍为 0。普通业务命令发现新版本时只在 stderr 提示，检查失败不阻断请求。更新地址按命令参数、`EVERYLINE_CLI_UPDATE_MANIFEST_URL`、发布构建内置值选择。
+
+`update` 只支持独立二进制。命令从解析出的 HTTPS manifest 选择当前平台制品，比较 SemVer，下载后校验 SHA-256，再替换当前二进制。同步替换完成时输出 `updated=true, scheduled=false`；Windows 需要等待当前进程退出时输出 `updated=false, scheduled=true`，独立 helper 的最终成功或失败写入 stderr。`--dry-run` 只做 manifest、平台和版本校验。通过 npm/npx 薄包装启动时不会修改包内二进制，应使用 npm 更新包。
 
 ## 退出码
 

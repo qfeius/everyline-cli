@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -114,11 +115,15 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 	if err := ValidateFileHash(fileHash); err != nil {
 		return result, fmt.Errorf("上传响应中的 fileHash 无效: %w", err)
 	}
+	contractConfig, err := reviewConfigContractPayload(spec.Config)
+	if err != nil {
+		return result, err
+	}
 	startRequest := StartRequest{
 		BusinessID: businessID,
 		FileID:     fileID,
 		FileHash:   fileHash,
-		Config:     spec.Config,
+		Config:     contractConfig,
 	}
 	if spec.ExtractSubjects {
 		result.Subjects, err = workflow.api.ExtractSubjects(workflowContext, startRequest)
@@ -193,7 +198,7 @@ func (workflow *Workflow) Wait(ctx context.Context, query TaskQuery) (Document, 
 	}
 }
 
-// WaitForResult 等待任务成功并获取一次最终详情。
+// WaitForResult 等待任务成功并获取一次最终详情；后端提供预览地址时补充稳定链接字段。
 // 入参：ctx context.Context 控制取消；query TaskQuery 为任务身份。
 // 返回值：Document 为最终详情或失败时的最后状态快照；error 为任务失败、超时、取消或详情查询失败。
 func (workflow *Workflow) WaitForResult(ctx context.Context, query TaskQuery) (Document, error) {
@@ -208,5 +213,35 @@ func (workflow *Workflow) WaitForResult(ctx context.Context, query TaskQuery) (D
 	if err != nil {
 		return snapshot, err
 	}
-	return info, nil
+	result := make(Document, len(info)+1)
+	for key, value := range info {
+		result[key] = value
+	}
+	// 飞书用户 OAuth 的 task/info 不保证返回预览 URL；详情成功不能因此降级为失败。
+	if detailURL, ok := ReviewDetailURL(info); ok {
+		result["reviewDetailUrl"] = detailURL
+	}
+	return result, nil
+}
+
+// ReviewDetailURL 从 task/info 顶层兼容字段读取并校验 http/https 审查详情链接。
+// 入参：document Document 为 task info 的 data 对象。
+// 返回值：string 为可打开链接；bool 表示响应中是否存在有效链接。
+func ReviewDetailURL(document Document) (string, bool) {
+	// `url` 是当前 OpenAPI V3 的正式字段，其余名称只保留既有客户端兼容。
+	for _, key := range []string{"url", "reviewDetailUrl", "review_detail_url", "detailUrl", "detail_url", "resultUrl", "result_url", "reportUrl", "report_url"} {
+		text, ok := document[key].(string)
+		if ok && isUsableReviewURL(text) {
+			return strings.TrimSpace(text), true
+		}
+	}
+	return "", false
+}
+
+// isUsableReviewURL 校验详情链接可由浏览器直接打开，拒绝相对地址和非 HTTP 协议。
+// 入参：value string 为候选链接。
+// 返回值：bool，完整 http/https URL 时为 true。
+func isUsableReviewURL(value string) bool {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
+	return err == nil && parsed.Host != "" && (parsed.Scheme == "http" || parsed.Scheme == "https")
 }

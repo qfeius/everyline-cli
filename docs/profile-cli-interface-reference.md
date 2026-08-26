@@ -40,7 +40,7 @@ Profile 保存在 `~/.everyline-cli/config.json`。可以通过 `EVERYLINE_CONFI
 | `oauth_redirect_url` | `--oauth-redirect-url` | user OAuth 登录时必填 | 本机 loopback callback；当前应使用 HTTP |
 | `oauth_scopes` | `--oauth-scope` | 可选 | OAuth scope；参数可重复或使用逗号分隔 |
 | `default_identity` | `--default-identity` | 可选，默认 `app` | `app` 或 `user` |
-| `default_output` | `--default-output` | 可选，默认 `table` | `json`、`yaml`、`table` 或 `raw` |
+| `default_output` | `--default-output` | 可选，默认 `json` | `json`、`yaml`、`table` 或 `raw`；显式值保持不变 |
 
 远端 URL 必须使用 HTTPS；仅 `localhost`、`127.0.0.0/8` 和 `::1` 等 loopback 地址允许 HTTP。`base-url` 不允许包含 query 或 fragment。
 
@@ -227,7 +227,7 @@ Profile 只影响 C 到 Q 的本地路由和鉴权过程；服务端业务请求
 |---|---:|---|
 | `--profile <name>` | 当前 Profile | 仅覆盖本次命令 |
 | `--as app\|user` | Profile 默认身份，再回退 app | 仅覆盖本次命令 |
-| `--output json\|yaml\|table\|raw` | Profile 默认输出，再回退 table | 控制 stdout 格式 |
+| `--output json\|yaml\|table\|raw` | Profile 默认输出，再回退 json | 控制 stdout 格式 |
 | `--raw` | `false` | 等价于 `--output raw`，输出紧凑 JSON，不是原始 HTTP envelope |
 | `--timeout <duration>` | `30s` | 单次业务操作总预算，包含取 token、重试和退避 |
 | `--verbose` | `false` | 将进度写入 stderr，不污染 stdout |
@@ -413,8 +413,8 @@ CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自�
 
 | CLI 命令 | 入参 | 响应 |
 |---|---|---|
-| `version` | 无 | `{"version":"...","commit":"...","date":"..."}` |
-| `update` | 必填 `--manifest-url HTTPS_URL`，可选 `--dry-run` | `currentVersion/latestVersion/platform/updated/scheduled/dryRun` |
+| `version` | 可选 `--manifest-url HTTPS_URL` | `version/commit/date/latestVersion/isLatest/updateCommand/checkError?` |
+| `update` | 可选 `--manifest-url HTTPS_URL`、`--dry-run`；也可使用环境变量或发布构建内置地址 | `currentVersion/latestVersion/platform/updated/scheduled/dryRun` |
 | `completion bash\|fish\|powershell\|zsh` | shell 名称 | 对应 shell completion 脚本文本 |
 
 更新 manifest：
@@ -548,9 +548,9 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
   "fileId": 11,
   "fileHash": "<64_HEX_SHA256>",
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
-    "reviewStrength": 1,
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
+    "reviewStrength": "中立",
     "selectedCheckListIds": ["check-1"],
     "matchContractTypeRulePackage": true
   }
@@ -562,11 +562,11 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
 | `businessId` | string | 是 | 非空 |
 | `fileId` | integer | 是 | 大于 0；HTTP 中发送为 string |
 | `fileHash` | string | 是 | 64 位 SHA-256 十六进制 |
-| `config.selectedPosition` | string | 是 | 非空 |
-| `config.selectedAuditRole` | string | 是 | 非空 |
-| `config.reviewStrength` | integer | 是 | `0`、`1` 或 `2` |
-| `config.selectedCheckListIds` | string[] | 否 | 每项非空 |
-| `config.matchContractTypeRulePackage` | boolean | 否 | 仅 `true` 具有业务意义 |
+| `config.selectedPosition` | string | 是 | 合同主体公司名称，非空 |
+| `config.selectedAuditRole` | string | 是 | 合同主体公司名称，非空 |
+| `config.reviewStrength` | string 或 integer | 是 | 推荐 `弱势`、`中立`、`强势`，兼容旧版 `0/1/2`；HTTP 统一发送 `0/1/2` |
+| `config.selectedCheckListIds` | string[] | 条件必填 | 非空数组，每项非空 |
+| `config.matchContractTypeRulePackage` | boolean | 条件必填 | 仅 `true` 构成有效规则来源 |
 | `usageReportContext.reportBusinessCode` | string | CLI 固定 | `everyLine_100_openApi_cli` |
 
 实际 HTTP 请求固定包含：
@@ -579,7 +579,7 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
 }
 ```
 
-响应为任务对象；`review run` 的等待链路要求响应包含正整数 `taskId`。
+`selectedCheckListIds` 非空或 `matchContractTypeRulePackage=true` 至少满足一项；两项同时提供时组合执行，互不覆盖且没有优先级。响应为任务对象；`review run` 的等待链路要求响应包含正整数 `taskId`。
 
 ### 7.5 任务查询
 
@@ -601,7 +601,7 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
 
 `info` 响应为完整任务详情对象，CLI 不裁剪字段。
 
-`result` 额外支持 `--interval`（默认 `2s`）和 `--deadline`（默认 `10m`）。stdout 输出最终 `info.data`；每次状态写入 stderr。失败时 stdout 尽量输出最后状态快照，同时进程返回非零退出码。
+`result` 额外支持 `--interval`（默认 `2s`）和 `--deadline`（默认 `10m`）。stdout 输出最终 `info.data`，后端提供顶层 `url` 时规范化为 `reviewDetailUrl`；每次状态写入 stderr。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。
 
 ### 7.6 一键 review run
 
@@ -615,9 +615,10 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
     "name": "合同.pdf"
   },
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
-    "reviewStrength": 1
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
+    "reviewStrength": "中立",
+    "matchContractTypeRulePackage": true
   },
   "extractSubjects": true,
   "wait": true
@@ -636,9 +637,10 @@ URL 来源输入：
   "businessId": "biz-1",
   "fileHash": "<64_HEX_SHA256>",
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
-    "reviewStrength": 1
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
+    "reviewStrength": "中立",
+    "matchContractTypeRulePackage": true
   },
   "wait": true
 }

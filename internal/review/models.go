@@ -3,6 +3,7 @@ package review
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,6 +19,9 @@ const (
 	// usageReportBusinessCodeEverylineCLI 是 startReview 固定上报的 CLI 业务编码，不接受调用方覆盖。
 	usageReportBusinessCodeEverylineCLI = "everyLine_100_openApi_cli"
 )
+
+// ErrReviewRuleSourceRequired 表示发起审查时没有选择任何可执行的规则来源。
+var ErrReviewRuleSourceRequired = errors.New("至少提供一种规则来源：非空 selectedCheckListIds，或 matchContractTypeRulePackage=true")
 
 // Document 保存平台 data 对象并保留未来新增字段，避免 CLI 因响应扩展而丢数据。
 type Document map[string]any
@@ -42,14 +46,43 @@ type StartInput struct {
 	Config     map[string]any `json:"config" yaml:"config"`
 }
 
-// ToRequest 将 CLI 输入转换为内部发起请求；fileId 继续保持当前 CLI 的 int64 输入行为。
-func (input StartInput) ToRequest() StartRequest {
+// Normalize 规范化 start CLI 输入中的文本和审查配置，不改变字段语义。
+// 入参：无，接收者 StartInput 为用户输入。
+// 返回值：StartInput，为可执行本地校验和转换的规范化输入。
+func (input StartInput) Normalize() StartInput {
+	input.BusinessID = strings.TrimSpace(input.BusinessID)
+	input.FileHash = normalizeSHA256(input.FileHash)
+	input.Config = normalizeReviewConfig(input.Config)
+	return input
+}
+
+// Validate 校验 start CLI 输入模型，并在 HTTP 模型转换前执行规则来源组合校验。
+// 入参：无，接收者 StartInput 为用户输入。
+// 返回值：error，输入合法且至少选择一种规则来源时为 nil。
+func (input StartInput) Validate() error {
+	input = input.Normalize()
+	schemaErr := contracts.ValidateSchema("review-start-input.schema.json", input)
+	if ruleErr := ValidateReviewRuleSources(input.Config); ruleErr != nil && hasValidReviewInputCore(input.Config) {
+		return ruleErr
+	}
+	return schemaErr
+}
+
+// ToRequest 将中文 CLI 输入转换为后端发起请求；fileId 继续保持当前 CLI 的 int64 输入行为。
+// 入参：无，接收者 StartInput 为已校验或待转换的用户输入。
+// 返回值：StartRequest 为使用数字审查强度的后端模型；error 为未知审查强度。
+func (input StartInput) ToRequest() (StartRequest, error) {
+	input = input.Normalize()
+	config, err := reviewConfigContractPayload(input.Config)
+	if err != nil {
+		return StartRequest{}, err
+	}
 	return StartRequest{
 		BusinessID: input.BusinessID,
 		FileID:     input.FileID,
 		FileHash:   input.FileHash,
-		Config:     input.Config,
-	}
+		Config:     config,
+	}, nil
 }
 
 // ContractPayload 将内部发起请求转换为开放接口边界格式。
@@ -145,9 +178,7 @@ type RunSpec struct {
 func (spec RunSpec) Normalize() RunSpec {
 	spec.BusinessID = strings.TrimSpace(spec.BusinessID)
 	spec.FileHash = normalizeSHA256(spec.FileHash)
-	if spec.Config == nil {
-		spec.Config = map[string]any{}
-	}
+	spec.Config = normalizeReviewConfig(spec.Config)
 	return spec
 }
 
@@ -155,7 +186,137 @@ func (spec RunSpec) Normalize() RunSpec {
 // 入参：无，接收者 RunSpec 为已归一化或待归一化的工作流输入。
 // 返回值：error，输入符合 review-run.schema.json 时为 nil。
 func (spec RunSpec) Validate() error {
-	return contracts.ValidateSchema("review-run.schema.json", spec.Normalize())
+	spec = spec.Normalize()
+	schemaErr := contracts.ValidateSchema("review-run.schema.json", spec)
+	if ruleErr := ValidateReviewRuleSources(spec.Config); ruleErr != nil && hasValidReviewInputCore(spec.Config) {
+		return ruleErr
+	}
+	return schemaErr
+}
+
+// ValidateReviewRuleSources 校验自定义清单和合同类型规则包至少启用一项；两项可同时生效。
+// 入参：config map[string]any 为 CLI 或后端审查配置。
+// 返回值：error，存在非空 selectedCheckListIds 或 matchContractTypeRulePackage=true 时为 nil。
+func ValidateReviewRuleSources(config map[string]any) error {
+	if hasSelectedChecklist(config["selectedCheckListIds"]) {
+		return nil
+	}
+	if enabled, ok := config["matchContractTypeRulePackage"].(bool); ok && enabled {
+		return nil
+	}
+	return ErrReviewRuleSourceRequired
+}
+
+// reviewConfigContractPayload 将 CLI 中文或兼容数字审查强度转换为后端 0/1/2 枚举，并复制其余配置。
+// 入参：config map[string]any 为已校验的 CLI 审查配置。
+// 返回值：map[string]any 为后端 config；error 为 reviewStrength 缺失或取值未知。
+func reviewConfigContractPayload(config map[string]any) (map[string]any, error) {
+	result := make(map[string]any, len(config))
+	for key, value := range config {
+		result[key] = value
+	}
+	strength, err := reviewStrengthContractValue(result["reviewStrength"])
+	if err != nil {
+		return nil, err
+	}
+	result["reviewStrength"] = strength
+	return result, nil
+}
+
+// reviewStrengthContractValue 将 CLI 新旧两种强度输入统一为后端整数枚举。
+// 入参：value any 为中文标签，或 JSON/Go 数字 0、1、2。
+// 返回值：int 为后端枚举；error 为类型或取值不受支持。
+func reviewStrengthContractValue(value any) (int, error) {
+	switch strength := value.(type) {
+	case string:
+		switch strings.TrimSpace(strength) {
+		case "弱势":
+			return 0, nil
+		case "中立":
+			return 1, nil
+		case "强势":
+			return 2, nil
+		}
+	case json.Number:
+		if number, err := strength.Int64(); err == nil && number >= 0 && number <= 2 {
+			return int(number), nil
+		}
+	case int:
+		if strength >= 0 && strength <= 2 {
+			return strength, nil
+		}
+	case int64:
+		if strength >= 0 && strength <= 2 {
+			return int(strength), nil
+		}
+	case float64:
+		if strength == 0 || strength == 1 || strength == 2 {
+			return int(strength), nil
+		}
+	}
+	return 0, fmt.Errorf("config.reviewStrength 必须是弱势、中立、强势或 0、1、2")
+}
+
+// normalizeReviewConfig 复制并清理 CLI 审查配置中的文本，避免直接修改调用方 map。
+// 入参：config map[string]any 为原始配置。
+// 返回值：map[string]any，为至少非 nil 的配置副本。
+func normalizeReviewConfig(config map[string]any) map[string]any {
+	result := make(map[string]any, len(config))
+	for key, value := range config {
+		switch key {
+		case "selectedPosition", "selectedAuditRole", "reviewStrength":
+			if text, ok := value.(string); ok {
+				value = strings.TrimSpace(text)
+			}
+		case "selectedCheckListIds":
+			if values, ok := value.([]any); ok {
+				normalized := make([]any, len(values))
+				for index, item := range values {
+					if text, isText := item.(string); isText {
+						item = strings.TrimSpace(text)
+					}
+					normalized[index] = item
+				}
+				value = normalized
+			}
+		}
+		result[key] = value
+	}
+	return result
+}
+
+// hasSelectedChecklist 判断配置值是否包含至少一个非空清单 ID，并兼容解码和领域测试的切片类型。
+// 入参：value any 为 selectedCheckListIds 字段值。
+// 返回值：bool，至少包含一个非空字符串时为 true。
+func hasSelectedChecklist(value any) bool {
+	switch values := value.(type) {
+	case []string:
+		for _, item := range values {
+			if strings.TrimSpace(item) != "" {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range values {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasValidReviewInputCore 判断规则来源之外的三个 CLI 审查字段是否已具备有效类型和值。
+// 入参：config map[string]any 为 CLI 审查配置。
+// 返回值：bool，立场、角色和中文或兼容数字强度均有效时为 true。
+func hasValidReviewInputCore(config map[string]any) bool {
+	position, positionOK := config["selectedPosition"].(string)
+	role, roleOK := config["selectedAuditRole"].(string)
+	if !positionOK || !roleOK || strings.TrimSpace(position) == "" || strings.TrimSpace(role) == "" {
+		return false
+	}
+	_, err := reviewStrengthContractValue(config["reviewStrength"])
+	return err == nil
 }
 
 // ValidateFileHash 校验 V3 发起审查所需的 SHA-256 十六进制指纹。

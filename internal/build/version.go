@@ -2,9 +2,10 @@ package build
 
 // 这些变量由发布构建通过 -ldflags 注入；本地构建保留可识别的默认值。
 var (
-	Version = "dev"
-	Commit  = "unknown"
-	Date    = "unknown"
+	Version           = "dev"
+	Commit            = "unknown"
+	Date              = "unknown"
+	UpdateManifestURL = ""
 )
 
 // Info 表示可稳定序列化的构建信息。

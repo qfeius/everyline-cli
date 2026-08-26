@@ -94,7 +94,7 @@ func (profile Profile) Validate() error {
 	}
 	profile.DefaultIdentity = identity
 	if profile.DefaultOutput == "" {
-		profile.DefaultOutput = "table"
+		profile.DefaultOutput = "json"
 	}
 	switch profile.DefaultOutput {
 	case "json", "yaml", "table", "raw":

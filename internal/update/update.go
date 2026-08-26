@@ -60,6 +60,13 @@ type Result struct {
 	DryRun         bool   `json:"dryRun" yaml:"dryRun"`
 }
 
+// CheckResult 表示只比较版本、不选择或下载平台制品的检查结果。
+type CheckResult struct {
+	CurrentVersion string
+	LatestVersion  string
+	IsLatest       bool
+}
+
 var semverPattern = regexp.MustCompile(`^v?([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$`)
 
 type version struct {
@@ -67,6 +74,33 @@ type version struct {
 	minor      uint64
 	patch      uint64
 	prerelease []string
+}
+
+// Check 获取 manifest 并比较当前版本；失败由调用方决定是否阻断业务命令。
+// 入参：ctx context.Context 控制请求；currentVersion/manifestURL string 为当前版本和 HTTPS manifest；httpClient *http.Client 为网络依赖。
+// 返回值：CheckResult 为版本比较结果；error 为 URL、SemVer 或 manifest 获取错误。
+func Check(ctx context.Context, currentVersion string, manifestURL string, httpClient *http.Client) (CheckResult, error) {
+	manifestURL = strings.TrimSpace(manifestURL)
+	if err := validateHTTPSURL(manifestURL, "manifest URL"); err != nil {
+		return CheckResult{}, err
+	}
+	current, err := parseVersion(currentVersion)
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("当前版本不可用于版本检查: %w", err)
+	}
+	manifest, err := fetchManifest(ctx, httpClient, manifestURL)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	latest, err := parseVersion(manifest.Version)
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("manifest version 无效: %w", err)
+	}
+	return CheckResult{
+		CurrentVersion: strings.TrimSpace(currentVersion),
+		LatestVersion:  strings.TrimSpace(manifest.Version),
+		IsLatest:       compareVersions(current, latest) >= 0,
+	}, nil
 }
 
 // Run 获取 manifest、校验当前平台制品并在需要时完成独立二进制更新。

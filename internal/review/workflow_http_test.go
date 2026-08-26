@@ -93,6 +93,10 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 			if !ok || usageReportContext["reportBusinessCode"] != usageReportBusinessCodeEverylineCLI {
 				t.Errorf("start body=%#v，缺少固定用量上报业务编码", body)
 			}
+			configBody, ok := body["config"].(map[string]any)
+			if !ok || configBody["reviewStrength"] != float64(1) || configBody["matchContractTypeRulePackage"] != true {
+				t.Errorf("start body=%#v，CLI 中文强度应转换为后端枚举并保留规则来源", body)
+			}
 			calls = append(calls, "start")
 			writeIntegrationEnvelope(writer, `{"taskId":88,"status":"running"}`)
 		case pathTaskStatus:
@@ -107,7 +111,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 		case pathTaskInfo:
 			assertIntegrationTaskQuery(t, request)
 			calls = append(calls, "info")
-			writeIntegrationEnvelope(writer, `{"taskId":88,"status":"success","result":[]}`)
+			writeIntegrationEnvelope(writer, `{"taskId":88,"status":"success","url":"https://review.example.com/tasks/88","result":[]}`)
 		default:
 			http.NotFound(writer, request)
 		}
@@ -133,6 +137,9 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 	}
 	if status, _ := StringValue(result.Final, "status"); status != "success" {
 		t.Fatalf("final=%#v", result.Final)
+	}
+	if detailURL, _ := StringValue(result.Final, "reviewDetailUrl"); detailURL != "https://review.example.com/tasks/88" {
+		t.Fatalf("final=%#v，后端顶层 url 应提升为稳定字段", result.Final)
 	}
 	expected := []string{"upload", "subjects", "start", "status", "status", "info"}
 	if strings.Join(calls, ",") != strings.Join(expected, ",") {

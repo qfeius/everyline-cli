@@ -108,6 +108,9 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			}
 			if existing, existingErr := runtime.Profiles.Get(profile.Name); existingErr == nil {
 				profile.DefaultIdentity = existing.DefaultIdentity
+				if !command.Flags().Changed("default-output") {
+					profile.DefaultOutput = existing.DefaultOutput
+				}
 				if profile.UserBaseURL == "" {
 					profile.UserBaseURL = existing.UserBaseURL
 				}
@@ -132,6 +135,9 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			} else if !errors.Is(existingErr, config.ErrProfileNotFound) {
 				return existingErr
 			}
+			if profile.DefaultOutput == "" {
+				profile.DefaultOutput = "json"
+			}
 			if defaultIdentity != "" {
 				identity, err := config.ParseIdentityKind(defaultIdentity)
 				if err != nil {
@@ -154,7 +160,7 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			if err := runtime.Profiles.Add(profile); err != nil {
 				return err
 			}
-			return render(runtime, root, "table", profile)
+			return render(runtime, root, profile.DefaultOutput, profile)
 		},
 	}
 	withNotes(command, "Profile 不保存 app secret 或 access token。")
@@ -170,7 +176,7 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().StringVar(&oauthRedirectURL, "oauth-redirect-url", "", "用户 OAuth loopback 回调 URL")
 	command.Flags().StringSliceVar(&oauthScopes, "oauth-scope", nil, "用户 OAuth scope，可重复传入")
 	command.Flags().StringVar(&defaultIdentity, "default-identity", "", "默认业务身份：app|user")
-	command.Flags().StringVar(&defaultOutput, "default-output", "table", "默认输出格式")
+	command.Flags().StringVar(&defaultOutput, "default-output", "", "默认输出格式，省略时为 json")
 	return command
 }
 

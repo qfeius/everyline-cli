@@ -15,15 +15,17 @@ type fakeAPI struct {
 	index    int
 	calls    []string
 	infoErr  error
+	info     Document
 	queries  []TaskQuery
 	contexts map[string]context.Context
 }
 
 func validReviewConfig() map[string]any {
 	return map[string]any{
-		"selectedPosition":  "甲方",
-		"selectedAuditRole": "甲方",
-		"reviewStrength":    1,
+		"selectedPosition":             "xxx公司",
+		"selectedAuditRole":            "xxx公司",
+		"reviewStrength":               1,
+		"matchContractTypeRulePackage": true,
 	}
 }
 
@@ -118,7 +120,10 @@ func (api *fakeAPI) Info(ctx context.Context, query TaskQuery) (Document, error)
 	if api.infoErr != nil {
 		return nil, api.infoErr
 	}
-	return Document{"taskId": int64(88), "status": "success", "result": []any{}}, nil
+	if api.info != nil {
+		return api.info, nil
+	}
+	return Document{"taskId": int64(88), "status": "success", "url": "https://review.example.com/tasks/88", "result": []any{}}, nil
 }
 
 // instantClock 让轮询测试无需真实等待。
@@ -198,6 +203,27 @@ func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
 		if query.VisibilityScope != VisibilityScopeContractResult || query.BusinessID != "biz-1" || query.AppType != AppTypeCLM {
 			t.Fatalf("query=%#v，详情查询必须复用完整任务上下文", query)
 		}
+	}
+}
+
+// TestWorkflowWaitForResultAllowsMissingDetailLink 验证 OAuth 详情没有预览链接时仍保留成功详情。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；成功语义、详情内容或可选链接字段不符合预期时通过 t.Fatal 报告。
+func TestWorkflowWaitForResultAllowsMissingDetailLink(t *testing.T) {
+	api := &fakeAPI{
+		statuses: []Document{{"taskId": int64(88), "status": "success"}},
+		info:     Document{"taskId": int64(88), "status": "success", "result": []any{"risk-card"}},
+	}
+	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
+	result, err := workflow.WaitForResult(context.Background(), TaskQuery{TaskID: 88})
+	if err != nil {
+		t.Fatalf("err=%v，OAuth 详情缺少预览链接时仍应成功", err)
+	}
+	if status, _ := StringValue(result, "status"); status != "success" || len(result["result"].([]any)) != 1 {
+		t.Fatalf("result=%#v，缺少链接时应返回完整详情", result)
+	}
+	if _, exists := result["reviewDetailUrl"]; exists {
+		t.Fatalf("result=%#v，后端未返回链接时不应伪造 reviewDetailUrl", result)
 	}
 }
 

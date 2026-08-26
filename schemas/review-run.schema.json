@@ -39,13 +39,28 @@
       "properties": {
         "selectedPosition": {"type": "string", "minLength": 1},
         "selectedAuditRole": {"type": "string", "minLength": 1},
-        "reviewStrength": {"type": "integer", "enum": [0, 1, 2]},
+        "reviewStrength": {
+          "oneOf": [
+            {"type": "string", "enum": ["弱势", "中立", "强势"]},
+            {"type": "integer", "enum": [0, 1, 2]}
+          ]
+        },
         "selectedCheckListIds": {
           "type": "array",
+          "minItems": 1,
           "items": {"type": "string", "minLength": 1}
         },
         "matchContractTypeRulePackage": {"type": "boolean"}
-      }
+      },
+      "anyOf": [
+        {"required": ["selectedCheckListIds"]},
+        {
+          "required": ["matchContractTypeRulePackage"],
+          "properties": {
+            "matchContractTypeRulePackage": {"const": true}
+          }
+        }
+      ]
     },
     "extractSubjects": {"type": "boolean", "default": false},
     "wait": {"type": "boolean"}
