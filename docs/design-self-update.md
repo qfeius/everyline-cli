@@ -74,7 +74,7 @@ Windows 无法覆盖正在运行的可执行文件时，CLI 先复制出独立 h
 
 ## `review task result` 当前边界
 
-命令默认轮询 `status`，每次响应向 stderr 输出状态；`success` 后调用一次 `info`，校验并规范化可用详情链接为顶层 `reviewDetailUrl`，stdout 只输出最终业务结果。链接缺失或不可用时返回最后状态快照和错误。CLI 当前确认的状态集合为：
+命令默认轮询 `status`，每次响应向 stderr 输出状态；`success` 后调用一次 `info`，顶层 `url` 可用时规范化为 `reviewDetailUrl`，stdout 只输出最终业务结果。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。CLI 当前确认的状态集合为：
 
 - `running`：继续轮询；
 - `success`：结束轮询并获取详情；

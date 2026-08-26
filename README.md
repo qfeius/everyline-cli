@@ -174,7 +174,7 @@ everyline-cli review run \
   > result.json 2> progress.log
 ~~~
 
-config.selectedPosition、config.selectedAuditRole 和 config.reviewStrength 是发起审查必填字段，其中立场和角色填写合同主体公司名称。`reviewStrength` 使用“弱势/中立/强势”，CLI 在 HTTP 边界分别转换为 `0/1/2`。规则来源必须满足非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；两项同时提供时组合执行，互不覆盖且没有优先级。文件来源通常由上传接口补充文件身份；URL 来源还需要提供 businessId 和上传接口返回的 fileHash。发起审查的实际 HTTP 请求会固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。
+config.selectedPosition、config.selectedAuditRole 和 config.reviewStrength 是发起审查必填字段，其中立场和角色填写合同主体公司名称。`reviewStrength` 推荐使用“弱势/中立/强势”，并兼容旧版 `0/1/2`；CLI 在 HTTP 边界统一转换为 `0/1/2`。规则来源必须满足非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；两项同时提供时组合执行，互不覆盖且没有优先级。文件来源通常由上传接口补充文件身份；URL 来源还需要提供 businessId 和上传接口返回的 fileHash。发起审查的实际 HTTP 请求会固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。
 
 ### 分步流程
 
@@ -219,7 +219,7 @@ everyline-cli review task result \
   --output json > result.json
 ~~~
 
-review task result 会在 stderr 输出 running 等任务状态，最终审查结果和规范化的 `reviewDetailUrl` 输出到 stdout。任务成功但详情响应缺少可用链接时，命令返回非零并输出最后状态快照。
+review task result 会在 stderr 输出 running 等任务状态，并把最终审查结果输出到 stdout；后端提供顶层 `url` 时会规范化为 `reviewDetailUrl`。飞书用户 OAuth 响应缺少预览链接时仍返回完整成功详情。
 
 CLI 已移除 --app-type 参数；文件上传也不再接受 --business-id。发起审查输入只接受当前契约声明的字段，未知字段会被拒绝；`usageReportContext` 仅由 CLI 在 HTTP 边界固定生成。
 

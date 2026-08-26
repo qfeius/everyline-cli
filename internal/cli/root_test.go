@@ -970,6 +970,20 @@ func TestReviewStartDryRun(t *testing.T) {
 	}
 }
 
+// TestReviewStartDryRunAcceptsLegacyNumericStrength 验证旧版数字强度输入仍可通过 CLI 校验并发往相同后端枚举。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；兼容输入被拒绝或输出枚举漂移时通过 t.Fatal 报告。
+func TestReviewStartDryRunAcceptsLegacyNumericStrength(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":1,"matchContractTypeRulePackage":true}}`
+	if err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"reviewStrength": 1`) {
+		t.Fatalf("stdout=%s，旧数字强度应输出相同后端枚举", stdout.String())
+	}
+}
+
 // TestReviewStartDryRunRejectsMissingRuleSource 验证规则来源全部缺失时 dry-run 在本地以用法错误阻断。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；未阻断、错误不明确或退出码不是 2 时通过 t.Fatal 报告。
@@ -1096,11 +1110,11 @@ func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 // TestReviewRunURLDryRunDefaultsConfig 验证 URL 工作流的身份字段和默认配置在 CLI 层可见。
 func TestReviewRunURLDryRunDefaultsConfig(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
+	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"selectedAuditRole": "xxx公司"`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
+	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"selectedAuditRole": "xxx公司"`) || !strings.Contains(stdout.String(), `"reviewStrength": 1`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
@@ -1419,7 +1433,7 @@ func TestReviewTaskResultPollsAndRendersInfo(t *testing.T) {
 			if request.URL.Query().Get("appType") != "" || request.URL.Query().Get("visibilityScope") != review.VisibilityScopeContractResult {
 				t.Errorf("info query=%s", request.URL.RawQuery)
 			}
-			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"success","reviewDetailUrl":"https://review.example.com/tasks/88","result":{"riskCount":0}}}`))
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"success","url":"https://review.example.com/tasks/88","result":{"riskCount":0}}}`))
 		default:
 			http.NotFound(writer, request)
 		}

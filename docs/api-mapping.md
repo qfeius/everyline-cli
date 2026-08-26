@@ -40,7 +40,7 @@
 
 任务 `status/info/result` 查询默认只要求 `taskId`；使用 `visibilityScope=contractResult` 时，当前服务端兼容契约只要求 `businessId`，不再要求 `appType`。CLI 已移除 `--app-type`，查询请求不会自动补入 appType。
 
-`review task start` 与 `review run` 的调用方输入只保留 `businessId`、`fileId`、`fileHash` 和 `config`；`config` 必须包含 `selectedPosition`、`selectedAuditRole`、`reviewStrength`，其中 CLI 强度取值为“弱势/中立/强势”，HTTP 边界转换为 `0/1/2`。非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少满足一项，两项同时提供时组合执行。在调用 `smartAuditTaskStartReview` 的 HTTP 边界，CLI 固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，该字段不接受输入或 Profile 覆盖。`fileHash` 使用上传接口返回的文件指纹；CLI 不接收文档中其他非必填字段，未知字段会在 JSON 解码阶段拒绝。`fileId` 本次仍保持 CLI 当前输入和内部类型行为，不纳入字符串化改造。`review subject extract` 的 `fileHash` 仍按文档作为可选链路追踪字段透传。
+`review task start` 与 `review run` 的调用方输入只保留 `businessId`、`fileId`、`fileHash` 和 `config`；`config` 必须包含 `selectedPosition`、`selectedAuditRole`、`reviewStrength`，其中 CLI 推荐“弱势/中立/强势”并兼容旧版 `0/1/2`，HTTP 边界统一转换为 `0/1/2`。非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少满足一项，两项同时提供时组合执行。在调用 `smartAuditTaskStartReview` 的 HTTP 边界，CLI 固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，该字段不接受输入或 Profile 覆盖。`fileHash` 使用上传接口返回的文件指纹；CLI 不接收文档中其他非必填字段，未知字段会在 JSON 解码阶段拒绝。`fileId` 本次仍保持 CLI 当前输入和内部类型行为，不纳入字符串化改造。`review subject extract` 的 `fileHash` 仍按文档作为可选链路追踪字段透传。
 
 `review run` 的数据流为：上传 -> 可选主体提取 -> 发起 -> 可选轮询 -> 详情。文件上传响应提供 `businessId/fileId/fileHash`；标准 URL 上传接口只返回文件 ID，因此 URL 来源需要在 RunSpec 中额外提供 `businessId` 和上传接口返回的 `fileHash`。
 

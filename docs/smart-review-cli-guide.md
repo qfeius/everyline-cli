@@ -310,7 +310,7 @@ Agent 负责整理审查配置、先 dry-run，再调用 `review run` 完成上�
 | `fileHash` | string | 条件 | URL 来源必填，64 位 SHA-256 十六进制 |
 | `config.selectedPosition` | string | 是 | 审查立场，填写合同主体公司名称 |
 | `config.selectedAuditRole` | string | 是 | 审查角色，填写合同主体公司名称 |
-| `config.reviewStrength` | string | 是 | `弱势`、`中立`、`强势`；CLI 转换为后端 `0/1/2` |
+| `config.reviewStrength` | string 或 integer | 是 | 推荐 `弱势`、`中立`、`强势`，兼容旧版 `0/1/2`；CLI 转换为后端 `0/1/2` |
 | `config.selectedCheckListIds` | string[] | 条件 | 指定审查清单 ID，每项非空 |
 | `config.matchContractTypeRulePackage` | boolean | 条件 | 是否匹配合同类型规则包，仅 `true` 可作为规则来源 |
 | `extractSubjects` | boolean | 否 | 是否在审查前提取合同主体，默认 `false` |
@@ -541,7 +541,7 @@ everyline-cli review task result \
   2> progress.log
 ```
 
-最终详情为后端 `task/info` 的 `data` 原形；CLI 将业务 JSON 写到 stdout，将轮询进度和错误写到 stderr。
+最终详情保留后端 `task/info` 的 `data`；顶层 `url` 存在时，CLI 额外补充稳定字段 `reviewDetailUrl`。飞书用户 OAuth 没有预览链接时仍返回完整成功详情。CLI 将业务 JSON 写到 stdout，将轮询进度和错误写到 stderr。
 
 ### 场景 7：审查清单管理
 

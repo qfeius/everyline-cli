@@ -111,7 +111,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 		case pathTaskInfo:
 			assertIntegrationTaskQuery(t, request)
 			calls = append(calls, "info")
-			writeIntegrationEnvelope(writer, `{"taskId":88,"status":"success","result":{"detailUrl":"https://review.example.com/tasks/88"}}`)
+			writeIntegrationEnvelope(writer, `{"taskId":88,"status":"success","url":"https://review.example.com/tasks/88","result":[]}`)
 		default:
 			http.NotFound(writer, request)
 		}
@@ -139,7 +139,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 		t.Fatalf("final=%#v", result.Final)
 	}
 	if detailURL, _ := StringValue(result.Final, "reviewDetailUrl"); detailURL != "https://review.example.com/tasks/88" {
-		t.Fatalf("final=%#v，嵌套详情链接应提升为稳定字段", result.Final)
+		t.Fatalf("final=%#v，后端顶层 url 应提升为稳定字段", result.Final)
 	}
 	expected := []string{"upload", "subjects", "start", "status", "status", "info"}
 	if strings.Join(calls, ",") != strings.Join(expected, ",") {

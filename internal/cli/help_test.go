@@ -61,7 +61,7 @@ func TestHelpExplainsReviewStartInputContract(t *testing.T) {
 		"fileHash string（必填，使用上传接口返回值）",
 		"config.selectedPosition string（必填）",
 		"config.selectedAuditRole string（必填）",
-		"config.reviewStrength string（必填，弱势|中立|强势）",
+		"config.reviewStrength string|integer（必填，弱势|中立|强势，兼容 0|1|2）",
 		"config.selectedCheckListIds array<string>（条件必填）",
 		"config.matchContractTypeRulePackage boolean（条件必填）",
 		"规则来源至少提供一项",

@@ -207,7 +207,7 @@ func ValidateReviewRuleSources(config map[string]any) error {
 	return ErrReviewRuleSourceRequired
 }
 
-// reviewConfigContractPayload 将 CLI 中文审查强度转换为后端 0/1/2 枚举，并复制其余配置。
+// reviewConfigContractPayload 将 CLI 中文或兼容数字审查强度转换为后端 0/1/2 枚举，并复制其余配置。
 // 入参：config map[string]any 为已校验的 CLI 审查配置。
 // 返回值：map[string]any 为后端 config；error 为 reviewStrength 缺失或取值未知。
 func reviewConfigContractPayload(config map[string]any) (map[string]any, error) {
@@ -215,21 +215,46 @@ func reviewConfigContractPayload(config map[string]any) (map[string]any, error) 
 	for key, value := range config {
 		result[key] = value
 	}
-	strength, ok := result["reviewStrength"].(string)
-	if !ok {
-		return nil, fmt.Errorf("config.reviewStrength 必须是弱势、中立或强势")
+	strength, err := reviewStrengthContractValue(result["reviewStrength"])
+	if err != nil {
+		return nil, err
 	}
-	switch strings.TrimSpace(strength) {
-	case "弱势":
-		result["reviewStrength"] = 0
-	case "中立":
-		result["reviewStrength"] = 1
-	case "强势":
-		result["reviewStrength"] = 2
-	default:
-		return nil, fmt.Errorf("config.reviewStrength 必须是弱势、中立或强势")
-	}
+	result["reviewStrength"] = strength
 	return result, nil
+}
+
+// reviewStrengthContractValue 将 CLI 新旧两种强度输入统一为后端整数枚举。
+// 入参：value any 为中文标签，或 JSON/Go 数字 0、1、2。
+// 返回值：int 为后端枚举；error 为类型或取值不受支持。
+func reviewStrengthContractValue(value any) (int, error) {
+	switch strength := value.(type) {
+	case string:
+		switch strings.TrimSpace(strength) {
+		case "弱势":
+			return 0, nil
+		case "中立":
+			return 1, nil
+		case "强势":
+			return 2, nil
+		}
+	case json.Number:
+		if number, err := strength.Int64(); err == nil && number >= 0 && number <= 2 {
+			return int(number), nil
+		}
+	case int:
+		if strength >= 0 && strength <= 2 {
+			return strength, nil
+		}
+	case int64:
+		if strength >= 0 && strength <= 2 {
+			return int(strength), nil
+		}
+	case float64:
+		if strength == 0 || strength == 1 || strength == 2 {
+			return int(strength), nil
+		}
+	}
+	return 0, fmt.Errorf("config.reviewStrength 必须是弱势、中立、强势或 0、1、2")
 }
 
 // normalizeReviewConfig 复制并清理 CLI 审查配置中的文本，避免直接修改调用方 map。
@@ -283,20 +308,15 @@ func hasSelectedChecklist(value any) bool {
 
 // hasValidReviewInputCore 判断规则来源之外的三个 CLI 审查字段是否已具备有效类型和值。
 // 入参：config map[string]any 为 CLI 审查配置。
-// 返回值：bool，立场、角色和中文强度均有效时为 true。
+// 返回值：bool，立场、角色和中文或兼容数字强度均有效时为 true。
 func hasValidReviewInputCore(config map[string]any) bool {
 	position, positionOK := config["selectedPosition"].(string)
 	role, roleOK := config["selectedAuditRole"].(string)
-	strength, strengthOK := config["reviewStrength"].(string)
-	if !positionOK || !roleOK || !strengthOK || strings.TrimSpace(position) == "" || strings.TrimSpace(role) == "" {
+	if !positionOK || !roleOK || strings.TrimSpace(position) == "" || strings.TrimSpace(role) == "" {
 		return false
 	}
-	switch strings.TrimSpace(strength) {
-	case "弱势", "中立", "强势":
-		return true
-	default:
-		return false
-	}
+	_, err := reviewStrengthContractValue(config["reviewStrength"])
+	return err == nil
 }
 
 // ValidateFileHash 校验 V3 发起审查所需的 SHA-256 十六进制指纹。

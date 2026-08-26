@@ -85,11 +85,11 @@ version [--manifest-url HTTPS_URL]
 update [--manifest-url HTTPS_URL] [--dry-run]
 ```
 
-所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端；两者当前行为一致。`review task result` 是 CLI 本地编排，不对应新的远端接口；它会轮询任务状态，默认把每次 `status` 输出到 stderr，成功后自动获取最终详情并补充规范化的 `reviewDetailUrl`。详情响应缺少可用链接时返回最后状态快照和非零退出码。
+所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端；两者当前行为一致。`review task result` 是 CLI 本地编排，不对应新的远端接口；它会轮询任务状态，默认把每次 `status` 输出到 stderr，成功后自动获取最终详情；后端提供顶层 `url` 时补充规范化的 `reviewDetailUrl`。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。
 
 `review run` 使用 URL 来源时，上传接口只返回 `fileId`；输入还需提供 `businessId` 和上传接口返回的 `fileHash`，工作流才会继续发起审查。需要完整闭环时在输入中显式设置 `"wait": true`；省略或设置为 `false` 时命令在发起任务后返回。
 
-`review task start` 和 `review run` 的发起审查输入只保留必填审查字段：`businessId`、`fileId`、`fileHash`、`config.selectedPosition`、`config.selectedAuditRole`、`config.reviewStrength`；立场和角色填写合同主体公司名称。审查强度输入为“弱势/中立/强势”，CLI 分别转换为后端 `0/1/2`。规则来源要求非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；同时提供时组合执行，没有覆盖或优先级。实际调用 `startReview` 时固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。`fileHash` 使用上传接口返回值；`fileId` 本次保持当前 CLI 输入类型，不进行全局字符串化。未列出的字段会被严格 JSON 输入拒绝。`review file upload` 也不接受 `--business-id`。主体提取仍必须提供 `--business-id`；任务 status/info/result 默认只需 `--task-id`，使用 `--visibility-scope contractResult` 时仍必须提供 `--business-id`，不再要求 appType。
+`review task start` 和 `review run` 的发起审查输入只保留必填审查字段：`businessId`、`fileId`、`fileHash`、`config.selectedPosition`、`config.selectedAuditRole`、`config.reviewStrength`；立场和角色填写合同主体公司名称。审查强度推荐“弱势/中立/强势”，并兼容旧版 `0/1/2`；CLI 统一转换为后端 `0/1/2`。规则来源要求非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；同时提供时组合执行，没有覆盖或优先级。实际调用 `startReview` 时固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。`fileHash` 使用上传接口返回值；`fileId` 本次保持当前 CLI 输入类型，不进行全局字符串化。未列出的字段会被严格 JSON 输入拒绝。`review file upload` 也不接受 `--business-id`。主体提取仍必须提供 `--business-id`；任务 status/info/result 默认只需 `--task-id`，使用 `--visibility-scope contractResult` 时仍必须提供 `--business-id`，不再要求 appType。
 
 发起审查示例：
 

@@ -5,17 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 )
 
-var (
-	// ErrTaskFailed 表示远端审查任务已进入明确的失败终态。
-	ErrTaskFailed = errors.New("审查任务失败")
-	// ErrReviewDetailLinkMissing 表示任务成功，但详情响应没有可供用户打开的审查链接。
-	ErrReviewDetailLinkMissing = errors.New("任务成功但详情响应缺少可用审查详情链接")
-)
+// ErrTaskFailed 表示远端审查任务已进入明确的失败终态。
+var ErrTaskFailed = errors.New("审查任务失败")
 
 // Clock 隔离真实时间与测试假时钟。
 type Clock interface {
@@ -203,7 +198,7 @@ func (workflow *Workflow) Wait(ctx context.Context, query TaskQuery) (Document, 
 	}
 }
 
-// WaitForResult 等待任务成功并获取一次最终详情。
+// WaitForResult 等待任务成功并获取一次最终详情；后端提供预览地址时补充稳定链接字段。
 // 入参：ctx context.Context 控制取消；query TaskQuery 为任务身份。
 // 返回值：Document 为最终详情或失败时的最后状态快照；error 为任务失败、超时、取消或详情查询失败。
 func (workflow *Workflow) WaitForResult(ctx context.Context, query TaskQuery) (Document, error) {
@@ -218,64 +213,29 @@ func (workflow *Workflow) WaitForResult(ctx context.Context, query TaskQuery) (D
 	if err != nil {
 		return snapshot, err
 	}
-	detailURL, ok := ReviewDetailURL(info)
-	if !ok {
-		return snapshot, ErrReviewDetailLinkMissing
-	}
 	result := make(Document, len(info)+1)
 	for key, value := range info {
 		result[key] = value
 	}
-	result["reviewDetailUrl"] = detailURL
+	// 飞书用户 OAuth 的 task/info 不保证返回预览 URL；详情成功不能因此降级为失败。
+	if detailURL, ok := ReviewDetailURL(info); ok {
+		result["reviewDetailUrl"] = detailURL
+	}
 	return result, nil
 }
 
-// ReviewDetailURL 从详情响应及其嵌套结果中读取并校验 http/https 审查详情链接。
+// ReviewDetailURL 从 task/info 顶层兼容字段读取并校验 http/https 审查详情链接。
 // 入参：document Document 为 task info 的 data 对象。
 // 返回值：string 为可打开链接；bool 表示响应中是否存在有效链接。
 func ReviewDetailURL(document Document) (string, bool) {
-	return findReviewDetailURL(map[string]any(document), false)
-}
-
-// findReviewDetailURL 递归查找后端兼容字段，并仅在详情语义上下文中接受通用 url/link 键。
-// 入参：value any 为当前对象或数组；detailContext bool 表示父级字段已指向 review/detail/result/report。
-// 返回值：string 为首个有效链接；bool 表示是否找到。
-func findReviewDetailURL(value any, detailContext bool) (string, bool) {
-	switch typed := value.(type) {
-	case map[string]any:
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			item := typed[key]
-			normalizedKey := normalizeLinkKey(key)
-			isLinkKey := strings.Contains(normalizedKey, "url") || strings.Contains(normalizedKey, "link")
-			isExplicitDetailLink := isLinkKey && (strings.Contains(normalizedKey, "review") || strings.Contains(normalizedKey, "detail") || normalizedKey == "resulturl" || normalizedKey == "resultlink" || normalizedKey == "reporturl" || normalizedKey == "reportlink")
-			if text, ok := item.(string); ok && (isExplicitDetailLink || (detailContext && isLinkKey)) && isUsableReviewURL(text) {
-				return strings.TrimSpace(text), true
-			}
-			childContext := detailContext || (!isLinkKey && (strings.Contains(normalizedKey, "review") || strings.Contains(normalizedKey, "detail") || strings.Contains(normalizedKey, "result") || strings.Contains(normalizedKey, "report")))
-			if result, ok := findReviewDetailURL(item, childContext); ok {
-				return result, true
-			}
-		}
-	case []any:
-		for _, item := range typed {
-			if result, ok := findReviewDetailURL(item, detailContext); ok {
-				return result, true
-			}
+	// `url` 是当前 OpenAPI V3 的正式字段，其余名称只保留既有客户端兼容。
+	for _, key := range []string{"url", "reviewDetailUrl", "review_detail_url", "detailUrl", "detail_url", "resultUrl", "result_url", "reportUrl", "report_url"} {
+		text, ok := document[key].(string)
+		if ok && isUsableReviewURL(text) {
+			return strings.TrimSpace(text), true
 		}
 	}
 	return "", false
-}
-
-// normalizeLinkKey 统一响应字段命名风格，兼容 camelCase、snake_case 和短横线。
-// 入参：key string 为响应字段名。
-// 返回值：string，为小写且移除常见分隔符的字段名。
-func normalizeLinkKey(key string) string {
-	return strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(key)))
 }
 
 // isUsableReviewURL 校验详情链接可由浏览器直接打开，拒绝相对地址和非 HTTP 协议。

@@ -261,7 +261,7 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 - config object（必填）：审查配置。
 - config.selectedPosition string（必填）：审查立场，填写合同主体公司名称。
 - config.selectedAuditRole string（必填）：审查角色，填写合同主体公司名称。
-- config.reviewStrength string（必填，弱势|中立|强势）：CLI 会转换为后端枚举。
+- config.reviewStrength string|integer（必填，弱势|中立|强势，兼容 0|1|2）：CLI 会转换为后端枚举。
 - config.selectedCheckListIds array<string>（条件必填）：指定自定义审查清单 ID。
 - config.matchContractTypeRulePackage boolean（条件必填）：是否匹配合同类型规则包；仅 true 生效。
 
@@ -383,8 +383,8 @@ func newReviewTaskResultCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 		Short: "等待审查完成并获取最终结果",
 		Long: `等待已有审查任务进入终态。
 
-任务成功后，CLI 会自动获取并输出最终审查结果和可用详情链接；这是 CLI 本地编排，不对应新的远端接口。
-如果详情响应缺少可用链接，命令返回失败并输出最后一次成功状态快照。`,
+任务成功后，CLI 会自动获取并输出最终审查结果；后端提供可用预览地址时补充 reviewDetailUrl。
+飞书用户 OAuth 响应没有预览地址时仍返回完整成功详情；这是 CLI 本地编排，不对应新的远端接口。`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			service, profile, err := buildReviewService(runtime, root)
@@ -416,7 +416,7 @@ func newReviewTaskResultCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 	}
 	withNotes(command,
 		"内部轮询 status，任务成功后调用一次 info。",
-		"超时、取消、详情获取失败或详情链接缺失时返回最后可用的任务快照和错误。",
+		"超时、取消或详情获取失败时返回最后可用的任务快照和错误；预览链接缺失不影响详情成功。",
 	)
 	addTaskQueryFlags(command, &query)
 	command.Flags().DurationVar(&interval, "interval", 2*time.Second, "轮询间隔")
@@ -447,7 +447,7 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 - config object（必填）：审查配置。
   - config.selectedPosition string（必填）：审查立场，填写合同主体公司名称。
   - config.selectedAuditRole string（必填）：审查角色，填写合同主体公司名称。
-  - config.reviewStrength string（必填，弱势、中立、强势）：CLI 会转换为后端枚举。
+  - config.reviewStrength string|integer（必填，弱势、中立、强势，兼容 0、1、2）：CLI 会转换为后端枚举。
   - config.selectedCheckListIds array<string>（条件必填）：指定自定义审查清单 ID。
   - config.matchContractTypeRulePackage boolean（条件必填）：是否匹配合同类型规则包；仅 true 生效。
 - 规则来源至少提供一项；两项同时提供时组合执行，互不覆盖且没有优先级。

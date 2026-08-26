@@ -564,7 +564,7 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
 | `fileHash` | string | 是 | 64 位 SHA-256 十六进制 |
 | `config.selectedPosition` | string | 是 | 合同主体公司名称，非空 |
 | `config.selectedAuditRole` | string | 是 | 合同主体公司名称，非空 |
-| `config.reviewStrength` | string | 是 | `弱势`、`中立` 或 `强势`；HTTP 分别发送 `0/1/2` |
+| `config.reviewStrength` | string 或 integer | 是 | 推荐 `弱势`、`中立`、`强势`，兼容旧版 `0/1/2`；HTTP 统一发送 `0/1/2` |
 | `config.selectedCheckListIds` | string[] | 条件必填 | 非空数组，每项非空 |
 | `config.matchContractTypeRulePackage` | boolean | 条件必填 | 仅 `true` 构成有效规则来源 |
 | `usageReportContext.reportBusinessCode` | string | CLI 固定 | `everyLine_100_openApi_cli` |
@@ -601,7 +601,7 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
 
 `info` 响应为完整任务详情对象，CLI 不裁剪字段。
 
-`result` 额外支持 `--interval`（默认 `2s`）和 `--deadline`（默认 `10m`）。stdout 输出最终 `info.data`，并把响应中的可用详情链接规范化为顶层 `reviewDetailUrl`；每次状态写入 stderr。任务成功但详情链接缺失或不可用时，stdout 输出最后状态快照，同时进程返回非零退出码。
+`result` 额外支持 `--interval`（默认 `2s`）和 `--deadline`（默认 `10m`）。stdout 输出最终 `info.data`，后端提供顶层 `url` 时规范化为 `reviewDetailUrl`；每次状态写入 stderr。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。
 
 ### 7.6 一键 review run
 
