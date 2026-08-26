@@ -261,13 +261,16 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 - config object（必填）：审查配置。
 - config.selectedPosition string（必填）：审查立场。
 - config.selectedAuditRole string（必填）：审查角色。
-- config.reviewStrength integer（必填，0|1|2）：审查强度。
-- config.selectedCheckListIds array<string>（可选）：指定审查清单 ID，非空时优先级最高。
-- config.matchContractTypeRulePackage boolean（可选）：是否匹配合同类型规则包；仅 true 生效。
+- config.reviewStrength string（必填，弱势|中立|强势）：CLI 会转换为后端枚举。
+- config.selectedCheckListIds array<string>（条件必填）：指定自定义审查清单 ID。
+- config.matchContractTypeRulePackage boolean（条件必填）：是否匹配合同类型规则包；仅 true 生效。
+
+规则来源至少提供一项：非空 selectedCheckListIds，或 matchContractTypeRulePackage=true。
+两项同时提供时组合执行，互不覆盖且没有优先级。
 
 CLI 仅接受以上字段，其他字段会按未知字段拒绝。
 实际 HTTP 请求固定补入 usageReportContext.reportBusinessCode=everyLine_100_openApi_cli，该字段不属于 CLI 输入。`,
-		Example: `  everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}' --dry-run
+		Example: `  everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}' --dry-run
   everyline-cli review task start --input review-start.json --output json`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
@@ -275,7 +278,15 @@ CLI 仅接受以上字段，其他字段会按未知字段拒绝。
 			if err := readJSONInput(inputPath, inline, &input); err != nil {
 				return err
 			}
-			request := input.ToRequest().Normalize()
+			input = input.Normalize()
+			if err := input.Validate(); err != nil {
+				return err
+			}
+			request, err := input.ToRequest()
+			if err != nil {
+				return err
+			}
+			request = request.Normalize()
 			if err := request.Validate(); err != nil {
 				return err
 			}
@@ -297,7 +308,7 @@ CLI 仅接受以上字段，其他字段会按未知字段拒绝。
 		"需要通过 --input 或 --data 提供 JSON 请求；本命令不会上传文件。",
 		"fileHash 应直接填写上传接口返回的文件指纹。",
 		"config 及 selectedPosition、selectedAuditRole、reviewStrength 均为必填。",
-		"selectedCheckListIds 和 matchContractTypeRulePackage 为可选规则来源参数。",
+		"规则来源至少提供一项；两项同时提供时组合执行，互不覆盖且没有优先级。",
 		"实际 HTTP 请求固定携带 usageReportContext.reportBusinessCode=everyLine_100_openApi_cli。",
 	)
 	addJSONInputFlags(command, &inputPath, &inline)
@@ -372,7 +383,8 @@ func newReviewTaskResultCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 		Short: "等待审查完成并获取最终结果",
 		Long: `等待已有审查任务进入终态。
 
-任务成功后，CLI 会自动获取并输出最终审查结果；这是 CLI 本地编排，不对应新的远端接口。`,
+任务成功后，CLI 会自动获取并输出最终审查结果和可用详情链接；这是 CLI 本地编排，不对应新的远端接口。
+如果详情响应缺少可用链接，命令返回失败并输出最后一次成功状态快照。`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			service, profile, err := buildReviewService(runtime, root)
@@ -404,7 +416,7 @@ func newReviewTaskResultCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 	}
 	withNotes(command,
 		"内部轮询 status，任务成功后调用一次 info。",
-		"超时、取消或详情获取失败时返回最后可用的任务快照和错误。",
+		"超时、取消、详情获取失败或详情链接缺失时返回最后可用的任务快照和错误。",
 	)
 	addTaskQueryFlags(command, &query)
 	command.Flags().DurationVar(&interval, "interval", 2*time.Second, "轮询间隔")
@@ -435,9 +447,10 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 - config object（必填）：审查配置。
   - config.selectedPosition string（必填）：审查立场。
   - config.selectedAuditRole string（必填）：审查角色。
-  - config.reviewStrength integer（必填，0、1、2）：审查强度。
-  - config.selectedCheckListIds array<string>（可选）：指定审查清单 ID，非空时优先级最高。
-  - config.matchContractTypeRulePackage boolean（可选）：是否匹配合同类型规则包；仅 true 生效。
+  - config.reviewStrength string（必填，弱势、中立、强势）：CLI 会转换为后端枚举。
+  - config.selectedCheckListIds array<string>（条件必填）：指定自定义审查清单 ID。
+  - config.matchContractTypeRulePackage boolean（条件必填）：是否匹配合同类型规则包；仅 true 生效。
+- 规则来源至少提供一项；两项同时提供时组合执行，互不覆盖且没有优先级。
 - businessId string：URL 来源必填；文件来源优先使用上传接口返回值。
 - fileHash string：URL 来源必填；fileHash 使用上传接口返回值。
 - extractSubjects boolean：可选，是否先提取合同参与方。
@@ -445,7 +458,7 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 
 发起审查的实际 HTTP 请求固定补入 usageReportContext.reportBusinessCode=everyLine_100_openApi_cli，该字段不属于 RunSpec 输入。`,
 		Example: `  everyline-cli review run --input review-run.json --output json
-  everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true},"wait":true}' --dry-run`,
+  everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true},"wait":true}' --dry-run`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var spec review.RunSpec
@@ -491,6 +504,7 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	withNotes(command,
 		"输入中的 wait=true 才会等待任务终态并返回最终详情。",
 		"config 及其三个必填子字段必须提供。",
+		"规则来源至少提供一项；自定义清单和合同类型清单同时提供时组合执行。",
 		"URL 来源需要额外提供 businessId 和上传接口返回的 fileHash。",
 		"CLI 仅接受以上字段，其他字段会按未知字段拒绝。",
 	)

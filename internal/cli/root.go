@@ -53,6 +53,9 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	command.PersistentFlags().DurationVar(&options.Timeout, "timeout", 30*time.Second, "普通远端请求超时")
 	command.PersistentFlags().BoolVar(&options.Verbose, "verbose", false, "将工作流进度写入 stderr，不污染 stdout")
 	command.PersistentFlags().BoolVar(&options.NoColor, "no-color", false, "禁用彩色输出")
+	command.PersistentPreRun = func(command *cobra.Command, args []string) {
+		maybeWarnNewVersion(command.Context(), runtime, options, command)
+	}
 	command.AddGroup(
 		&cobra.Group{ID: "business", Title: "Review"},
 		&cobra.Group{ID: "cli", Title: "CLI Management"},
@@ -143,7 +146,7 @@ func render(runtime *Runtime, options *rootOptions, defaultOutput string, value 
 		formatName = defaultOutput
 	}
 	if formatName == "" {
-		formatName = "table"
+		formatName = "json"
 	}
 	if options.Raw {
 		formatName = "raw"

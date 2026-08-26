@@ -19,7 +19,8 @@ review task start -> review task result <task-id>
 1. 重复调用任务状态接口；
 2. 任务处于 `running` 时按轮询间隔继续等待；
 3. 任务进入 `success` 后调用一次详情接口；
-4. 输出最终审查详情。
+4. 校验并规范化可用详情链接；
+5. 输出最终审查详情和 `reviewDetailUrl`。
 
 ### 1.3 非目标
 
@@ -36,7 +37,7 @@ review task start -> review task result <task-id>
 ## 2. 运行契约
 
 - `Workflow.Wait` 轮询 `Status` 并返回最后状态快照。
-- `Workflow.WaitForResult` 在 `success` 后调用一次 `Info`。
+- `Workflow.WaitForResult` 在 `success` 后调用一次 `Info`，要求响应包含可用 http/https 详情链接并规范化为 `reviewDetailUrl`。
 - `review task result` 注册等待与详情编排；`review task status` 和 `review task info` 保持单次查询。
 - 每次轮询状态默认写入 stderr，最终业务结果写入 stdout。
 
@@ -76,12 +77,14 @@ CLI result
   -> API.Status（running 时按间隔轮询）
   -> success
   -> API.Info（仅调用一次）
-  -> 输出完整详情
+  -> 校验详情链接
+  -> 输出完整详情和 reviewDetailUrl
 ```
 
 ### 4.1 成功
 
 - `Status` 返回 `success` 后只调用一次 `Info`。
+- `Info` 必须包含可用详情链接；缺失时返回最后一次 `success` 状态快照和错误。
 - 命令以退出码 `0` 结束。
 - 标准输出只包含最终结果；每次轮询收到的 status 默认写入 stderr，不污染 JSON stdout。
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"git.qtech.cn/ai/everyline-cli/internal/build"
@@ -26,6 +27,10 @@ func newUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
   everyline-cli update --manifest-url https://example.com/everyline-cli/manifest.json --dry-run`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
+			manifestURL = resolvedUpdateManifestURL(manifestURL)
+			if manifestURL == "" {
+				return fmt.Errorf("必须通过 --manifest-url、EVERYLINE_CLI_UPDATE_MANIFEST_URL 或发布构建配置更新 manifest URL")
+			}
 			ctx, cancel := context.WithTimeout(command.Context(), root.Timeout)
 			defer cancel()
 			result, err := selfupdate.Run(ctx, build.Current().Version, manifestURL, selfupdate.Options{
@@ -46,6 +51,5 @@ func newUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	)
 	command.Flags().StringVar(&manifestURL, "manifest-url", "", "更新 manifest 的 HTTPS 地址")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "只检查更新，不下载或替换文件")
-	_ = command.MarkFlagRequired("manifest-url")
 	return command
 }

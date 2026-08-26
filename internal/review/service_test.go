@@ -45,9 +45,10 @@ func TestServiceStartContract(t *testing.T) {
 		FileID:     11,
 		FileHash:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Config: map[string]any{
-			"selectedPosition":  "甲方",
-			"selectedAuditRole": "甲方",
-			"reviewStrength":    1,
+			"selectedPosition":             "甲方",
+			"selectedAuditRole":            "甲方",
+			"reviewStrength":               1,
+			"matchContractTypeRulePackage": true,
 		},
 	}
 	if _, err := service.Start(context.Background(), request); err != nil {

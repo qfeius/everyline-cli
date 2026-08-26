@@ -42,6 +42,22 @@ func testHTTPClient(handler func(*http.Request) (*http.Response, error)) *http.C
 	return &http.Client{Transport: roundTripFunc(handler)}
 }
 
+// TestCheckComparesVersionsWithoutSelectingArtifact 验证轻量版本检查只比较 manifest 版本，不要求当前平台制品。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；版本比较或网络边界不符合预期时通过 t.Fatal 报告。
+func TestCheckComparesVersionsWithoutSelectingArtifact(t *testing.T) {
+	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, manifest("1.1.0", "other-platform", "https://updates.example.test/everyline-cli", checksum("new"))), nil
+	})
+	result, err := Check(t.Context(), "1.0.0", "https://updates.example.test/manifest.json", client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CurrentVersion != "1.0.0" || result.LatestVersion != "1.1.0" || result.IsLatest {
+		t.Fatalf("result=%#v", result)
+	}
+}
+
 func TestRunRejectsNonHTTPSManifestBeforeNetwork(t *testing.T) {
 	called := false
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {

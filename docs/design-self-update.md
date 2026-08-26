@@ -2,12 +2,13 @@
 
 ## 目标
 
-提供独立二进制的安全自更新命令。更新源由调用方通过 HTTPS manifest 显式指定，CLI 不内置环境地址，也不依赖 Profile 或业务鉴权。
+提供独立二进制的安全自更新命令和非阻断版本检查。更新源由命令参数、环境变量或发布构建通过 HTTPS manifest 配置，不依赖 Profile 或业务鉴权。
 
 命令形式：
 
 ```text
-everyline-cli update --manifest-url https://example.com/everyline-cli/manifest.json [--dry-run]
+everyline-cli version [--manifest-url https://example.com/everyline-cli/manifest.json]
+everyline-cli update [--manifest-url https://example.com/everyline-cli/manifest.json] [--dry-run]
 ```
 
 ## manifest 契约
@@ -69,9 +70,11 @@ Windows 无法覆盖正在运行的可执行文件时，CLI 先复制出独立 h
 | Windows 制品已交给独立 helper | 返回 `updated=false, scheduled=true`；最终结果由 helper 写入 stderr |
 | npm/npx 薄包装调用 | 返回安装方式提示，不执行更新 |
 
+`version` 稳定输出当前构建字段以及 `latestVersion/isLatest/updateCommand`。manifest 未配置或检查失败时，命令仍返回成功，`isLatest=null` 并输出 `checkError`，不把未知状态误报为最新版。普通 `review/checklist/rule` 命令只在确认存在新版本时向 stderr 写提示；检查失败不改变业务请求和退出码。
+
 ## `review task result` 当前边界
 
-命令默认轮询 `status`，每次响应向 stderr 输出状态；`success` 后调用一次 `info`，stdout 只输出最终业务结果。CLI 当前确认的状态集合为：
+命令默认轮询 `status`，每次响应向 stderr 输出状态；`success` 后调用一次 `info`，校验并规范化可用详情链接为顶层 `reviewDetailUrl`，stdout 只输出最终业务结果。链接缺失或不可用时返回最后状态快照和错误。CLI 当前确认的状态集合为：
 
 - `running`：继续轮询；
 - `success`：结束轮询并获取详情；

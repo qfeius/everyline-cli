@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
+	"git.qtech.cn/ai/everyline-cli/internal/build"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/review"
@@ -61,6 +62,33 @@ func TestConfigCommands(t *testing.T) {
 	}
 }
 
+// TestConfigAddDefaultsToJSONAndPreservesExplicitOutput 验证新 Profile 默认 json，覆盖时保留用户显式 table 配置。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；默认或覆盖行为漂移时通过 t.Fatal 报告。
+func TestConfigAddDefaultsToJSONAndPreservesExplicitOutput(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	baseArgs := []string{"config", "add", "dev", "--base-url", "https://api.example.com", "--token-url", "https://api.example.com/token", "--app-id", "cli-dev"}
+	if err := Execute(context.Background(), runtime, baseArgs); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := runtime.Profiles.Get("dev")
+	if err != nil || profile.DefaultOutput != "json" {
+		t.Fatalf("profile=%#v err=%v，省略 default-output 时应为 json", profile, err)
+	}
+
+	withTable := append(append([]string{}, baseArgs...), "--default-output", "table", "--output", "json")
+	if err := Execute(context.Background(), runtime, withTable); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), runtime, append(append([]string{}, baseArgs...), "--output", "json")); err != nil {
+		t.Fatal(err)
+	}
+	profile, err = runtime.Profiles.Get("dev")
+	if err != nil || profile.DefaultOutput != "table" {
+		t.Fatalf("profile=%#v err=%v，覆盖 Profile 时应保留显式 table", profile, err)
+	}
+}
+
 // TestConfigAddEnvironmentPreset 验证 config add 可用预设环境创建 test 和 blue Profile。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -94,6 +122,81 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if test.name == "test" && !profile.HasOAuthConfiguration() {
 			t.Fatalf("environment=%s 缺少 OAuth 预设: %#v", test.name, profile)
 		}
+	}
+}
+
+// TestVersionReportsLatestStateAndUpdateCommand 验证 version 输出最新版本判断和可执行更新命令。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；结构化字段缺失或比较错误时通过 t.Fatal 报告。
+func TestVersionReportsLatestStateAndUpdateCommand(t *testing.T) {
+	originalVersion := build.Version
+	originalManifestURL := build.UpdateManifestURL
+	build.Version = "1.0.0"
+	build.UpdateManifestURL = ""
+	t.Cleanup(func() {
+		build.Version = originalVersion
+		build.UpdateManifestURL = originalManifestURL
+	})
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"version":"1.1.0","platforms":{"test":{"url":"https://updates.example.com/cli","sha256":"unused"}}}`))
+	}))
+	defer server.Close()
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	if err := Execute(context.Background(), runtime, []string{"version", "--manifest-url", server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"version": "1.0.0"`, `"latestVersion": "1.1.0"`, `"isLatest": false`, `"updateCommand": "everyline-cli update --manifest-url ` + server.URL + `"`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
+		}
+	}
+}
+
+// TestVersionCheckFailureIsNonBlockingAndUnknown 验证检查失败时 version 仍成功，且不会把 isLatest 误报为 true。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；退出或状态语义错误时通过 t.Fatal 报告。
+func TestVersionCheckFailureIsNonBlockingAndUnknown(t *testing.T) {
+	originalVersion := build.Version
+	build.Version = "1.0.0"
+	t.Cleanup(func() { build.Version = originalVersion })
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte(`{"invalid":true}`))
+	}))
+	defer server.Close()
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	if err := Execute(context.Background(), runtime, []string{"version", "--manifest-url", server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"isLatest": null`) || strings.Contains(stdout.String(), `"isLatest": true`) || !strings.Contains(stdout.String(), `"checkError"`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestBusinessCommandWarnsWhenNewVersionExists 验证普通业务命令发现新版本时只在 stderr 提示且不阻断 dry-run。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；业务退出或提示位置错误时通过 t.Fatal 报告。
+func TestBusinessCommandWarnsWhenNewVersionExists(t *testing.T) {
+	originalVersion := build.Version
+	build.Version = "1.0.0"
+	t.Cleanup(func() { build.Version = originalVersion })
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"version":"1.1.0","platforms":{"test":{"url":"https://updates.example.com/cli","sha256":"unused"}}}`))
+	}))
+	defer server.Close()
+	t.Setenv("EVERYLINE_CLI_UPDATE_MANIFEST_URL", server.URL)
+	runtime, stdout, stderr := testRuntime(t)
+	runtime.HTTP = server.Client()
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true}}`
+	if err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "发现新版本") || !strings.Contains(stderr.String(), "发现新版本 1.1.0") || !strings.Contains(stderr.String(), "everyline-cli update") {
+		t.Fatalf("stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 }
 
@@ -805,13 +908,28 @@ func TestAuthLoginHonorsRootTimeout(t *testing.T) {
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestReviewStartDryRun(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run", "--output", "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"fileId": "12"`) || !strings.Contains(stdout.String(), `"selectedPosition": "甲方"`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || !strings.Contains(stdout.String(), `"reportBusinessCode": "everyLine_100_openApi_cli"`) || strings.Contains(stdout.String(), `"appType"`) {
+	if !strings.Contains(stdout.String(), `"fileId": "12"`) || !strings.Contains(stdout.String(), `"selectedPosition": "甲方"`) || !strings.Contains(stdout.String(), `"reviewStrength": 1`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || !strings.Contains(stdout.String(), `"reportBusinessCode": "everyLine_100_openApi_cli"`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewStartDryRunRejectsMissingRuleSource 验证规则来源全部缺失时 dry-run 在本地以用法错误阻断。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；未阻断、错误不明确或退出码不是 2 时通过 t.Fatal 报告。
+func TestReviewStartDryRunRejectsMissingRuleSource(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":false}}`
+	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
+	if !errors.Is(err, review.ErrReviewRuleSourceRequired) || ExitCode(err) != ExitUsage {
+		t.Fatalf("err=%v exit=%d", err, ExitCode(err))
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout=%s，失败校验不应输出请求", stdout.String())
 	}
 }
 
@@ -926,12 +1044,28 @@ func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 // TestReviewRunURLDryRunDefaultsConfig 验证 URL 工作流的身份字段和默认配置在 CLI 层可见。
 func TestReviewRunURLDryRunDefaultsConfig(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
+	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"selectedAuditRole": "甲方"`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewRunDryRunRejectsMissingRuleSource 验证一键工作流和 task start 使用同一规则来源约束。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；缺失规则来源未在 dry-run 阶段阻断时通过 t.Fatal 报告。
+func TestReviewRunDryRunRejectsMissingRuleSource(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	filePath := filepath.Join(t.TempDir(), "contract.pdf")
+	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立"}}`
+	err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run"})
+	if !errors.Is(err, review.ErrReviewRuleSourceRequired) || ExitCode(err) != ExitUsage {
+		t.Fatalf("err=%v exit=%d", err, ExitCode(err))
 	}
 }
 
@@ -1147,7 +1281,7 @@ func TestReviewRunDryRunValidatesLocalFile(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.PDF"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"wait":true}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.PDF"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1163,7 +1297,7 @@ func TestReviewRunDryRunAllowsExtensionlessLocalPath(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1}}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1200,7 +1334,7 @@ func TestReviewRunRendersPartialResultOnFailure(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"businessId":"biz-1","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"wait":true}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"businessId":"biz-1","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}`
 	err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--interval", "1ms", "--deadline", "1s", "--output", "json"})
 	if !errors.Is(err, review.ErrTaskFailed) {
 		t.Fatalf("err=%v", err)
@@ -1233,7 +1367,7 @@ func TestReviewTaskResultPollsAndRendersInfo(t *testing.T) {
 			if request.URL.Query().Get("appType") != "" || request.URL.Query().Get("visibilityScope") != review.VisibilityScopeContractResult {
 				t.Errorf("info query=%s", request.URL.RawQuery)
 			}
-			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"success","result":{"riskCount":0}}}`))
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":{"taskId":88,"status":"success","reviewDetailUrl":"https://review.example.com/tasks/88","result":{"riskCount":0}}}`))
 		default:
 			http.NotFound(writer, request)
 		}

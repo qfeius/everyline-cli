@@ -10,11 +10,12 @@
 ## 变更内容
 
 - `review task start` 与 `review run` 的发起审查契约保留 `businessId`、`fileId`、`fileHash`、`config`，并允许配置 `selectedCheckListIds`（`array<string>`）和 `matchContractTypeRulePackage`（`boolean`）。
-- `config` 强制要求 `selectedPosition`、`selectedAuditRole`、`reviewStrength`，`reviewStrength` 仅接受 `0`、`1`、`2`。
+- `config` 强制要求 `selectedPosition`、`selectedAuditRole`、`reviewStrength`；CLI 强度仅接受“弱势/中立/强势”，HTTP 请求分别转换为 `0/1/2`。
+- 非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少满足一项；两项同时提供时组合执行，互不覆盖且无优先级。
 - CLI 不再接受未纳入 CLI 契约的发起审查非必填字段；未知字段通过严格 JSON 解码拒绝。
 - `review task start` 与 `review run` 调用 `startReview` 时固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，该上下文不暴露为 CLI 输入或 Profile 配置。
 - 保留当前 `fileId` CLI 输入类型和内部类型，不扩展到其他命令的字符串化改造。
-- 帮助输出增加字段说明、必填约束、两个规则来源可选字段、`fileHash` 来源说明和包含可选字段的 `--data` 示例。
+- 帮助输出增加字段说明、规则来源组合约束、`fileHash` 来源说明和包含规则来源的 `--data` 示例。
 
 ## 影响面
 

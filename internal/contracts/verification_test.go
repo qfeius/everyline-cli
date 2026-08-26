@@ -60,7 +60,7 @@ func validContractInput(schema string) any {
 	case "review-subject.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1"}
 	case "review-start.schema.json":
-		return map[string]any{"businessId": "biz", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{"selectedPosition": "甲方", "selectedAuditRole": "甲方", "reviewStrength": 1}, "usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"}}
+		return map[string]any{"businessId": "biz", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{"selectedPosition": "甲方", "selectedAuditRole": "甲方", "reviewStrength": 1, "matchContractTypeRulePackage": true}, "usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"}}
 	case "review-task-query.schema.json":
 		return map[string]any{"taskId": 1, "businessId": "biz"}
 	case "checklist.schema.json":
@@ -133,9 +133,10 @@ func TestStartSchemaRequiresReviewConfig(t *testing.T) {
 		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		"config": map[string]any{
-			"selectedPosition":  "甲方",
-			"selectedAuditRole": "甲方",
-			"reviewStrength":    1,
+			"selectedPosition":             "甲方",
+			"selectedAuditRole":            "甲方",
+			"reviewStrength":               1,
+			"matchContractTypeRulePackage": true,
 		},
 	}
 	if err := ValidateRequest("smartAuditTaskStartReview", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", input); err != nil {
@@ -164,9 +165,10 @@ func TestStartSchemaRejectsExcludedFields(t *testing.T) {
 		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		"config": map[string]any{
-			"selectedPosition":  "甲方",
-			"selectedAuditRole": "甲方",
-			"reviewStrength":    1,
+			"selectedPosition":             "甲方",
+			"selectedAuditRole":            "甲方",
+			"reviewStrength":               1,
+			"matchContractTypeRulePackage": true,
 		},
 		"appType": "THIRD_PARTY",
 	}
@@ -203,7 +205,7 @@ func TestReviewRunSchemaIsExecutable(t *testing.T) {
 		"config": map[string]any{
 			"selectedPosition":             "甲方",
 			"selectedAuditRole":            "甲方",
-			"reviewStrength":               1,
+			"reviewStrength":               "中立",
 			"selectedCheckListIds":         []string{"2001001"},
 			"matchContractTypeRulePackage": true,
 		},
@@ -245,5 +247,28 @@ func TestReviewStartSchemaAcceptsRuleSelectionOptions(t *testing.T) {
 	}
 	if err := ValidateSchema("review-start.schema.json", input); err != nil {
 		t.Fatalf("err=%v，规则来源参数应被 CLI 契约接受", err)
+	}
+}
+
+// TestReviewSchemasRequireAtLeastOneRuleSource 验证 start HTTP 和 run CLI Schema 都拒绝规则来源全部缺失。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；任一 Schema 接受空规则来源时通过 t.Fatal 报告。
+func TestReviewSchemasRequireAtLeastOneRuleSource(t *testing.T) {
+	start := validContractInput("review-start.schema.json").(map[string]any)
+	delete(start["config"].(map[string]any), "matchContractTypeRulePackage")
+	if err := ValidateSchema("review-start.schema.json", start); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("start err=%v，后端请求 Schema 应拒绝空规则来源", err)
+	}
+
+	run := map[string]any{
+		"source": map[string]any{"type": "file", "path": "contract.pdf", "name": "合同.pdf"},
+		"config": map[string]any{
+			"selectedPosition":  "甲方",
+			"selectedAuditRole": "甲方",
+			"reviewStrength":    "中立",
+		},
+	}
+	if err := ValidateSchema("review-run.schema.json", run); !errors.Is(err, ErrContractMismatch) {
+		t.Fatalf("run err=%v，CLI Schema 应拒绝空规则来源", err)
 	}
 }

@@ -31,7 +31,7 @@ func ExitCode(err error) int {
 	if errors.As(err, &apiError) {
 		return ExitAPI
 	}
-	if errors.Is(err, contracts.ErrContractUnverified) || errors.Is(err, contracts.ErrContractMismatch) || errors.Is(err, review.ErrTaskFailed) {
+	if errors.Is(err, contracts.ErrContractUnverified) || errors.Is(err, contracts.ErrContractMismatch) || errors.Is(err, review.ErrTaskFailed) || errors.Is(err, review.ErrReviewDetailLinkMissing) {
 		return ExitAPI
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {

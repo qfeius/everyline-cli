@@ -1,8 +1,9 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf '0.0.0-development')
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf 'uncommitted')
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+UPDATE_MANIFEST_URL ?=
 PACKAGE_VERSION ?= $(shell node scripts/package-version.js "$(VERSION)")
-LDFLAGS := -s -w -X git.qtech.cn/ai/everyline-cli/internal/build.Version=$(VERSION) -X git.qtech.cn/ai/everyline-cli/internal/build.Commit=$(COMMIT) -X git.qtech.cn/ai/everyline-cli/internal/build.Date=$(BUILD_DATE)
+LDFLAGS := -s -w -X git.qtech.cn/ai/everyline-cli/internal/build.Version=$(VERSION) -X git.qtech.cn/ai/everyline-cli/internal/build.Commit=$(COMMIT) -X git.qtech.cn/ai/everyline-cli/internal/build.Date=$(BUILD_DATE) -X git.qtech.cn/ai/everyline-cli/internal/build.UpdateManifestURL=$(UPDATE_MANIFEST_URL)
 
 .PHONY: build test vet release-assets release-check package-check clean
 

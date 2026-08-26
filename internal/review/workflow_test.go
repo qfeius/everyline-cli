@@ -15,15 +15,17 @@ type fakeAPI struct {
 	index    int
 	calls    []string
 	infoErr  error
+	info     Document
 	queries  []TaskQuery
 	contexts map[string]context.Context
 }
 
 func validReviewConfig() map[string]any {
 	return map[string]any{
-		"selectedPosition":  "甲方",
-		"selectedAuditRole": "甲方",
-		"reviewStrength":    1,
+		"selectedPosition":             "甲方",
+		"selectedAuditRole":            "甲方",
+		"reviewStrength":               "中立",
+		"matchContractTypeRulePackage": true,
 	}
 }
 
@@ -118,7 +120,10 @@ func (api *fakeAPI) Info(ctx context.Context, query TaskQuery) (Document, error)
 	if api.infoErr != nil {
 		return nil, api.infoErr
 	}
-	return Document{"taskId": int64(88), "status": "success", "result": []any{}}, nil
+	if api.info != nil {
+		return api.info, nil
+	}
+	return Document{"taskId": int64(88), "status": "success", "reviewDetailUrl": "https://review.example.com/tasks/88", "result": []any{}}, nil
 }
 
 // instantClock 让轮询测试无需真实等待。
@@ -198,6 +203,24 @@ func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
 		if query.VisibilityScope != VisibilityScopeContractResult || query.BusinessID != "biz-1" || query.AppType != AppTypeCLM {
 			t.Fatalf("query=%#v，详情查询必须复用完整任务上下文", query)
 		}
+	}
+}
+
+// TestWorkflowWaitForResultRequiresDetailLink 验证成功任务缺少可用详情链接时返回最后状态和明确错误。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；错误语义或状态快照丢失时通过 t.Fatal 报告。
+func TestWorkflowWaitForResultRequiresDetailLink(t *testing.T) {
+	api := &fakeAPI{
+		statuses: []Document{{"taskId": int64(88), "status": "success"}},
+		info:     Document{"taskId": int64(88), "status": "success", "result": []any{}},
+	}
+	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
+	snapshot, err := workflow.WaitForResult(context.Background(), TaskQuery{TaskID: 88})
+	if !errors.Is(err, ErrReviewDetailLinkMissing) {
+		t.Fatalf("err=%v，期望 ErrReviewDetailLinkMissing", err)
+	}
+	if status, _ := StringValue(snapshot, "status"); status != "success" {
+		t.Fatalf("snapshot=%#v，缺少链接时应返回最后成功状态", snapshot)
 	}
 }
 

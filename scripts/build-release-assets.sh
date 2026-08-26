@@ -5,6 +5,7 @@ set -eu
 version=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || true)}
 commit=${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || true)}
 build_date=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+update_manifest_url=${UPDATE_MANIFEST_URL:-}
 version=${version:-0.0.0-development}
 commit=${commit:-uncommitted}
 
@@ -19,7 +20,7 @@ for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 wi
   mkdir -p "$output_dir"
   GOOS="$target_os" GOARCH="$target_arch" CGO_ENABLED=0 go build \
     -trimpath \
-    -ldflags "-s -w -X git.qtech.cn/ai/everyline-cli/internal/build.Version=$version -X git.qtech.cn/ai/everyline-cli/internal/build.Commit=$commit -X git.qtech.cn/ai/everyline-cli/internal/build.Date=$build_date" \
+    -ldflags "-s -w -X git.qtech.cn/ai/everyline-cli/internal/build.Version=$version -X git.qtech.cn/ai/everyline-cli/internal/build.Commit=$commit -X git.qtech.cn/ai/everyline-cli/internal/build.Date=$build_date -X git.qtech.cn/ai/everyline-cli/internal/build.UpdateManifestURL=$update_manifest_url" \
     -o "$output_dir/$executable" \
     ./cmd/everyline-cli
 done
