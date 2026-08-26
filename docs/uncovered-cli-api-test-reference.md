@@ -81,7 +81,7 @@ CLI stdout 为：
 
 | # | Operation ID | CLI 命令 | 方法与路径 | 当前真实调用状态 |
 |---:|---|---|---|---|
-| 1 | `uploadContractFileByURLV3` | `review file upload-url` | `POST /open-apis/contract-review/v3/file/contract/uploadByUrl` | 支持 |
+| 1 | `uploadContractFileByURLV3` | `review file upload-url` | `POST /open-apis/contract-review/v1/file/contract/uploadByUrl` | 支持 |
 | 2 | `createReviewChecklist` | `checklist create` | `POST /open-apis/review-rules/review-checklists` | 支持 |
 | 3 | `batchCreateReviewChecklists` | `checklist batch-create` | `POST /open-apis/review-rules/review-checklists/batch` | 仅 dry-run |
 | 4 | `listReviewChecklists` | `checklist list` | `GET /open-apis/review-rules/review-checklists` | 支持 |
@@ -108,7 +108,7 @@ CLI stdout 为：
 HTTP：
 
 ```text
-POST /open-apis/contract-review/v3/file/contract/uploadByUrl
+POST /open-apis/contract-review/v1/file/contract/uploadByUrl
 Content-Type: application/json
 ```
 
@@ -118,7 +118,6 @@ Content-Type: application/json
 |---|---|---|---|
 | `--file-url` | `fileUrl` | 是 | 完整的 `http` 或 `https` URL |
 | `--name` | `fileName` | 是 | 以 `.doc`、`.docx` 或 `.pdf` 结尾 |
-| 无，CLI 固定注入 | `channelType` | 是 | 固定为 `everyline-cli`，调用方不可覆盖 |
 
 CLI 调用：
 
@@ -135,8 +134,7 @@ everyline-cli review file upload-url \
 ```json
 {
   "fileUrl": "https://files.example.com/采购合同.pdf",
-  "fileName": "采购合同.pdf",
-  "channelType": "everyline-cli"
+  "fileName": "采购合同.pdf"
 }
 ```
 
@@ -162,12 +160,11 @@ dry-run stdout：
 ```json
 {
   "fileUrl": "https://files.example.com/采购合同.pdf",
-  "fileName": "采购合同.pdf",
-  "channelType": "everyline-cli"
+  "fileName": "采购合同.pdf"
 }
 ```
 
-建议至少补充以下场景：成功上传、非法 URL、非法扩展名、`channelType` 固定值、V3 路径，以及 `review run` 的 URL 来源链路。
+建议至少补充以下场景：成功上传、非法 URL、非法扩展名、请求体不含 `channelType`、V1 实际路径，以及 `review run` 的 URL 来源链路。
 
 ## 5. Checklist 接口
 
@@ -834,7 +831,7 @@ everyline-cli rule batch-delete \
 - 每条用例记录 CLI 版本、Profile、身份、完整命令、退出码、stdout、stderr 和远端 `request_id`。
 - 所有写操作先执行 `--dry-run` 或 `--print-input`，确认规范化请求后再执行真实调用。
 - 四个未核验批量创建/更新 operation 只验证 dry-run 和失败关闭，不把“未发送远端请求”误判为接口成功。
-- URL 上传明确验证 V3 路径和固定 `channelType=everyline-cli`。
+- URL 上传明确验证 V1 实际路径，并确认请求体不包含 `channelType`。
 - 删除操作验证缺少 `--yes` 时不发送请求，并使用隔离测试资源执行真实删除。
 - 成功 stdout 始终可被 JSON 解析；失败不在 stdout 伪造成功对象。
 - Checklist、Rule Group、Rule 的实际 `data` 全量保存，后续获得正式 response schema 后再升级字段级断言。

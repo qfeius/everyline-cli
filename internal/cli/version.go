@@ -34,7 +34,13 @@ func newVersionCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		Short: "显示版本并检查更新",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			result := inspectVersion(command.Context(), runtime, resolvedUpdateManifestURL(manifestURL))
+			explicitManifestURL := strings.TrimSpace(manifestURL)
+			resolvedManifestURL := resolvedUpdateManifestURL(explicitManifestURL)
+			result := inspectVersion(command.Context(), runtime, resolvedManifestURL)
+			// 显式覆盖必须保留在建议命令中，避免检查 B 源后实际从环境中的 A 源更新。
+			if explicitManifestURL != "" {
+				result.UpdateCommand = versionUpdateCommand(resolvedManifestURL, true)
+			}
 			return render(runtime, root, "json", result)
 		},
 	}
@@ -60,12 +66,12 @@ func inspectVersion(ctx context.Context, runtime *Runtime, manifestURL string) v
 	checked, err := selfupdate.Check(checkContext, result.Version, manifestURL, runtime.HTTP)
 	if err != nil {
 		result.CheckError = err.Error()
-		result.UpdateCommand = versionUpdateCommand(manifestURL)
+		result.UpdateCommand = versionUpdateCommand(manifestURL, false)
 		return result
 	}
 	result.LatestVersion = checked.LatestVersion
 	result.IsLatest = &checked.IsLatest
-	result.UpdateCommand = versionUpdateCommand(manifestURL)
+	result.UpdateCommand = versionUpdateCommand(manifestURL, false)
 	return result
 }
 
@@ -82,11 +88,14 @@ func resolvedUpdateManifestURL(explicit string) string {
 }
 
 // versionUpdateCommand 根据安装方式返回用户可直接执行的更新命令。
-// 入参：manifestURL string 为独立二进制更新源。
+// 入参：manifestURL string 为独立二进制更新源；explicit bool 表示该地址来自本次命令显式覆盖。
 // 返回值：string，npm 包使用 npm 命令，独立二进制使用 update 命令。
-func versionUpdateCommand(manifestURL string) string {
+func versionUpdateCommand(manifestURL string, explicit bool) string {
 	if os.Getenv("EVERYLINE_CLI_WRAPPER") == "1" {
 		return "npm install -g everyline-cli@latest"
+	}
+	if explicit && strings.TrimSpace(manifestURL) != "" {
+		return "everyline-cli update --manifest-url " + strings.TrimSpace(manifestURL)
 	}
 	if strings.TrimSpace(build.UpdateManifestURL) != "" || strings.TrimSpace(os.Getenv("EVERYLINE_CLI_UPDATE_MANIFEST_URL")) != "" {
 		return "everyline-cli update"
@@ -103,6 +112,16 @@ func versionUpdateCommand(manifestURL string) string {
 func maybeWarnNewVersion(ctx context.Context, runtime *Runtime, root *rootOptions, command *cobra.Command) {
 	if !isBusinessCommand(command) {
 		return
+	}
+	// dry-run/print-input 承诺只执行本地校验，因此连更新 manifest 也不能访问。
+	for _, flagName := range []string{"dry-run", "print-input"} {
+		if command.Flags().Lookup(flagName) == nil {
+			continue
+		}
+		enabled, err := command.Flags().GetBool(flagName)
+		if err == nil && enabled {
+			return
+		}
 	}
 	manifestURL := resolvedUpdateManifestURL("")
 	if manifestURL == "" {

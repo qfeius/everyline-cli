@@ -2,7 +2,7 @@
 
 你的 AI Agent 能读合同、找风险、整理审查意见，但如果它进不了智审系统，就只能停在“帮你分析一下”。`everyline-cli` 把合同上传、主体提取、发起审查、结果查询、清单管理和规则管理变成稳定的命令，让 Agent、测试脚本和 CI 都能直接完成一条真实的智审流程。
 
-> 当前基线：`test` 分支，commit `c3f06aa`，核对日期 `2026-08-25`。
+> 当前基线：`test` 分支，核对日期 `2026-08-26`。
 >
 > 本文格式参照[智书合同 CLI 文档](https://ysi13ckdb9.feishu.cn/wiki/BosWwJsWfi5zK3kqtagctiwrnpf)，命令、字段、接口路径和行为以当前 `everyline-cli` 源码与 JSON Schema 为准。
 
@@ -193,8 +193,8 @@ CLI 会打开浏览器完成 OAuth/PKCE 授权，并通过本机 loopback 回调
 
 ```text
 帮我用 everyline-cli 审查 ./contract.pdf。
-使用 test-app Profile 和 app 身份，审查立场、审查角色都用甲方，
-审查强度为 1，自动匹配合同类型规则包；先 dry-run，确认后正式执行并等待结果。
+使用 test-app Profile 和 app 身份，审查立场、审查角色都用 xxx公司，
+审查强度为中立，自动匹配合同类型规则包；先 dry-run，确认后正式执行并等待结果。
 ```
 
 也可以准备 `review-run.json`：
@@ -207,9 +207,9 @@ CLI 会打开浏览器完成 OAuth/PKCE 授权，并通过本机 loopback 回调
     "name": "采购合同.pdf"
   },
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
-    "reviewStrength": 1,
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
+    "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   },
   "extractSubjects": true,
@@ -295,7 +295,7 @@ Agent 负责整理审查配置、先 dry-run，再调用 `review run` 完成上�
 
 | 用户输入提示词 | Agent 会使用的命令 |
 |---|---|
-| “审查本地采购合同，按甲方立场，自动匹配规则包并等到结果。” | `everyline-cli review run --input review-run.json --dry-run`，确认后去掉 `--dry-run` 正式执行 |
+| “审查本地采购合同，按 xxx公司 立场，自动匹配规则包并等到结果。” | `everyline-cli review run --input review-run.json --dry-run`，确认后去掉 `--dry-run` 正式执行 |
 | “只发起任务，不等待结果。” | 将 `wait` 设为 `false` 后执行 `review run` |
 
 `review run` 核心输入字段：
@@ -308,15 +308,15 @@ Agent 负责整理审查配置、先 dry-run，再调用 `review run` 完成上�
 | `source.name` | string | 是 | 文件名只支持 `.doc`、`.docx`、`.pdf` |
 | `businessId` | string | 条件 | URL 来源必填；文件来源优先使用上传响应 |
 | `fileHash` | string | 条件 | URL 来源必填，64 位 SHA-256 十六进制 |
-| `config.selectedPosition` | string | 是 | 审查立场，非空 |
-| `config.selectedAuditRole` | string | 是 | 审查角色，非空 |
-| `config.reviewStrength` | integer | 是 | `0`、`1`、`2` |
-| `config.selectedCheckListIds` | string[] | 否 | 指定审查清单 ID，每项非空 |
-| `config.matchContractTypeRulePackage` | boolean | 否 | 是否匹配合同类型规则包，仅 `true` 有业务意义 |
+| `config.selectedPosition` | string | 是 | 审查立场，填写合同主体公司名称 |
+| `config.selectedAuditRole` | string | 是 | 审查角色，填写合同主体公司名称 |
+| `config.reviewStrength` | string | 是 | `弱势`、`中立`、`强势`；CLI 转换为后端 `0/1/2` |
+| `config.selectedCheckListIds` | string[] | 条件 | 指定审查清单 ID，每项非空 |
+| `config.matchContractTypeRulePackage` | boolean | 条件 | 是否匹配合同类型规则包，仅 `true` 可作为规则来源 |
 | `extractSubjects` | boolean | 否 | 是否在审查前提取合同主体，默认 `false` |
 | `wait` | boolean | 否 | 是否等待终态并获取详情，默认 `false` |
 
-当前 CLI 不接受 `reviewRules`。正式调用建议始终提供非空 `selectedCheckListIds`，或设置 `matchContractTypeRulePackage=true`。
+当前 CLI 不接受 `reviewRules`。非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少提供一项；两项同时提供时组合执行。
 
 ### 场景 2：URL 合同一键审查
 
@@ -337,9 +337,9 @@ URL 上传链路当前只保证返回 `fileId`，所以一键审查输入还要�
   "businessId": "<BUSINESS_ID>",
   "fileHash": "<64_HEX_SHA256>",
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
-    "reviewStrength": 1,
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
+    "reviewStrength": "中立",
     "selectedCheckListIds": ["<CHECKLIST_ID>"]
   },
   "wait": true
@@ -416,9 +416,9 @@ Content-Type: application/json
   "fileId": 123,
   "fileHash": "<64_HEX_SHA256>",
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
-    "reviewStrength": 1,
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
+    "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   }
 }
@@ -442,10 +442,13 @@ CLI 发送到后端时会将 `fileId` 转为字符串：
   "fileId": "123",
   "fileHash": "<64_HEX_SHA256>",
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
     "reviewStrength": 1,
     "matchContractTypeRulePackage": true
+  },
+  "usageReportContext": {
+    "reportBusinessCode": "everyLine_100_openApi_cli"
   }
 }
 ```
@@ -894,7 +897,7 @@ CLI 校验 HTTP 状态和业务 code 后，只把 `data` 写到 stdout。GET 请
 ```text
 请使用 everyline-cli 审查 ./contract.pdf。
 Profile 使用 test-app，身份使用 app；先执行 auth status。
-审查立场和角色都设置为甲方，reviewStrength=1，
+审查立场和角色都设置为 xxx公司，reviewStrength=中立，
 matchContractTypeRulePackage=true，extractSubjects=true，wait=true。
 先 dry-run 并展示规范化请求，确认后再真实调用。
 业务 JSON 保存到 result.json，进度保存到 progress.log。
@@ -973,7 +976,7 @@ everyline-cli <命令> --help
 
 dry-run 不访问 Profile、token 和后端，只代表 CLI 本地契约通过。权限、文件状态、环境能力和后端附加业务规则只在真实调用时生效。
 
-当前 CLI 不强校验“至少提供一种规则来源”。当 `selectedCheckListIds` 缺失或为空，并且 `matchContractTypeRulePackage` 缺失或为 `false` 时，dry-run 仍可能返回 `0`，但 test 后端可能用 HTTP 422 拒绝真实请求。
+当前 CLI 会在本地强校验规则来源。当 `selectedCheckListIds` 缺失或为空，并且 `matchContractTypeRulePackage` 缺失或为 `false` 时，dry-run 返回退出码 `2`，不会继续调用后端。
 
 ### `reviewRules` 可以作为规则来源吗？
 
@@ -981,9 +984,7 @@ dry-run 不访问 Profile、token 和后端，只代表 CLI 本地契约通过�
 
 ### startReview 会自动添加 `channelType` 或 `usageReportContext` 吗？
 
-以 `test@c3f06aa` 当前源码重新构建后，本地上传、URL 上传和 startReview 都不注入 `channelType`；`StartRequest.ContractPayload()` 也不注入 `usageReportContext`。
-
-工作区旧版 `bin/everyline-cli` 的帮助曾声明会固定注入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，但当前源码没有该行为。验证时应先重新构建，并以 `everyline-cli version` 记录实际版本。
+本地上传、URL 上传和 startReview 都不注入 `channelType`。startReview 会在 HTTP 边界固定注入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供且不能覆盖。
 
 ### 为什么 URL 上传的 Operation 名称是 V3，路径却是 V1？
 
@@ -1039,4 +1040,4 @@ everyline-cli version --output json
 
 | 版本/基线 | 日期 | 变更说明 |
 |---|---|---|
-| `test@c3f06aa` | `2026-08-25` | 按合同 CLI 文档格式重排；补充同款图标、快速开始、九类用户场景、能力地图、四套环境配置、完整接口映射、入参与响应、Agent 提示词和 FAQ |
+| `test` | `2026-08-26` | 按当前 CLI 契约同步中文审查强度、规则来源校验、固定用量上报参数、公司名示例和 URL 上传行为 |

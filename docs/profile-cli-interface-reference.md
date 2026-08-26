@@ -548,8 +548,8 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
   "fileId": 11,
   "fileHash": "<64_HEX_SHA256>",
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
     "reviewStrength": "中立",
     "selectedCheckListIds": ["check-1"],
     "matchContractTypeRulePackage": true
@@ -562,8 +562,8 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
 | `businessId` | string | 是 | 非空 |
 | `fileId` | integer | 是 | 大于 0；HTTP 中发送为 string |
 | `fileHash` | string | 是 | 64 位 SHA-256 十六进制 |
-| `config.selectedPosition` | string | 是 | 非空 |
-| `config.selectedAuditRole` | string | 是 | 非空 |
+| `config.selectedPosition` | string | 是 | 合同主体公司名称，非空 |
+| `config.selectedAuditRole` | string | 是 | 合同主体公司名称，非空 |
 | `config.reviewStrength` | string | 是 | `弱势`、`中立` 或 `强势`；HTTP 分别发送 `0/1/2` |
 | `config.selectedCheckListIds` | string[] | 条件必填 | 非空数组，每项非空 |
 | `config.matchContractTypeRulePackage` | boolean | 条件必填 | 仅 `true` 构成有效规则来源 |
@@ -615,8 +615,8 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
     "name": "合同.pdf"
   },
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
     "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   },
@@ -637,8 +637,8 @@ URL 来源输入：
   "businessId": "biz-1",
   "fileHash": "<64_HEX_SHA256>",
   "config": {
-    "selectedPosition": "甲方",
-    "selectedAuditRole": "甲方",
+    "selectedPosition": "xxx公司",
+    "selectedAuditRole": "xxx公司",
     "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   },

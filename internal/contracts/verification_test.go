@@ -60,7 +60,7 @@ func validContractInput(schema string) any {
 	case "review-subject.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1"}
 	case "review-start.schema.json":
-		return map[string]any{"businessId": "biz", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{"selectedPosition": "甲方", "selectedAuditRole": "甲方", "reviewStrength": 1, "matchContractTypeRulePackage": true}, "usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"}}
+		return map[string]any{"businessId": "biz", "fileId": "1", "fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config": map[string]any{"selectedPosition": "xxx公司", "selectedAuditRole": "xxx公司", "reviewStrength": 1, "matchContractTypeRulePackage": true}, "usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"}}
 	case "review-task-query.schema.json":
 		return map[string]any{"taskId": 1, "businessId": "biz"}
 	case "checklist.schema.json":
@@ -133,8 +133,8 @@ func TestStartSchemaRequiresReviewConfig(t *testing.T) {
 		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		"config": map[string]any{
-			"selectedPosition":             "甲方",
-			"selectedAuditRole":            "甲方",
+			"selectedPosition":             "xxx公司",
+			"selectedAuditRole":            "xxx公司",
 			"reviewStrength":               1,
 			"matchContractTypeRulePackage": true,
 		},
@@ -165,8 +165,8 @@ func TestStartSchemaRejectsExcludedFields(t *testing.T) {
 		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		"config": map[string]any{
-			"selectedPosition":             "甲方",
-			"selectedAuditRole":            "甲方",
+			"selectedPosition":             "xxx公司",
+			"selectedAuditRole":            "xxx公司",
 			"reviewStrength":               1,
 			"matchContractTypeRulePackage": true,
 		},
@@ -203,8 +203,8 @@ func TestReviewRunSchemaIsExecutable(t *testing.T) {
 		"businessId": "biz-url",
 		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"config": map[string]any{
-			"selectedPosition":             "甲方",
-			"selectedAuditRole":            "甲方",
+			"selectedPosition":             "xxx公司",
+			"selectedAuditRole":            "xxx公司",
 			"reviewStrength":               "中立",
 			"selectedCheckListIds":         []string{"2001001"},
 			"matchContractTypeRulePackage": true,
@@ -238,8 +238,8 @@ func TestReviewStartSchemaAcceptsRuleSelectionOptions(t *testing.T) {
 		"fileHash":           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"usageReportContext": map[string]any{"reportBusinessCode": "everyLine_100_openApi_cli"},
 		"config": map[string]any{
-			"selectedPosition":             "甲方",
-			"selectedAuditRole":            "甲方",
+			"selectedPosition":             "xxx公司",
+			"selectedAuditRole":            "xxx公司",
 			"reviewStrength":               1,
 			"selectedCheckListIds":         []string{"2001001"},
 			"matchContractTypeRulePackage": true,
@@ -263,8 +263,8 @@ func TestReviewSchemasRequireAtLeastOneRuleSource(t *testing.T) {
 	run := map[string]any{
 		"source": map[string]any{"type": "file", "path": "contract.pdf", "name": "合同.pdf"},
 		"config": map[string]any{
-			"selectedPosition":  "甲方",
-			"selectedAuditRole": "甲方",
+			"selectedPosition":  "xxx公司",
+			"selectedAuditRole": "xxx公司",
 			"reviewStrength":    "中立",
 		},
 	}

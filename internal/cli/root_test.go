@@ -155,6 +155,30 @@ func TestVersionReportsLatestStateAndUpdateCommand(t *testing.T) {
 	}
 }
 
+// TestVersionExplicitManifestKeepsOverrideInUpdateCommand 验证显式检查源不会被环境默认源替换。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；建议命令没有保留显式 manifest 时通过 t.Fatal 报告。
+func TestVersionExplicitManifestKeepsOverrideInUpdateCommand(t *testing.T) {
+	originalVersion := build.Version
+	build.Version = "1.0.0"
+	t.Cleanup(func() { build.Version = originalVersion })
+	t.Setenv("EVERYLINE_CLI_UPDATE_MANIFEST_URL", "https://updates-a.example.com/manifest.json")
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"version":"1.1.0","platforms":{"test":{"url":"https://updates.example.com/cli","sha256":"unused"}}}`))
+	}))
+	defer server.Close()
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	if err := Execute(context.Background(), runtime, []string{"version", "--manifest-url", server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"updateCommand": "everyline-cli update --manifest-url `+server.URL+`"`) {
+		t.Fatalf("stdout=%s，显式 manifest 必须保留在更新命令中", stdout.String())
+	}
+}
+
 // TestVersionCheckFailureIsNonBlockingAndUnknown 验证检查失败时 version 仍成功，且不会把 isLatest 误报为 true。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；退出或状态语义错误时通过 t.Fatal 报告。
@@ -176,9 +200,9 @@ func TestVersionCheckFailureIsNonBlockingAndUnknown(t *testing.T) {
 	}
 }
 
-// TestBusinessCommandWarnsWhenNewVersionExists 验证普通业务命令发现新版本时只在 stderr 提示且不阻断 dry-run。
+// TestBusinessCommandWarnsWhenNewVersionExists 验证普通业务命令发现新版本时只在 stderr 提示。
 // 入参：t *testing.T 为测试上下文。
-// 返回值：无；业务退出或提示位置错误时通过 t.Fatal 报告。
+// 返回值：无；提示缺失或污染 stdout 时通过 t.Fatal 报告。
 func TestBusinessCommandWarnsWhenNewVersionExists(t *testing.T) {
 	originalVersion := build.Version
 	build.Version = "1.0.0"
@@ -191,12 +215,40 @@ func TestBusinessCommandWarnsWhenNewVersionExists(t *testing.T) {
 	t.Setenv("EVERYLINE_CLI_UPDATE_MANIFEST_URL", server.URL)
 	runtime, stdout, stderr := testRuntime(t)
 	runtime.HTTP = server.Client()
-	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true}}`
+	rootCommand := NewRootCommand(runtime)
+	businessCommand, _, err := rootCommand.Find([]string{"review", "task", "status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	maybeWarnNewVersion(context.Background(), runtime, &rootOptions{}, businessCommand)
+	if strings.Contains(stdout.String(), "发现新版本") || !strings.Contains(stderr.String(), "发现新版本 1.1.0") || !strings.Contains(stderr.String(), "everyline-cli update") {
+		t.Fatalf("stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+// TestBusinessDryRunSkipsVersionCheck 验证 dry-run 严格保持纯本地校验，不访问更新服务。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；发生网络调用或版本提示时通过 t.Fatal 报告。
+func TestBusinessDryRunSkipsVersionCheck(t *testing.T) {
+	originalVersion := build.Version
+	build.Version = "1.0.0"
+	t.Cleanup(func() { build.Version = originalVersion })
+	manifestCalls := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		manifestCalls++
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"version":"1.1.0","platforms":{"test":{"url":"https://updates.example.com/cli","sha256":"unused"}}}`))
+	}))
+	defer server.Close()
+	t.Setenv("EVERYLINE_CLI_UPDATE_MANIFEST_URL", server.URL)
+	runtime, _, stderr := testRuntime(t)
+	runtime.HTTP = server.Client()
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(stdout.String(), "发现新版本") || !strings.Contains(stderr.String(), "发现新版本 1.1.0") || !strings.Contains(stderr.String(), "everyline-cli update") {
-		t.Fatalf("stdout=%s stderr=%s", stdout.String(), stderr.String())
+	if manifestCalls != 0 || strings.Contains(stderr.String(), "[version]") {
+		t.Fatalf("manifestCalls=%d stderr=%s，dry-run 不应检查更新", manifestCalls, stderr.String())
 	}
 }
 
@@ -908,12 +960,12 @@ func TestAuthLoginHonorsRootTimeout(t *testing.T) {
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestReviewStartDryRun(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run", "--output", "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"fileId": "12"`) || !strings.Contains(stdout.String(), `"selectedPosition": "甲方"`) || !strings.Contains(stdout.String(), `"reviewStrength": 1`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || !strings.Contains(stdout.String(), `"reportBusinessCode": "everyLine_100_openApi_cli"`) || strings.Contains(stdout.String(), `"appType"`) {
+	if !strings.Contains(stdout.String(), `"fileId": "12"`) || !strings.Contains(stdout.String(), `"selectedPosition": "xxx公司"`) || !strings.Contains(stdout.String(), `"reviewStrength": 1`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || !strings.Contains(stdout.String(), `"reportBusinessCode": "everyLine_100_openApi_cli"`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
@@ -923,7 +975,7 @@ func TestReviewStartDryRun(t *testing.T) {
 // 返回值：无；未阻断、错误不明确或退出码不是 2 时通过 t.Fatal 报告。
 func TestReviewStartDryRunRejectsMissingRuleSource(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":false}}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":false}}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
 	if !errors.Is(err, review.ErrReviewRuleSourceRequired) || ExitCode(err) != ExitUsage {
 		t.Fatalf("err=%v exit=%d", err, ExitCode(err))
@@ -936,7 +988,7 @@ func TestReviewStartDryRunRejectsMissingRuleSource(t *testing.T) {
 // TestReviewStartRejectsRemovedOptionalField 验证 start CLI 契约不接受未纳入 CLI 的可选字段。
 func TestReviewStartRejectsRemovedOptionalField(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"appType":"THIRD_PARTY"}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":1},"appType":"THIRD_PARTY"}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run", "--output", "json"})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("err=%v stdout=%s", err, stdout.String())
@@ -1019,7 +1071,7 @@ func TestReviewFileUploadRejectsRemovedBusinessIDFlag(t *testing.T) {
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestReviewStartRejectsUnknownField(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"typo":true}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":1},"typo":true}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("err=%v", err)
@@ -1034,7 +1086,7 @@ func TestReviewStartRejectsUnknownField(t *testing.T) {
 // 返回值：无；字段出现在 CLI 请求时通过未知字段错误阻断。
 func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
-	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"usageReportContext":{}}`
+	payload := `{"businessId":"biz-1","fileId":12,"fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":1},"usageReportContext":{}}`
 	err := Execute(context.Background(), runtime, []string{"review", "task", "start", "--data", payload, "--dry-run"})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("err=%v", err)
@@ -1044,11 +1096,11 @@ func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 // TestReviewRunURLDryRunDefaultsConfig 验证 URL 工作流的身份字段和默认配置在 CLI 层可见。
 func TestReviewRunURLDryRunDefaultsConfig(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
+	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"selectedAuditRole": "甲方"`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
+	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"selectedAuditRole": "xxx公司"`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
@@ -1062,7 +1114,7 @@ func TestReviewRunDryRunRejectsMissingRuleSource(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立"}}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立"}}`
 	err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run"})
 	if !errors.Is(err, review.ErrReviewRuleSourceRequired) || ExitCode(err) != ExitUsage {
 		t.Fatalf("err=%v exit=%d", err, ExitCode(err))
@@ -1072,7 +1124,7 @@ func TestReviewRunDryRunRejectsMissingRuleSource(t *testing.T) {
 // TestReviewRunRejectsRemovedOptionalField 验证 review run 不接受已排除的发起审查可选字段。
 func TestReviewRunRejectsRemovedOptionalField(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
-	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":1},"appType":"THIRD_PARTY"}`
+	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":1},"appType":"THIRD_PARTY"}`
 	err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run"})
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("err=%v", err)
@@ -1281,7 +1333,7 @@ func TestReviewRunDryRunValidatesLocalFile(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.PDF"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.PDF"},"config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1297,7 +1349,7 @@ func TestReviewRunDryRunAllowsExtensionlessLocalPath(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true}}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1334,7 +1386,7 @@ func TestReviewRunRendersPartialResultOnFailure(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("pdf"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"businessId":"biz-1","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}`
+	payload := `{"source":{"type":"file","path":"` + filePath + `","name":"合同.pdf"},"businessId":"biz-1","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}`
 	err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--interval", "1ms", "--deadline", "1s", "--output", "json"})
 	if !errors.Is(err, review.ErrTaskFailed) {
 		t.Fatalf("err=%v", err)

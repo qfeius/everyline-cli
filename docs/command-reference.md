@@ -89,13 +89,13 @@ update [--manifest-url HTTPS_URL] [--dry-run]
 
 `review run` 使用 URL 来源时，上传接口只返回 `fileId`；输入还需提供 `businessId` 和上传接口返回的 `fileHash`，工作流才会继续发起审查。需要完整闭环时在输入中显式设置 `"wait": true`；省略或设置为 `false` 时命令在发起任务后返回。
 
-`review task start` 和 `review run` 的发起审查输入只保留必填审查字段：`businessId`、`fileId`、`fileHash`、`config.selectedPosition`、`config.selectedAuditRole`、`config.reviewStrength`。审查强度输入为“弱势/中立/强势”，CLI 分别转换为后端 `0/1/2`。规则来源要求非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；同时提供时组合执行，没有覆盖或优先级。实际调用 `startReview` 时固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。`fileHash` 使用上传接口返回值；`fileId` 本次保持当前 CLI 输入类型，不进行全局字符串化。未列出的字段会被严格 JSON 输入拒绝。`review file upload` 也不接受 `--business-id`。主体提取仍必须提供 `--business-id`；任务 status/info/result 默认只需 `--task-id`，使用 `--visibility-scope contractResult` 时仍必须提供 `--business-id`，不再要求 appType。
+`review task start` 和 `review run` 的发起审查输入只保留必填审查字段：`businessId`、`fileId`、`fileHash`、`config.selectedPosition`、`config.selectedAuditRole`、`config.reviewStrength`；立场和角色填写合同主体公司名称。审查强度输入为“弱势/中立/强势”，CLI 分别转换为后端 `0/1/2`。规则来源要求非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；同时提供时组合执行，没有覆盖或优先级。实际调用 `startReview` 时固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。`fileHash` 使用上传接口返回值；`fileId` 本次保持当前 CLI 输入类型，不进行全局字符串化。未列出的字段会被严格 JSON 输入拒绝。`review file upload` 也不接受 `--business-id`。主体提取仍必须提供 `--business-id`；任务 status/info/result 默认只需 `--task-id`，使用 `--visibility-scope contractResult` 时仍必须提供 `--business-id`，不再要求 appType。
 
 发起审查示例：
 
 ```bash
-everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true}}' --dry-run
-everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}' --dry-run
+everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true}}' --dry-run
+everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}' --dry-run
 ```
 
 `checklist batch-create`、`checklist batch-update`、`rule batch-create`、`rule batch-update` 属于非必需批量写能力。它们支持本地 `--dry-run`/`--print-input`，真实调用会在发送 HTTP 请求前失败关闭；单项写入和批量删除不受此限制。

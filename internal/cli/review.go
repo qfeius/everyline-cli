@@ -259,8 +259,8 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 - fileId integer（必填）：平台文件 ID；保持当前 CLI 输入方式。
 - fileHash string（必填，使用上传接口返回值）：文件指纹。
 - config object（必填）：审查配置。
-- config.selectedPosition string（必填）：审查立场。
-- config.selectedAuditRole string（必填）：审查角色。
+- config.selectedPosition string（必填）：审查立场，填写合同主体公司名称。
+- config.selectedAuditRole string（必填）：审查角色，填写合同主体公司名称。
 - config.reviewStrength string（必填，弱势|中立|强势）：CLI 会转换为后端枚举。
 - config.selectedCheckListIds array<string>（条件必填）：指定自定义审查清单 ID。
 - config.matchContractTypeRulePackage boolean（条件必填）：是否匹配合同类型规则包；仅 true 生效。
@@ -270,7 +270,7 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 
 CLI 仅接受以上字段，其他字段会按未知字段拒绝。
 实际 HTTP 请求固定补入 usageReportContext.reportBusinessCode=everyLine_100_openApi_cli，该字段不属于 CLI 输入。`,
-		Example: `  everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}' --dry-run
+		Example: `  everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}' --dry-run
   everyline-cli review task start --input review-start.json --output json`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
@@ -445,8 +445,8 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 请求字段：
 - source object（必填）：type=file 时提供 path/name；type=url 时提供 fileUrl/name。
 - config object（必填）：审查配置。
-  - config.selectedPosition string（必填）：审查立场。
-  - config.selectedAuditRole string（必填）：审查角色。
+  - config.selectedPosition string（必填）：审查立场，填写合同主体公司名称。
+  - config.selectedAuditRole string（必填）：审查角色，填写合同主体公司名称。
   - config.reviewStrength string（必填，弱势、中立、强势）：CLI 会转换为后端枚举。
   - config.selectedCheckListIds array<string>（条件必填）：指定自定义审查清单 ID。
   - config.matchContractTypeRulePackage boolean（条件必填）：是否匹配合同类型规则包；仅 true 生效。
@@ -458,7 +458,7 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 
 发起审查的实际 HTTP 请求固定补入 usageReportContext.reportBusinessCode=everyLine_100_openApi_cli，该字段不属于 RunSpec 输入。`,
 		Example: `  everyline-cli review run --input review-run.json --output json
-  everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"甲方","selectedAuditRole":"甲方","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true},"wait":true}' --dry-run`,
+  everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true},"wait":true}' --dry-run`,
 		Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var spec review.RunSpec
