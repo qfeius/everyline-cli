@@ -21,7 +21,7 @@ flowchart TD
     D -->|未授权| E[完成 OAuth 或 app 授权]
     D -->|已授权| F{识别业务意图}
     E --> F
-    F -->|合同审查| G[收集合同来源]
+    F -->|合同审查| G[读取单附件、路径或 URL]
     G --> H[上传并提取主体]
     H --> I[选择立场方]
     I --> J[选择清单或内置规则包]
@@ -99,6 +99,12 @@ flowchart TD
 | FILE-06 | 受限 | URL 下载或上传失败 | 返回真实失败阶段 | 清理已创建的临时文件后停止 |
 | FILE-07 | 已支持 | URL 上传路径存在多种实现 | 只下载一次后本地上传，不先调用 URL 上传再回退 | 避免生成重复平台文件 |
 | FILE-08 | 受限 | CLI 上传失败或结果缺少后续必需身份 | 不让用户补填内部字段 | 返回真实上传结果并停止 |
+| FILE-09 | 已支持 | 用户消息只附加一份 DOC、DOCX 或 PDF 合同 | 直接采用宿主暴露的可读文件，不询问绝对路径 | 上传并记录真实文件身份 |
+| FILE-10 | 已支持 | 用户附加一份合同并同时说明“强度中立” | 同时记录合同来源和强度 | 后续不重复询问这两项 |
+| FILE-11 | 已支持 | 当前消息包含多份合同附件 | 展示真实文件名，让用户选择一份 | 唯一选择后上传 |
+| FILE-12 | 受限 | 附件只有预览或引用，宿主没有提供原始文件读取或下载能力 | 不根据预览文本重建合同 | 请用户提供可读取路径或完整 URL |
+| FILE-13 | 已支持 | 宿主提供附件下载能力或完整下载地址 | 原始字节只下载一次到权限受限的临时目录 | 任务结束或失败后清理本次临时副本 |
+| FILE-14 | 受限 | 消息附件不是 DOC、DOCX 或 PDF | 不把其他文件误作合同 | 说明支持格式并等待合同来源 |
 
 ## 7. 主体提取与立场方选择
 
@@ -238,14 +244,15 @@ flowchart TD
 以下最小集合可覆盖主要分支：
 
 1. `$everyline-cli 使用 test-user Profile 和 user 身份检查授权状态，先不要上传文件。`
-2. `$everyline-cli 使用 test-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
-3. `$everyline-cli 使用 test-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
-4. `$everyline-cli 列出我可用的自定义审查清单和其中的规则。`
-5. `$everyline-cli 创建一个采购合同审查清单。`
-6. `$everyline-cli 给“采购合同清单”增加“付款条件风险”规则。`
-7. `$everyline-cli 删除“采购合同清单”。`
-8. `$everyline-cli 创建一条付款条件风险规则。`
-9. `$everyline-cli 删除一条仍被清单引用的规则。`
-10. `$everyline-cli 删除包含多条规则的规则分组。`
+2. 在消息中附加一份合同并发送：`$everyline-cli 使用 test-user Profile 和 user 身份审查这个附件；强度中立。`
+3. `$everyline-cli 使用 test-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
+4. `$everyline-cli 使用 test-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
+5. `$everyline-cli 列出我可用的自定义审查清单和其中的规则。`
+6. `$everyline-cli 创建一个采购合同审查清单。`
+7. `$everyline-cli 给“采购合同清单”增加“付款条件风险”规则。`
+8. `$everyline-cli 删除“采购合同清单”。`
+9. `$everyline-cli 创建一条付款条件风险规则。`
+10. `$everyline-cli 删除一条仍被清单引用的规则。`
+11. `$everyline-cli 删除包含多条规则的规则分组。`
 
 验收时应同时覆盖确认、取消、名称重复、无匹配、授权失败、版本能力缺失、计费异常、发起超时无 task ID、成功无详情链接等分支。
