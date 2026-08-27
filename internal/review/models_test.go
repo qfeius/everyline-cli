@@ -18,7 +18,7 @@ func TestStartInputMapsChineseReviewStrength(t *testing.T) {
 				FileHash:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				Config: map[string]any{
 					"selectedPosition":             "xxx公司",
-					"selectedAuditRole":            "xxx公司",
+					"selectedAuditRole":            "甲方",
 					"reviewStrength":               label,
 					"matchContractTypeRulePackage": true,
 				},
@@ -47,7 +47,7 @@ func TestStartInputAcceptsLegacyNumericReviewStrength(t *testing.T) {
 		FileHash:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Config: map[string]any{
 			"selectedPosition":             "xxx公司",
-			"selectedAuditRole":            "xxx公司",
+			"selectedAuditRole":            "甲方",
 			"reviewStrength":               json.Number("1"),
 			"matchContractTypeRulePackage": true,
 		},
@@ -74,7 +74,7 @@ func TestStartInputRequiresAtLeastOneRuleSource(t *testing.T) {
 		FileHash:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Config: map[string]any{
 			"selectedPosition":             "xxx公司",
-			"selectedAuditRole":            "xxx公司",
+			"selectedAuditRole":            "甲方",
 			"reviewStrength":               "中立",
 			"matchContractTypeRulePackage": false,
 		},

@@ -22,8 +22,8 @@
       "additionalProperties": false,
       "required": ["selectedPosition", "selectedAuditRole", "reviewStrength"],
       "properties": {
-        "selectedPosition": {"type": "string", "minLength": 1},
-        "selectedAuditRole": {"type": "string", "minLength": 1},
+        "selectedPosition": {"type": "string", "minLength": 1, "description": "合同主体提取响应中所选 counterpart.name 的精确值"},
+        "selectedAuditRole": {"type": "string", "minLength": 1, "description": "同一所选 counterpart.role 的精确值，例如甲方或乙方"},
         "reviewStrength": {"type": "integer", "enum": [0, 1, 2]},
         "selectedCheckListIds": {
           "type": "array",

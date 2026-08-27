@@ -100,6 +100,28 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 			t.Fatalf("EveryLine 审查流程缺少固定调用上下文的命令 %q", expected)
 		}
 	}
+
+	// 主体映射必须保留同一候选的 name/role，避免把公司名称误写到 selectedAuditRole 后才由服务端拒绝。
+	for _, expected := range []string{
+		"`selectedPosition` 使用所选候选的 `name`",
+		"`selectedAuditRole` 使用同一候选的 `role`",
+		`"selectedPosition": "唯一匹配候选的 name"`,
+		`"selectedAuditRole": "同一候选的 role，例如甲方"`,
+		"固定使用 `0. 按合同类型自动匹配内置规则包`",
+		"展示编号与解析用户回复必须使用同一份映射",
+	} {
+		if !strings.Contains(workflowText, expected) {
+			t.Fatalf("EveryLine 审查流程缺少主体映射约束 %q", expected)
+		}
+	}
+	for _, unexpected := range []string{
+		"将唯一匹配的主体同时写入这两个兼容字段",
+		`"selectedAuditRole": "唯一匹配的主体名称"`,
+	} {
+		if strings.Contains(workflowText, unexpected) {
+			t.Fatalf("EveryLine 审查流程仍包含错误主体映射 %q", unexpected)
+		}
+	}
 }
 
 func TestHelpIncludesUpdateCommand(t *testing.T) {
@@ -125,6 +147,7 @@ func TestHelpExplainsReviewStartInputContract(t *testing.T) {
 		"fileHash string（必填，使用上传接口返回值）",
 		"config.selectedPosition string（必填）",
 		"config.selectedAuditRole string（必填）",
+		"填写同一主体的角色，例如甲方或乙方",
 		"config.reviewStrength string|integer（必填，弱势|中立|强势，兼容 0|1|2）",
 		"config.selectedCheckListIds array<string>（条件必填）",
 		"config.matchContractTypeRulePackage boolean（条件必填）",
@@ -132,7 +155,7 @@ func TestHelpExplainsReviewStartInputContract(t *testing.T) {
 		"组合执行，互不覆盖且没有优先级",
 		"usageReportContext.reportBusinessCode=everyLine_100_openApi_cli",
 		`selectedPosition":"xxx公司"`,
-		`selectedAuditRole":"xxx公司"`,
+		`selectedAuditRole":"甲方"`,
 		`selectedCheckListIds":["2001001"]`,
 		`matchContractTypeRulePackage":true`,
 		"--data '{",
@@ -160,6 +183,7 @@ func TestHelpExplainsReviewRunInputContract(t *testing.T) {
 		"config object（必填）",
 		"config.selectedPosition",
 		"config.selectedAuditRole",
+		"填写同一主体的角色，例如甲方或乙方",
 		"config.reviewStrength",
 		"config.selectedCheckListIds array<string>（条件必填）",
 		"config.matchContractTypeRulePackage boolean（条件必填）",
@@ -167,7 +191,7 @@ func TestHelpExplainsReviewRunInputContract(t *testing.T) {
 		"组合执行，互不覆盖且没有优先级",
 		"usageReportContext.reportBusinessCode=everyLine_100_openApi_cli",
 		`selectedPosition":"xxx公司"`,
-		`selectedAuditRole":"xxx公司"`,
+		`selectedAuditRole":"甲方"`,
 		`selectedCheckListIds":["2001001"]`,
 		`matchContractTypeRulePackage":true`,
 		"fileHash 使用上传接口返回值",

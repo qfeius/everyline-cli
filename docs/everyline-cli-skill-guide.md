@@ -345,17 +345,17 @@ $everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/采
 用户：$everyline-cli 使用 prod-user Profile 和 user 身份审查 /Users/me/Documents/采购合同.pdf
 
 Agent：检测到以下合同主体，请选择审查立场方：
-1. 示例采购有限公司
-2. 示例供应有限公司
+1. 示例采购有限公司（甲方）
+2. 示例供应有限公司（乙方）
 
 用户：选择 1
 
 Agent：请选择审查规则来源：
-1. 按合同类型自动匹配内置规则包
-2. 实际查询到的自定义清单 A
-3. 实际查询到的自定义清单 B
+0. 按合同类型自动匹配内置规则包
+1. 实际查询到的自定义清单 A
+2. 实际查询到的自定义清单 B
 
-用户：选择 1 和 2
+用户：选择 0 和 1
 
 Agent：请选择审查强度：弱势、中立、强势。
 
@@ -385,6 +385,8 @@ $everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/采
 | 输入交互 | 用户只需提供合同附件、路径或 URL 形式的合同来源，以及立场方、清单和强度；单附件不再追问路径 |
 | 内部参数 | Skill 不向用户索要 `businessId/fileId/fileHash/selectedAuditRole/wait` |
 | 候选数据 | 主体、清单、规则均来自实时 CLI 查询 |
+| 主体映射 | 所选候选的 `name` 写入 `selectedPosition`，同一候选的 `role` 写入 `selectedAuditRole` |
+| 规则编号 | `0` 固定表示内置规则包，自定义清单从 `1` 开始，展示与解析使用同一映射 |
 | 正式请求门 | 同一输入的 dry-run 成功后才发起真实任务 |
 | 任务幂等 | 取得 task ID 后只查询该任务，不重复创建 |
 | 最终结果 | 返回真实终态；服务端提供链接时返回 `reviewDetailUrl` |

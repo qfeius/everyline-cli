@@ -150,7 +150,7 @@ everyline-cli review run \
   },
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   },
@@ -180,7 +180,7 @@ everyline-cli review run \
   > result.json 2> progress.log
 ~~~
 
-config.selectedPosition、config.selectedAuditRole 和 config.reviewStrength 是发起审查必填字段，其中立场和角色填写合同主体公司名称。`reviewStrength` 推荐使用“弱势/中立/强势”，并兼容旧版 `0/1/2`；CLI 在 HTTP 边界统一转换为 `0/1/2`。规则来源必须满足非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；两项同时提供时组合执行，互不覆盖且没有优先级。文件来源通常由上传接口补充文件身份；URL 来源还需要提供 businessId 和上传接口返回的 fileHash。发起审查的实际 HTTP 请求会固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。
+config.selectedPosition、config.selectedAuditRole 和 config.reviewStrength 是发起审查必填字段。`selectedPosition` 填写合同主体的精确名称，`selectedAuditRole` 填写同一主体在主体提取响应中的角色，例如“甲方”或“乙方”。`reviewStrength` 推荐使用“弱势/中立/强势”，并兼容旧版 `0/1/2`；CLI 在 HTTP 边界统一转换为 `0/1/2`。规则来源必须满足非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；两项同时提供时组合执行，互不覆盖且没有优先级。文件来源通常由上传接口补充文件身份；URL 来源还需要提供 businessId 和上传接口返回的 fileHash。发起审查的实际 HTTP 请求会固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。
 
 ### 分步流程
 
@@ -211,7 +211,7 @@ everyline-cli review file upload \
 everyline-cli review task start \
   --profile prod-user \
   --as user \
-  --data '{"businessId":"biz-001","fileId":123456,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true}}' \
+  --data '{"businessId":"biz-001","fileId":123456,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"xxx公司","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true}}' \
   --output json
 ~~~
 

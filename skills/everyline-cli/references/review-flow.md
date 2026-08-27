@@ -56,10 +56,10 @@
 review subject extract --profile <profile> --as <identity> --business-id <businessId> --file-id <fileId> --file-hash <fileHash> --output json
 ```
 
-- 展示 CLI 返回的完整主体名称，不展示合同正文。
-- 用户之前已经提供的主体名称可以唯一匹配时直接采用。
-- 不能根据文件名、登录用户、历史任务或常见甲乙方关系替用户决定主体。
-- 当前 CLI 的 `selectedPosition` 与 `selectedAuditRole` 都要求合同主体公司名称；构造发起请求时将唯一匹配的主体同时写入这两个兼容字段，不再询问用户第二次。
+- 将响应中每个 `counterparts[]` 候选的 `role` 和 `name` 作为同一组数据保存；向用户展示完整主体名称及对应角色，不展示合同正文。
+- 用户之前已经提供的主体名称可以唯一匹配时直接采用，并保留该候选原始 `role`，不再询问用户第二个角色字段。
+- 构造发起请求时，`selectedPosition` 使用所选候选的 `name`，`selectedAuditRole` 使用同一候选的 `role`。不得将公司名称复制到 `selectedAuditRole`，也不得从展示文本、文件名、登录用户、历史任务或常见甲乙方关系猜测角色。
+- 所选候选缺少非空 `name` 或 `role` 时返回主体数据不完整并停止，不发送审查任务。
 
 ## 查询并选择清单
 
@@ -67,7 +67,8 @@ review subject extract --profile <profile> --as <identity> --business-id <busine
 2. 对每个真实清单展示名称和可用的类型信息。响应只有规则 ID 时，读取全部规则分组及规则页面，使用本次查询建立 ID 到规则名称的映射。
 3. 允许用户组合选择多个真实自定义清单。
 4. 当前 CLI 明确支持的内置选项只有“按合同类型自动匹配内置规则包”，它映射为 `matchContractTypeRulePackage=true`；不要虚构其他内置清单或 ID。
-5. 名称重复时使用类型、规则名称、创建信息或对话编号区分，内部保存本次查询得到的真实 ID。
+5. 展示规则来源时固定使用 `0. 按合同类型自动匹配内置规则包`，真实自定义清单从 `1` 开始连续编号；展示编号与解析用户回复必须使用同一份映射，组合选择时允许 `0` 与一个或多个自定义清单编号同时出现。
+6. 名称重复时使用类型、规则名称、创建信息或对话编号区分，内部保存本次查询得到的真实 ID。
 
 ## 构造并发起任务
 
@@ -79,8 +80,8 @@ review subject extract --profile <profile> --as <identity> --business-id <busine
   "fileId": 123,
   "fileHash": "UPLOAD_FILE_HASH",
   "config": {
-    "selectedPosition": "唯一匹配的主体名称",
-    "selectedAuditRole": "唯一匹配的主体名称",
+    "selectedPosition": "唯一匹配候选的 name",
+    "selectedAuditRole": "同一候选的 role，例如甲方",
     "reviewStrength": "中立",
     "selectedCheckListIds": ["真实自定义清单 ID"],
     "matchContractTypeRulePackage": true

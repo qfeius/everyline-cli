@@ -193,7 +193,7 @@ CLI 会打开浏览器完成 OAuth/PKCE 授权，并通过本机 loopback 回调
 
 ```text
 帮我用 everyline-cli 审查 ./contract.pdf。
-使用 test-app Profile 和 app 身份，审查立场、审查角色都用 xxx公司，
+使用 test-app Profile 和 app 身份，审查立场使用 xxx公司，审查角色使用该主体对应的甲方，
 审查强度为中立，自动匹配合同类型规则包；先 dry-run，确认后正式执行并等待结果。
 ```
 
@@ -208,7 +208,7 @@ CLI 会打开浏览器完成 OAuth/PKCE 授权，并通过本机 loopback 回调
   },
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   },
@@ -308,8 +308,8 @@ Agent 负责整理审查配置、先 dry-run，再调用 `review run` 完成上�
 | `source.name` | string | 是 | 文件名只支持 `.doc`、`.docx`、`.pdf` |
 | `businessId` | string | 条件 | URL 来源必填；文件来源优先使用上传响应 |
 | `fileHash` | string | 条件 | URL 来源必填，64 位 SHA-256 十六进制 |
-| `config.selectedPosition` | string | 是 | 审查立场，填写合同主体公司名称 |
-| `config.selectedAuditRole` | string | 是 | 审查角色，填写合同主体公司名称 |
+| `config.selectedPosition` | string | 是 | 审查立场，填写合同主体精确名称 |
+| `config.selectedAuditRole` | string | 是 | 审查角色，填写同一主体的角色，例如甲方或乙方 |
 | `config.reviewStrength` | string 或 integer | 是 | 推荐 `弱势`、`中立`、`强势`，兼容旧版 `0/1/2`；CLI 转换为后端 `0/1/2` |
 | `config.selectedCheckListIds` | string[] | 条件 | 指定审查清单 ID，每项非空 |
 | `config.matchContractTypeRulePackage` | boolean | 条件 | 是否匹配合同类型规则包，仅 `true` 可作为规则来源 |
@@ -338,7 +338,7 @@ URL 上传链路当前只保证返回 `fileId`，所以一键审查输入还要�
   "fileHash": "<64_HEX_SHA256>",
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": "中立",
     "selectedCheckListIds": ["<CHECKLIST_ID>"]
   },
@@ -417,7 +417,7 @@ Content-Type: application/json
   "fileHash": "<64_HEX_SHA256>",
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   }
@@ -443,7 +443,7 @@ CLI 发送到后端时会将 `fileId` 转为字符串：
   "fileHash": "<64_HEX_SHA256>",
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": 1,
     "matchContractTypeRulePackage": true
   },
