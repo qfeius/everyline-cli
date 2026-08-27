@@ -58,8 +58,8 @@
 review subject extract --profile <profile> --as <identity> --business-id <businessId> --file-id <fileId> --file-hash <fileHash> --output json
 ```
 
-- 将响应中每个 `counterparts[]` 候选的 `role` 和 `name` 作为同一组数据保存；向用户展示完整主体名称及对应角色，不展示合同正文。
-- 用户之前已经提供的主体名称可以唯一匹配时直接采用，并保留该候选原始 `role`，不再询问用户第二个角色字段。
+- 将响应中每个 `counterparts[]` 候选的 `role` 和 `name` 作为同一组数据保存；按 `name（role）` 展示完整主体名称及对应角色，并保留展示项到原始候选的映射，不展示合同正文。
+- 用户之前已经提供的主体名称可以唯一匹配时直接采用，并保留该候选原始 `role`，不再询问用户第二个角色字段。用户回复完整展示项 `猎聘123（乙方）` 时，也必须通过本次展示映射选中对应候选，得到 `selectedPosition=猎聘123`、`selectedAuditRole=乙方`；括号中的角色用于匹配本次候选，不作为脱离主体响应的新角色来源。
 - 构造发起请求时，`selectedPosition` 使用所选候选的 `name`，`selectedAuditRole` 使用同一候选的 `role`。不得将公司名称复制到 `selectedAuditRole`，也不得从展示文本、文件名、登录用户、历史任务或常见甲乙方关系猜测角色。
 - 所选候选缺少非空 `name` 或 `role` 时返回主体数据不完整并停止，不发送审查任务。
 

@@ -119,6 +119,7 @@ flowchart TD
 | SUBJECT-05 | 受限 | CLI 未返回可用主体，或候选缺少 `role/name` | 不根据文件名、登录用户或甲乙方关系猜测 | 返回提取结果并停止 |
 | SUBJECT-06 | 已支持 | 已确定唯一主体 | 将同一候选的 `name` 写入 `selectedPosition`、`role` 写入 `selectedAuditRole` | 不向用户追问第二个角色字段 |
 | SUBJECT-07 | 受限 | 准备把公司名称同时写入两个字段 | 拒绝错误映射并回到本次主体响应读取同一候选的 `role/name` | 映射正确后才能 dry-run |
+| SUBJECT-08 | 已支持 | 用户回复完整展示项 `猎聘123（乙方）` | 用本次展示映射选中同一结构化候选，设置 `selectedPosition=猎聘123`、`selectedAuditRole=乙方` | 不把公司名称写入角色字段 |
 
 ## 8. 审查清单选择
 
