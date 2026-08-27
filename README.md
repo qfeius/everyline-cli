@@ -97,6 +97,10 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 ## Codex/Agent 最佳实践
 
+仓库和 npm 发布包都包含可独立分发的交互式 Skill：`skills/everyline-cli/`。它负责在对话中收集合同来源、审查立场方、审查清单和审查强度，再调用现有 CLI 完成授权、上传、主体提取、任务发起和结果查询。
+
+Skill 不会修改或替代 CLI 接口，安装 npm 包时也不会自动写入用户的 Skill 目录。需要使用时，由 Agent 宿主或发布平台导入完整的 `skills/everyline-cli/` 目录即可。
+
 Agent 执行 CLI 时建议遵循固定流程：
 
 1. 检查版本和命令路径。

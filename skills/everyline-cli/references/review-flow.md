@@ -1,0 +1,94 @@
+# 当前 CLI 的交互式合同审查流程
+
+## 就绪门
+
+在读取或上传合同前，先执行主 Skill 中的版本与实时帮助检查。只有 `review task start` 明确接受中文强度，并明确两类规则来源可以组合执行时，才继续本流程。旧版只接受 `0/1/2` 时停止，不在 Skill 中维护或猜测数字映射。
+
+## 输入边界
+
+整个对话只向用户收集四项业务输入：
+
+| 输入 | 用户可见内容 | 继续条件 |
+| --- | --- | --- |
+| 合同来源 | 本地 DOC、DOCX、PDF 路径或完整 HTTP/HTTPS URL | 可以安全读取并上传 |
+| 审查立场方 | 合同中的具体主体名称 | 与主体候选唯一匹配 |
+| 审查清单 | 真实清单名称、类型和规则名称 | 至少选择一个自定义清单或内置规则包 |
+| 审查强度 | 弱势、中立、强势 | 选择其中一项 |
+
+`businessId`、`fileId`、`fileHash`、`selectedAuditRole` 和任务轮询选项是当前 CLI 的内部兼容数据，不作为额外问题询问用户。
+
+## 准备合同
+
+### 本地文件
+
+1. 确认路径存在，扩展名为 DOC、DOCX 或 PDF。
+2. 调用 `review file upload --file <path> --name <basename> --output json`。
+3. 从结构化结果记录真实 `businessId/fileId/fileHash`，不向用户展示合同正文。
+
+### URL
+
+当前 URL 上传链路不能保证返回后续主体提取所需的全部文件身份。为了不改变 CLI 接口：
+
+1. 将完整 HTTP/HTTPS URL 下载到权限受限的临时目录；不在日志中输出带查询参数的 URL。
+2. 根据响应文件名或 URL 路径确定 DOC、DOCX、PDF 文件名，无法可靠确定类型时停止并说明原因。
+3. 按本地文件流程上传。
+4. 任务结束或失败后删除本次临时下载和临时输入文件，只删除已明确创建的临时路径。
+
+不要先调用 URL 上传再回退到本地上传，避免为同一来源创建两份平台文件。
+
+## 提取并匹配主体
+
+使用上传结果调用：
+
+```text
+review subject extract --business-id <businessId> --file-id <fileId> --file-hash <fileHash> --output json
+```
+
+- 展示 CLI 返回的完整主体名称，不展示合同正文。
+- 用户之前已经提供的主体名称可以唯一匹配时直接采用。
+- 不能根据文件名、登录用户、历史任务或常见甲乙方关系替用户决定主体。
+- 当前 CLI 的 `selectedPosition` 与 `selectedAuditRole` 都要求合同主体公司名称；构造发起请求时将唯一匹配的主体同时写入这两个兼容字段，不再询问用户第二次。
+
+## 查询并选择清单
+
+1. 使用 `checklist list --page-index 1 --page-size 100 --output json` 查询，按响应分页信息继续读取全部页面。
+2. 对每个真实清单展示名称和可用的类型信息。响应只有规则 ID 时，读取全部规则分组及规则页面，使用本次查询建立 ID 到规则名称的映射。
+3. 允许用户组合选择多个真实自定义清单。
+4. 当前 CLI 明确支持的内置选项只有“按合同类型自动匹配内置规则包”，它映射为 `matchContractTypeRulePackage=true`；不要虚构其他内置清单或 ID。
+5. 名称重复时使用类型、规则名称、创建信息或对话编号区分，内部保存本次查询得到的真实 ID。
+
+## 构造并发起任务
+
+四项输入全部满足后，使用权限受限的临时 JSON 文件调用 `review task start --input <path> --output json`。兼容请求形状为：
+
+```json
+{
+  "businessId": "UPLOAD_BUSINESS_ID",
+  "fileId": 123,
+  "fileHash": "UPLOAD_FILE_HASH",
+  "config": {
+    "selectedPosition": "唯一匹配的主体名称",
+    "selectedAuditRole": "唯一匹配的主体名称",
+    "reviewStrength": "中立",
+    "selectedCheckListIds": ["真实自定义清单 ID"],
+    "matchContractTypeRulePackage": true
+  }
+}
+```
+
+- 只提供自定义清单时省略 `matchContractTypeRulePackage` 或设为 `false`。
+- 只选择内置规则包时省略 `selectedCheckListIds`。
+- 不向用户展示数字审查强度、内部文件身份或完整请求 JSON。
+- 不做点数预检，不估算或展示余额。
+
+发起成功后记录唯一 task ID。若 CLI 返回点数不足以外的错误，返回真实原因，不把它改写为充值提示。
+
+## 等待并返回结果
+
+调用 `review task result --task-id <taskId> --business-id <businessId> --output json`，具体参数以实时帮助为准。
+
+- 等待期间可以告诉用户任务已创建并正在等待，但不能称为审查完成。
+- 成功时返回 CLI 实际提供的终态和 `reviewDetailUrl`。
+- 状态成功但链接缺失时，说明任务成功但尚未取得详情链接，不拼接地址。
+- 失败、取消或超时时返回真实阶段、原因及已经取得的 request ID 或 task ID。
+- 同一次对话已经取得 task ID 后，任何恢复都从结果查询继续，不重新上传或发起。
