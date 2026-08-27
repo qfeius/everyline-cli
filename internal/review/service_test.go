@@ -46,7 +46,7 @@ func TestServiceStartContract(t *testing.T) {
 		FileHash:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Config: map[string]any{
 			"selectedPosition":             "xxx公司",
-			"selectedAuditRole":            "xxx公司",
+			"selectedAuditRole":            "甲方",
 			"reviewStrength":               1,
 			"matchContractTypeRulePackage": true,
 		},

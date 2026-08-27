@@ -97,11 +97,11 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 ## Codex/Agent 最佳实践
 
-仓库和 npm 发布包都包含可独立分发的交互式 Skill：`skills/everyline-cli/`。它负责在对话中固定 Profile 和身份，收集合同来源、审查立场方、审查清单和审查强度，再调用现有 CLI 完成授权、上传、主体提取、dry-run、任务发起和结果查询。
+仓库和 npm 发布包都包含可独立分发的交互式 Skill：`skills/everyline-cli/`。它负责在对话中固定 Profile 和身份，接收单个合同附件、本地路径或 URL 形式的合同来源，收集审查立场方、审查清单和审查强度，再调用现有 CLI 完成授权、上传、主体提取、dry-run、任务发起和结果查询。
 
 Skill 不会修改或替代 CLI 接口，安装 npm 包时也不会自动写入用户的 Skill 目录。需要使用时，由 Agent 宿主或发布平台导入完整的 `skills/everyline-cli/` 目录即可。
 
-在其他设备安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)；评审全部对话分支，请参阅 [EveryLine CLI Skill 全量交互场景](docs/everyline-cli-skill-interaction-scenarios.md)。
+在 Codex、WorkBuddy 或豆包电脑版安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)；评审全部对话分支，请参阅 [EveryLine CLI Skill 全量交互场景](docs/everyline-cli-skill-interaction-scenarios.md)。
 
 Agent 执行 CLI 时建议遵循固定流程：
 
@@ -150,7 +150,7 @@ everyline-cli review run \
   },
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   },
@@ -180,7 +180,7 @@ everyline-cli review run \
   > result.json 2> progress.log
 ~~~
 
-config.selectedPosition、config.selectedAuditRole 和 config.reviewStrength 是发起审查必填字段，其中立场和角色填写合同主体公司名称。`reviewStrength` 推荐使用“弱势/中立/强势”，并兼容旧版 `0/1/2`；CLI 在 HTTP 边界统一转换为 `0/1/2`。规则来源必须满足非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；两项同时提供时组合执行，互不覆盖且没有优先级。文件来源通常由上传接口补充文件身份；URL 来源还需要提供 businessId 和上传接口返回的 fileHash。发起审查的实际 HTTP 请求会固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。
+config.selectedPosition、config.selectedAuditRole 和 config.reviewStrength 是发起审查必填字段。`selectedPosition` 填写合同主体的精确名称，`selectedAuditRole` 填写同一主体在主体提取响应中的角色，例如“甲方”或“乙方”。`reviewStrength` 推荐使用“弱势/中立/强势”，并兼容旧版 `0/1/2`；CLI 在 HTTP 边界统一转换为 `0/1/2`。规则来源必须满足非空 `selectedCheckListIds` 或 `matchContractTypeRulePackage=true` 至少一项；两项同时提供时组合执行，互不覆盖且没有优先级。文件来源通常由上传接口补充文件身份；URL 来源还需要提供 businessId 和上传接口返回的 fileHash。发起审查的实际 HTTP 请求会固定补入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供也不能覆盖。
 
 ### 分步流程
 
@@ -211,7 +211,7 @@ everyline-cli review file upload \
 everyline-cli review task start \
   --profile prod-user \
   --as user \
-  --data '{"businessId":"biz-001","fileId":123456,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"xxx公司","selectedAuditRole":"xxx公司","reviewStrength":"中立","matchContractTypeRulePackage":true}}' \
+  --data '{"businessId":"biz-001","fileId":123456,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"xxx公司","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true}}' \
   --output json
 ~~~
 

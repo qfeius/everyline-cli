@@ -536,7 +536,18 @@ everyline-cli review subject extract \
 }
 ```
 
-`businessId`、`fileId` 必填，`fileHash` 可选。响应为主体信息对象，CLI 保留全部服务端字段。
+`businessId`、`fileId` 必填，`fileHash` 可选。响应为主体信息对象，CLI 保留全部服务端字段。交互审查流程使用同一 `counterparts[]` 候选的 `name` 和 `role`：
+
+```json
+{
+  "counterparts": [
+    {"name": "xxx公司", "role": "甲方"},
+    {"name": "yyy公司", "role": "乙方"}
+  ]
+}
+```
+
+其中 `name` 写入 `config.selectedPosition`，同一候选的 `role` 写入 `config.selectedAuditRole`；候选缺少任一字段时，交互 Skill 停止发起任务。
 
 ### 7.4 发起审查任务
 
@@ -549,7 +560,7 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
   "fileHash": "<64_HEX_SHA256>",
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": "中立",
     "selectedCheckListIds": ["check-1"],
     "matchContractTypeRulePackage": true
@@ -562,8 +573,8 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
 | `businessId` | string | 是 | 非空 |
 | `fileId` | integer | 是 | 大于 0；HTTP 中发送为 string |
 | `fileHash` | string | 是 | 64 位 SHA-256 十六进制 |
-| `config.selectedPosition` | string | 是 | 合同主体公司名称，非空 |
-| `config.selectedAuditRole` | string | 是 | 合同主体公司名称，非空 |
+| `config.selectedPosition` | string | 是 | 合同主体精确名称，非空 |
+| `config.selectedAuditRole` | string | 是 | 同一主体的角色，例如甲方或乙方，非空 |
 | `config.reviewStrength` | string 或 integer | 是 | 推荐 `弱势`、`中立`、`强势`，兼容旧版 `0/1/2`；HTTP 统一发送 `0/1/2` |
 | `config.selectedCheckListIds` | string[] | 条件必填 | 非空数组，每项非空 |
 | `config.matchContractTypeRulePackage` | boolean | 条件必填 | 仅 `true` 构成有效规则来源 |
@@ -616,7 +627,7 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
   },
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   },
@@ -638,7 +649,7 @@ URL 来源输入：
   "fileHash": "<64_HEX_SHA256>",
   "config": {
     "selectedPosition": "xxx公司",
-    "selectedAuditRole": "xxx公司",
+    "selectedAuditRole": "甲方",
     "reviewStrength": "中立",
     "matchContractTypeRulePackage": true
   },
