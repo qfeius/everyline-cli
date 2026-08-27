@@ -15,6 +15,7 @@
     "bin/windows-amd64/",
     "bin/windows-arm64/",
     "docs/everyline-cli-skill-guide.md",
+    "docs/everyline-cli-skill-interaction-scenarios.md",
     "scripts/install.js",
     "scripts/package-version.js",
     "scripts/platform.js",

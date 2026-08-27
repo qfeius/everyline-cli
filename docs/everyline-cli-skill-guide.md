@@ -2,6 +2,8 @@
 
 本文用于在一台全新设备上安装 `everyline-cli` 及配套交互 Skill，并验证合同审查的多轮对话流程。Skill 负责对话和流程编排，CLI 继续负责授权、文件上传、主体提取、清单查询、任务发起和结果查询；安装 Skill 不会改变 CLI 的命令、参数或 JSON 接口。
 
+需要逐项评审或测试当前 Skill 的全部分支时，请结合 [EveryLine CLI Skill 全量交互场景](everyline-cli-skill-interaction-scenarios.md)。
+
 OpenAI 官方文档将 Skill 定义为包含 `SKILL.md` 及可选 references、scripts、assets 的目录。Codex 支持显式 `$skill-name` 调用和按 description 自动触发，并会扫描用户级 `$HOME/.agents/skills`；发现结果未刷新时可以重启 Codex。详见 [OpenAI Build skills](https://learn.chatgpt.com/docs/build-skills)。
 
 ## 1. 验证前准备
@@ -287,7 +289,7 @@ $everyline-cli 使用 user 身份审查 /absolute/path/采购合同.pdf；立场
 
 执行 `everyline-cli config list` 检查配置，再通过 `everyline-cli config use PROFILE_NAME` 选中本次验证使用的 Profile。
 
-### user OAuth 无法开始
+### user OAuth 启动失败
 
 检查当前发布包的 prod Profile 是否具有平台确认过的 OAuth metadata、client ID 和 loopback redirect。相关配置缺失时记录 CLI 原始提示并联系平台配置负责人。
 
