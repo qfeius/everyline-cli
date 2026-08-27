@@ -107,6 +107,8 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 	for _, expected := range []string{
 		"`selectedPosition` 使用所选候选的 `name`",
 		"`selectedAuditRole` 使用同一候选的 `role`",
+		"用户回复完整展示项 `猎聘123（乙方）`",
+		"`selectedPosition=猎聘123`、`selectedAuditRole=乙方`",
 		`"selectedPosition": "唯一匹配候选的 name"`,
 		`"selectedAuditRole": "同一候选的 role，例如甲方"`,
 		"固定使用 `0. 按合同类型自动匹配内置规则包`",

@@ -34,6 +34,9 @@ package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version
 test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/SKILL.md"
 test -f "$temporary_dir/install/node_modules/everyline-cli/docs/everyline-cli-skill-guide.md"
 test -f "$temporary_dir/install/node_modules/everyline-cli/docs/everyline-cli-skill-interaction-scenarios.md"
+# 安装包必须保留主体展示项到后端 name/role 的映射，避免发布后回退为两个字段都填写公司名称。
+grep -F '用户回复完整展示项 `猎聘123（乙方）`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/references/review-flow.md" >/dev/null
+grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/references/review-flow.md" >/dev/null
 
 # 可选的期望版本同时约束 manifest 和 ldflags，防止两个发布版本源漂移。
 if [ -n "${EXPECTED_VERSION:-}" ]; then
