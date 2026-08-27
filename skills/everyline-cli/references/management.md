@@ -1,6 +1,6 @@
 # 当前 CLI 的交互式清单与规则管理
 
-只有用户明确要求管理清单或规则时使用本流程。所有命令和参数以实时 `--help` 为准，默认使用 JSON 输出并读取全部分页。
+只有用户明确要求管理清单或规则时使用本流程。所有命令和参数以实时 `--help` 为准，默认使用 JSON 输出并读取全部分页。先按主 Skill 固定 `<profile>` 与 `<identity>`，本流程的每条授权、查询和写入命令都显式携带 `--profile <profile> --as <identity>`。
 
 ## 共同规则
 
@@ -22,7 +22,7 @@
 ### 删除
 
 1. 精确定位自定义清单并展示名称、规则名称和已知影响。
-2. 用户明确确认后调用 `checklist delete --id <id> --yes --output json`。
+2. 用户明确确认后调用 `checklist delete --profile <profile> --as <identity> --id <id> --yes --output json`。
 3. 用户取消、目标变化或定位不唯一时停止。
 
 ## 审查规则

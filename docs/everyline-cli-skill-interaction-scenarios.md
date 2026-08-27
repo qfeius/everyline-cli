@@ -16,8 +16,8 @@
 flowchart TD
     A[用户表达 EveryLine 意图] --> B[检查 CLI 路径、版本和实时帮助]
     B -->|能力缺失| Z[说明缺口并停止相关操作]
-    B --> C[确定 user 或 app 身份]
-    C --> D[查询授权状态]
+    B --> C[固定 Profile 和 user 或 app 身份]
+    C --> D[使用显式 Profile 和身份查询授权状态]
     D -->|未授权| E[完成 OAuth 或 app 授权]
     D -->|已授权| F{识别业务意图}
     E --> F
@@ -26,8 +26,9 @@ flowchart TD
     H --> I[选择立场方]
     I --> J[选择清单或内置规则包]
     J --> K[选择审查强度]
-    K --> L[发起一次审查任务]
-    L --> M[只轮询已取得的 task ID]
+    K --> L[使用同一输入执行 dry-run]
+    L -->|通过| M[发起一次审查任务]
+    M --> T[只轮询已取得的 task ID]
     F -->|清单或规则管理| N[查询并唯一定位资源]
     N --> O[展示字段摘要或差异]
     O -->|写操作| P[取得针对具体目标的确认]
@@ -40,11 +41,13 @@ flowchart TD
 以下规则适用于所有场景：
 
 - 已经从用户消息或可靠 CLI 结果取得的信息不重复询问。
+- 会话开始时固定一个 Profile 和身份，所有授权与业务命令显式传递同一 `--profile/--as`。
 - 身份、主体、清单、规则或分组匹配唯一时直接采用；无匹配或多项匹配时展示真实候选项。
 - 用户看到名称、类型、风险等级和编号；内部 ID 只来自本次 CLI 查询。
 - 默认解析 `--output json` 的 stdout；stderr 只作为进度和诊断信息。
 - 合同正文、token、app secret、授权码、回调参数和完整内部请求不输出到对话。
 - 查询操作无需写入确认；创建、更新和删除在具体目标与影响范围明确后确认。
+- 创建审查任务前必须先用同一输入完成 dry-run；dry-run 失败时不发送正式请求。
 - 任何真实失败都保留阶段、原始原因及已有 request ID 或 task ID。
 
 ## 4. 入口与就绪检查
@@ -61,12 +64,15 @@ flowchart TD
 | READY-05 | 受限 | 目标命令或参数在实时帮助中缺失 | 列出缺口，不模拟或猜测接口 | 停止该业务操作 |
 | READY-06 | 受限 | 旧版 `reviewStrength` 只接受 `0/1/2` | 不维护数字映射，不上传合同 | 停止合同审查；只读能力仍可继续 |
 | READY-07 | 受限 | CLI 未说明清单与内置规则包可组合 | 不假设组合语义，不上传合同 | 停止合同审查 |
-| READY-08 | 受限 | `review task result` 未提供等待最终结果能力 | 不自行模拟任务状态机 | 停止合同审查 |
+| READY-08 | 受限 | `review task result --help` 未提供等待最终结果能力 | 不自行模拟任务状态机 | 停止合同审查 |
 
 ## 5. 身份与授权交互
 
 | ID | 状态 | 用户示例或条件 | Skill 处理 | 结束条件 |
 | --- | --- | --- | --- | --- |
+| PROFILE-01 | 已支持 | 用户明确提供 Profile | 使用 `config show <profile> --output json` 校验、读取并固定该 Profile | 后续命令显式传递 Profile |
+| PROFILE-02 | 已支持 | 用户未提供 Profile | 使用 `config show --output json` 读取当前 Profile | 固定当前 Profile |
+| PROFILE-03 | 受限 | Profile 缺失或与用户指定环境不一致 | 不创建、修改或切换 Profile | 用户修正后重新调用 |
 | AUTH-01 | 已支持 | `使用 user 身份审查` | 直接选择 user，不再询问身份 | 查询 user 授权状态 |
 | AUTH-02 | 已支持 | `使用 app 身份查询清单` | 直接选择 app，不再询问身份 | 查询 app 授权状态 |
 | AUTH-03 | 已支持 | 用户未说明身份，身份会影响资源范围 | 只询问一次使用 user 还是 app | 用户明确身份后继续 |
@@ -77,8 +83,9 @@ flowchart TD
 | AUTH-08 | 已支持 | app 需要 secret | 只通过 stdin 或等价安全凭证源提供 | 登录后重新查询状态 |
 | AUTH-09 | 受限 | app 或 user 授权失败 | 不自动切换到另一身份 | 返回真实失败并停止 |
 | AUTH-10 | 受限 | 尚未选择 Profile 或 Profile 配置缺失 | 返回 CLI 配置错误，不猜测环境或 AppID | 用户修正 Profile 后重新调用 |
+| AUTH-11 | 已支持 | Profile 与身份已确定 | 每条授权、查询和写入命令都携带相同 `--profile/--as` | 不回退默认上下文 |
 
-当前 Skill 不负责自动创建、切换或修改 Profile；外部验证前应按安装手册准备当前 Profile。
+当前 Skill 不负责自动创建、切换或修改 Profile；外部验证前应按安装手册准备 Profile。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
 
 ## 6. 合同来源交互
 
@@ -126,13 +133,15 @@ flowchart TD
 | STRENGTH-01 | 已支持 | 用户未说明强度 | 询问弱势、中立或强势 | 用户选择一项 |
 | STRENGTH-02 | 已支持 | `强度中立` | 直接采用中文值 | 不重复询问 |
 | STRENGTH-03 | 受限 | 用户提供其他值或数字 | 展示三个中文选项，不猜测数字映射 | 用户重新选择 |
-| START-01 | 已支持 | 四项业务输入全部完成 | 构造权限受限的临时 JSON 并调用一次 `review task start` | 获取 task ID 或真实错误 |
-| START-02 | 已支持 | 用户问“是否还要确认开始” | 审查输入完整后自动发起，不增加开始或点数确认 | 进入创建请求 |
-| START-03 | 已支持 | 用户询问点数余额 | Skill 不做点数预检、估算或余额展示 | 继续当前审查流程 |
-| START-04 | 已支持 | 只选择自定义清单 | 省略内置规则包或设为 false | 发起任务 |
-| START-05 | 已支持 | 只选择内置规则包 | 省略自定义清单 ID | 发起任务 |
-| START-06 | 已支持 | 同时选择两类规则来源 | 两项都传给 CLI | 发起组合审查 |
-| START-07 | 受限 | 临时输入创建或清理失败 | 返回本地失败，不泄露请求 JSON | 停止并保留必要诊断 |
+| START-01 | 已支持 | 四项业务输入全部完成 | 构造权限受限的临时 JSON，使用固定 Profile/身份执行一次 `review task start --dry-run` | 得到规范化输入或本地错误 |
+| START-02 | 受限 | dry-run 失败 | 返回本地校验错误 | 不发送正式请求 |
+| START-03 | 已支持 | dry-run 成功 | 使用同一输入、Profile 和身份执行一次正式 `review task start` | 获取 task ID 或真实错误 |
+| START-04 | 已支持 | 用户问“是否还要确认开始” | dry-run 通过后自动发起，不增加开始或点数确认 | 进入创建请求 |
+| START-05 | 已支持 | 用户询问点数余额 | Skill 不做点数预检、估算或余额展示 | 继续当前审查流程 |
+| START-06 | 已支持 | 只选择自定义清单 | 省略内置规则包或设为 false | dry-run 后发起任务 |
+| START-07 | 已支持 | 只选择内置规则包 | 省略自定义清单 ID | dry-run 后发起任务 |
+| START-08 | 已支持 | 同时选择两类规则来源 | 两项都传给 CLI | dry-run 后发起组合审查 |
+| START-09 | 受限 | 临时输入创建或清理失败 | 返回本地失败，不泄露请求 JSON | 停止并保留必要诊断 |
 
 ## 10. 任务结果、异常和恢复
 
@@ -228,9 +237,9 @@ flowchart TD
 
 以下最小集合可覆盖主要分支：
 
-1. `$everyline-cli 使用 user 身份检查授权状态，先不要上传文件。`
-2. `$everyline-cli 使用 user 身份审查 /absolute/path/合同.pdf。`
-3. `$everyline-cli 使用 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
+1. `$everyline-cli 使用 test-user Profile 和 user 身份检查授权状态，先不要上传文件。`
+2. `$everyline-cli 使用 test-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
+3. `$everyline-cli 使用 test-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
 4. `$everyline-cli 列出我可用的自定义审查清单和其中的规则。`
 5. `$everyline-cli 创建一个采购合同审查清单。`
 6. `$everyline-cli 给“采购合同清单”增加“付款条件风险”规则。`

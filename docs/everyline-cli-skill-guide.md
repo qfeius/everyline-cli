@@ -119,10 +119,10 @@ $HOME/.agents/skills/everyline-cli/
 先运行一个不上传合同的冒烟验证：
 
 ```text
-$everyline-cli 使用 user 身份检查 CLI 版本、审查能力和授权状态，先不要上传合同。
+$everyline-cli 使用当前 prod-user Profile 和 user 身份检查 CLI 版本、审查能力和授权状态，先不要上传合同。
 ```
 
-预期行为：Codex 检查 `everyline-cli` 路径、版本、帮助信息和授权状态，不要求填写 `businessId`、`fileHash` 等内部字段。
+预期行为：Codex 检查 `everyline-cli` 路径、版本、两条任务命令的帮助信息和授权状态，解析当前 `prod-user` Profile，并在后续调用中固定传入该 Profile 与 user 身份；不要求填写 `businessId`、`fileHash` 等内部字段。
 
 ## 5. 配置身份与授权
 
@@ -205,23 +205,24 @@ Skill 也会在上传合同前重复这项就绪检查。缺少任一能力时�
 在 Codex 中输入以下提示，并替换为验证设备可读取的绝对文件路径：
 
 ```text
-$everyline-cli 使用 user 身份审查 /absolute/path/采购合同.pdf
+$everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/采购合同.pdf
 ```
 
 正常交互顺序如下：
 
-1. Skill 检查 CLI 版本、目标命令和 user 授权状态。
+1. Skill 解析并固定 `prod-user` Profile 与 user 身份，检查 CLI 版本、`review task start/result` 帮助和授权状态。
 2. CLI 上传合同并返回内部文件身份。
 3. CLI 提取合同主体；Skill 展示真实主体名称，让用户选择审查立场方。
 4. Skill 查询真实自定义清单和内置规则包选项，让用户选择审查规则来源。
 5. Skill 询问审查强度：弱势、中立或强势。
-6. 四项业务输入完整后，Skill 自动发起任务并记录 task ID。
-7. Skill 只查询该 task ID，等待终态后返回实际状态及 `reviewDetailUrl`（服务端提供时）。
+6. 四项业务输入完整后，Skill 使用同一输入执行 dry-run；失败时不发送正式请求。
+7. dry-run 通过后，Skill 使用同一 Profile 和身份自动发起一次任务并记录 task ID。
+8. Skill 只查询该 task ID，等待终态后返回实际状态及 `reviewDetailUrl`（服务端提供时）。
 
 示例对话：
 
 ```text
-用户：$everyline-cli 使用 user 身份审查 /Users/me/Documents/采购合同.pdf
+用户：$everyline-cli 使用 prod-user Profile 和 user 身份审查 /Users/me/Documents/采购合同.pdf
 
 Codex：检测到以下合同主体，请选择审查立场方：
 1. 示例采购有限公司
@@ -240,7 +241,7 @@ Codex：请选择审查强度：弱势、中立、强势。
 
 用户：中立
 
-Codex：任务已创建，正在等待审查结果……
+Codex：参数 dry-run 已通过，任务已创建，正在等待审查结果……
 ```
 
 候选主体、清单名称和最终链接必须来自当前身份下的真实 CLI 响应。示例名称仅用于说明对话形式。
@@ -248,7 +249,7 @@ Codex：任务已创建，正在等待审查结果……
 如果用户已经知道全部输入，可以在第一句话一次提供：
 
 ```text
-$everyline-cli 使用 user 身份审查 /absolute/path/采购合同.pdf；立场方是示例采购有限公司；使用内置规则包和自定义清单 A；强度中立。
+$everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/采购合同.pdf；立场方是示例采购有限公司；使用内置规则包和自定义清单 A；强度中立。
 ```
 
 信息能够唯一匹配时，Skill 会减少追问。
@@ -259,10 +260,12 @@ $everyline-cli 使用 user 身份审查 /absolute/path/采购合同.pdf；立场
 | --- | --- |
 | Skill 发现 | `/skills` 中出现 `everyline-cli` |
 | CLI 发现 | `everyline-cli version --output json` 成功，版本符合预期 |
+| 调用上下文 | 所有授权和业务命令显式使用同一 `--profile/--as` |
 | 授权 | `auth status` 返回 `authenticated=true` |
 | 输入交互 | 用户只需提供合同来源、立场方、清单和强度 |
 | 内部参数 | Skill 不向用户索要 `businessId/fileId/fileHash/selectedAuditRole/wait` |
 | 候选数据 | 主体、清单、规则均来自实时 CLI 查询 |
+| 正式请求门 | 同一输入的 dry-run 成功后才发起真实任务 |
 | 任务幂等 | 取得 task ID 后只查询该任务，不重复创建 |
 | 最终结果 | 返回真实终态；服务端提供链接时返回 `reviewDetailUrl` |
 | CLI 兼容 | 原有命令、参数和 JSON 接口保持不变 |

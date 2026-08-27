@@ -44,7 +44,14 @@ review task result
 checklist list
 ```
 
-开始上传合同前，再读取 `review task start --help` 并确认目标能力：
+开始上传合同前，分别读取以下实时帮助：
+
+```bash
+everyline-cli review task start --help
+everyline-cli review task result --help
+```
+
+从对应命令的帮助中确认目标能力：
 
 - `reviewStrength` 直接接受“弱势 / 中立 / 强势”；
 - 非空 `selectedCheckListIds` 与 `matchContractTypeRulePackage=true` 可以组合执行；
@@ -54,11 +61,16 @@ checklist list
 
 ## 授权交互
 
-用户已经明确 `user` 或 `app` 时直接使用。身份会影响资源范围而用户未指定时，只询问一次使用哪种身份，不因一种身份失败而自动切换另一种身份。
+授权和业务调用前，先固定本次会话使用的 Profile 与身份：
 
-1. 先执行 `auth status --as <identity> --output json`。
+1. 用户明确提供 Profile 时执行 `everyline-cli config show <profile> --output json` 校验并读取该 Profile；未提供时执行 `everyline-cli config show --output json` 读取当前 Profile。
+2. 当前 Profile 不存在或与用户明确指定的环境不一致时停止，请用户提供或修正 Profile；不自动创建、修改或切换 Profile。
+3. 用户已经明确 `user` 或 `app` 时直接使用。身份会影响资源范围而用户未指定时，只询问一次使用哪种身份，不因一种身份失败而自动切换另一种身份。
+4. Profile 和身份确定后，本次会话的每条授权、查询和写入命令都显式携带 `--profile <profile> --as <identity>`，不依赖当前 Profile 或默认身份。
+
+1. 先执行 `auth status --profile <profile> --as <identity> --output json`。
 2. 只有结构化结果中的 `authenticated=true` 表示已授权，退出码为零不等价于已授权。
-3. user 未授权时执行 OAuth 登录。CLI 已打开浏览器时让用户在该页面完成授权；使用 `--no-open-browser` 返回链接时，将链接原样交给用户。不要为了切换呈现方式重启当前 OAuth 会话。
+3. user 未授权时执行 `auth login --profile <profile> --as user` 发起 OAuth 登录。CLI 已打开浏览器时让用户在该页面完成授权；使用 `--no-open-browser` 返回链接时，将链接原样交给用户。不要为了切换呈现方式重启当前 OAuth 会话。
 4. app secret 只通过 stdin 或等价安全凭证源传入，不放入命令参数、JSON、日志或回复。
 5. 登录完成后重新查询结构化状态；取消、失败或失效时停止业务调用并返回真实原因。
 

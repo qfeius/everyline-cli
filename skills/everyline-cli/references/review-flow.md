@@ -2,7 +2,9 @@
 
 ## 就绪门
 
-在读取或上传合同前，先执行主 Skill 中的版本与实时帮助检查。只有 `review task start` 明确接受中文强度，并明确两类规则来源可以组合执行时，才继续本流程。旧版只接受 `0/1/2` 时停止，不在 Skill 中维护或猜测数字映射。
+在读取或上传合同前，先执行主 Skill 中的版本与实时帮助检查，并固定本次使用的 `<profile>` 与 `<identity>`。只有 `review task start` 明确接受中文强度、明确两类规则来源可以组合执行，并且 `review task result` 明确会等待终态和获取详情时，才继续本流程。旧版只接受 `0/1/2` 时停止，不在 Skill 中维护或猜测数字映射。
+
+本流程的每条 CLI 命令都必须显式携带 `--profile <profile> --as <identity>`；不得在同一次审查中回退到当前 Profile 或 Profile 默认身份。
 
 ## 输入边界
 
@@ -22,7 +24,7 @@
 ### 本地文件
 
 1. 确认路径存在，扩展名为 DOC、DOCX 或 PDF。
-2. 调用 `review file upload --file <path> --name <basename> --output json`。
+2. 调用 `review file upload --profile <profile> --as <identity> --file <path> --name <basename> --output json`。
 3. 从结构化结果记录真实 `businessId/fileId/fileHash`，不向用户展示合同正文。
 
 ### URL
@@ -41,7 +43,7 @@
 使用上传结果调用：
 
 ```text
-review subject extract --business-id <businessId> --file-id <fileId> --file-hash <fileHash> --output json
+review subject extract --profile <profile> --as <identity> --business-id <businessId> --file-id <fileId> --file-hash <fileHash> --output json
 ```
 
 - 展示 CLI 返回的完整主体名称，不展示合同正文。
@@ -51,7 +53,7 @@ review subject extract --business-id <businessId> --file-id <fileId> --file-hash
 
 ## 查询并选择清单
 
-1. 使用 `checklist list --page-index 1 --page-size 100 --output json` 查询，按响应分页信息继续读取全部页面。
+1. 使用 `checklist list --profile <profile> --as <identity> --page-index 1 --page-size 100 --output json` 查询，按响应分页信息继续读取全部页面。
 2. 对每个真实清单展示名称和可用的类型信息。响应只有规则 ID 时，读取全部规则分组及规则页面，使用本次查询建立 ID 到规则名称的映射。
 3. 允许用户组合选择多个真实自定义清单。
 4. 当前 CLI 明确支持的内置选项只有“按合同类型自动匹配内置规则包”，它映射为 `matchContractTypeRulePackage=true`；不要虚构其他内置清单或 ID。
@@ -59,7 +61,7 @@ review subject extract --business-id <businessId> --file-id <fileId> --file-hash
 
 ## 构造并发起任务
 
-四项输入全部满足后，使用权限受限的临时 JSON 文件调用 `review task start --input <path> --output json`。兼容请求形状为：
+四项输入全部满足后，将兼容请求写入权限受限的临时 JSON 文件。兼容请求形状为：
 
 ```json
 {
@@ -81,11 +83,25 @@ review subject extract --business-id <businessId> --file-id <fileId> --file-hash
 - 不向用户展示数字审查强度、内部文件身份或完整请求 JSON。
 - 不做点数预检，不估算或展示余额。
 
+先使用同一份临时输入执行无副作用校验：
+
+```text
+review task start --profile <profile> --as <identity> --input <path> --dry-run --output json
+```
+
+只有 dry-run 退出码为 0 时，才移除 `--dry-run` 并执行一次正式请求：
+
+```text
+review task start --profile <profile> --as <identity> --input <path> --output json
+```
+
+dry-run 失败时返回本地校验错误，不发送正式请求；正式请求仍按主 Skill 规则自动发起，不额外询问用户是否开始。
+
 发起成功后记录唯一 task ID。若 CLI 返回点数不足以外的错误，返回真实原因，不把它改写为充值提示。
 
 ## 等待并返回结果
 
-调用 `review task result --task-id <taskId> --business-id <businessId> --output json`，具体参数以实时帮助为准。
+调用 `review task result --profile <profile> --as <identity> --task-id <taskId> --business-id <businessId> --output json`，具体参数以实时帮助为准。
 
 - 等待期间可以告诉用户任务已创建并正在等待，但不能称为审查完成。
 - 成功时返回 CLI 实际提供的终态和 `reviewDetailUrl`。
