@@ -20,9 +20,12 @@ type fakeAPI struct {
 	contexts map[string]context.Context
 }
 
+// validReviewConfig 返回与主体提取夹具一致的合法审查配置。
+// 入参：无。
+// 返回值：map[string]any，包含同一主体候选的名称、角色、强度和规则来源。
 func validReviewConfig() map[string]any {
 	return map[string]any{
-		"selectedPosition":             "xxx公司",
+		"selectedPosition":             "中北大学",
 		"selectedAuditRole":            "甲方",
 		"reviewStrength":               1,
 		"matchContractTypeRulePackage": true,
@@ -86,7 +89,7 @@ func (api *fakeAPI) UploadURL(context.Context, string, string) (Document, error)
 func (api *fakeAPI) ExtractSubjects(ctx context.Context, _ StartRequest) (Document, error) {
 	api.recordContext("subjects", ctx)
 	api.calls = append(api.calls, "subjects")
-	return Document{"counterparts": []any{"甲方"}}, nil
+	return Document{"counterparts": []any{map[string]any{"name": "中北大学", "role": "甲方"}}}, nil
 }
 
 // Start 返回 running 任务快照。
@@ -156,6 +159,15 @@ func TestWorkflowRun(t *testing.T) {
 	}
 	if status, _ := StringValue(result.Final, "status"); status != "success" {
 		t.Fatalf("result=%#v", result)
+	}
+	// Workflow 必须原样保留主体候选的 name/role，避免 Agent 只能取得角色而缺少公司名称。
+	counterparts, ok := result.Subjects["counterparts"].([]any)
+	if !ok || len(counterparts) != 1 {
+		t.Fatalf("subjects=%#v，期望一个结构化主体候选", result.Subjects)
+	}
+	firstCounterpart, ok := counterparts[0].(map[string]any)
+	if !ok || firstCounterpart["name"] != "中北大学" || firstCounterpart["role"] != "甲方" {
+		t.Fatalf("subjects=%#v，主体候选必须保留同一组 name/role", result.Subjects)
 	}
 	expected := []string{"upload", "subjects", "start", "status", "status", "info"}
 	if len(api.calls) != len(expected) {

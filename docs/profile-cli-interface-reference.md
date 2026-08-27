@@ -536,7 +536,18 @@ everyline-cli review subject extract \
 }
 ```
 
-`businessId`、`fileId` 必填，`fileHash` 可选。响应为主体信息对象，CLI 保留全部服务端字段。
+`businessId`、`fileId` 必填，`fileHash` 可选。响应为主体信息对象，CLI 保留全部服务端字段。交互审查流程使用同一 `counterparts[]` 候选的 `name` 和 `role`：
+
+```json
+{
+  "counterparts": [
+    {"name": "xxx公司", "role": "甲方"},
+    {"name": "yyy公司", "role": "乙方"}
+  ]
+}
+```
+
+其中 `name` 写入 `config.selectedPosition`，同一候选的 `role` 写入 `config.selectedAuditRole`；候选缺少任一字段时，交互 Skill 停止发起任务。
 
 ### 7.4 发起审查任务
 

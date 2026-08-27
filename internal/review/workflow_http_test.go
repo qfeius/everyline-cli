@@ -80,7 +80,7 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 				t.Errorf("subjects body=%#v", body)
 			}
 			calls = append(calls, "subjects")
-			writeIntegrationEnvelope(writer, `{"counterparts":["甲方"]}`)
+			writeIntegrationEnvelope(writer, `{"counterparts":[{"name":"中北大学","role":"甲方"},{"name":"湖南华科电子有限公司","role":"乙方"}]}`)
 		case pathStartReview:
 			var body map[string]any
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
@@ -94,8 +94,8 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 				t.Errorf("start body=%#v，缺少固定用量上报业务编码", body)
 			}
 			configBody, ok := body["config"].(map[string]any)
-			if !ok || configBody["reviewStrength"] != float64(1) || configBody["matchContractTypeRulePackage"] != true {
-				t.Errorf("start body=%#v，CLI 中文强度应转换为后端枚举并保留规则来源", body)
+			if !ok || configBody["selectedPosition"] != "中北大学" || configBody["selectedAuditRole"] != "甲方" || configBody["reviewStrength"] != float64(1) || configBody["matchContractTypeRulePackage"] != true {
+				t.Errorf("start body=%#v，必须发送同一主体候选的 name/role，并转换中文强度、保留规则来源", body)
 			}
 			calls = append(calls, "start")
 			writeIntegrationEnvelope(writer, `{"taskId":88,"status":"running"}`)
@@ -140,6 +140,15 @@ func TestWorkflowRunHTTPIntegration(t *testing.T) {
 	}
 	if detailURL, _ := StringValue(result.Final, "reviewDetailUrl"); detailURL != "https://review.example.com/tasks/88" {
 		t.Fatalf("final=%#v，后端顶层 url 应提升为稳定字段", result.Final)
+	}
+	// 主体响应必须保留同一候选的名称和角色，供 Agent 构造 selectedPosition/selectedAuditRole。
+	counterparts, ok := result.Subjects["counterparts"].([]any)
+	if !ok || len(counterparts) != 2 {
+		t.Fatalf("subjects=%#v，期望两个结构化主体候选", result.Subjects)
+	}
+	firstCounterpart, ok := counterparts[0].(map[string]any)
+	if !ok || firstCounterpart["name"] != "中北大学" || firstCounterpart["role"] != "甲方" {
+		t.Fatalf("subjects=%#v，主体候选必须保留同一组 name/role", result.Subjects)
 	}
 	expected := []string{"upload", "subjects", "start", "status", "status", "info"}
 	if strings.Join(calls, ",") != strings.Join(expected, ",") {

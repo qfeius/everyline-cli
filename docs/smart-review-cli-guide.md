@@ -490,7 +490,18 @@ everyline-cli review subject extract \
 }
 ```
 
-`businessId`、`fileId` 必填，`fileHash` 可选。成功响应为服务端 `data` 中的主体信息对象，CLI 不裁剪字段。
+`businessId`、`fileId` 必填，`fileHash` 可选。成功响应为服务端 `data` 中的主体信息对象，CLI 不裁剪字段。交互 Skill 从同一 `counterparts[]` 候选读取名称和角色：
+
+```json
+{
+  "counterparts": [
+    {"name": "xxx公司", "role": "甲方"},
+    {"name": "yyy公司", "role": "乙方"}
+  ]
+}
+```
+
+所选候选的 `name` 传入 `config.selectedPosition`，同一候选的 `role` 传入 `config.selectedAuditRole`，不得把公司名称同时写入两个字段。
 
 ### 场景 5：查询任务当前状态
 
