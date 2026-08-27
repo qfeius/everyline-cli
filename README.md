@@ -101,6 +101,8 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 Skill 不会修改或替代 CLI 接口，安装 npm 包时也不会自动写入用户的 Skill 目录。需要使用时，由 Agent 宿主或发布平台导入完整的 `skills/everyline-cli/` 目录即可。
 
+在其他设备安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)。
+
 Agent 执行 CLI 时建议遵循固定流程：
 
 1. 检查版本和命令路径。

@@ -14,6 +14,7 @@
     "bin/linux-arm64/",
     "bin/windows-amd64/",
     "bin/windows-arm64/",
+    "docs/everyline-cli-skill-guide.md",
     "scripts/install.js",
     "scripts/package-version.js",
     "scripts/platform.js",

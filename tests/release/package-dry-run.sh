@@ -10,6 +10,8 @@ if [ -n "${EXPECTED_PACKAGE_VERSION:-}" ]; then
   package_root="$temporary_dir/package"
   mkdir -p "$package_root"
   cp package.json README.md "$package_root/"
+  mkdir -p "$package_root/docs"
+  cp docs/everyline-cli-skill-guide.md "$package_root/docs/"
   # 发布校验使用临时包根目录时，也携带对外分发的 Agent Skill。
   cp -R bin scripts skills "$package_root/"
   node - "$package_root/package.json" "$EXPECTED_PACKAGE_VERSION" <<'NODE'
@@ -39,6 +41,7 @@ function requiredPackageFiles() {
   const binaries = targets.map((target) => `bin/${target}/everyline-cli${target.startsWith("windows-") ? ".exe" : ""}`);
   return [
     "bin/checksums.txt",
+    "docs/everyline-cli-skill-guide.md",
     "scripts/install.js",
     "scripts/package-version.js",
     "scripts/platform.js",
