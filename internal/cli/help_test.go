@@ -38,6 +38,70 @@ func TestHelpExplainsReviewTaskResultIsLocalOrchestration(t *testing.T) {
 	}
 }
 
+// TestEverylineSkillReadinessMatchesLiveHelp 验证交互 Skill 的就绪门、调用上下文和 dry-run 顺序与当前 CLI 能力一致。
+// 入参：t *testing.T 为 Go 测试上下文。
+// 返回值：无；Skill 缺少真实帮助命令、显式 Profile/身份或 dry-run 门时通过测试失败报告差异。
+func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
+	skillContent, err := os.ReadFile("../../skills/everyline-cli/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowContent, err := os.ReadFile("../../skills/everyline-cli/references/review-flow.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 就绪门必须读取两条真实帮助命令，不能从 start 帮助推断 result 的轮询能力。
+	skillText := string(skillContent)
+	for _, expected := range []string{
+		"everyline-cli config show <profile> --output json",
+		"everyline-cli review task start --help",
+		"everyline-cli review task result --help",
+		"--profile <profile> --as <identity>",
+	} {
+		if !strings.Contains(skillText, expected) {
+			t.Fatalf("EveryLine Skill 缺少 %q", expected)
+		}
+	}
+
+	helpChecks := []struct {
+		args     []string
+		expected string
+	}{
+		{args: []string{"review", "task", "start", "--help"}, expected: "两项同时提供时组合执行"},
+		{args: []string{"review", "task", "result", "--help"}, expected: "自动获取并输出最终审查结果"},
+	}
+	for _, check := range helpChecks {
+		runtime, stdout, _ := testRuntime(t)
+		if err := Execute(context.Background(), runtime, check.args); err != nil {
+			t.Fatalf("args=%v err=%v", check.args, err)
+		}
+		if !strings.Contains(stdout.String(), check.expected) {
+			t.Fatalf("args=%v 帮助缺少 %q: %s", check.args, check.expected, stdout.String())
+		}
+	}
+
+	// 同一临时输入必须先 dry-run，再执行唯一一次正式 start，并在全部命令中固定调用上下文。
+	workflowText := string(workflowContent)
+	dryRunCommand := "review task start --profile <profile> --as <identity> --input <path> --dry-run --output json"
+	startCommand := "review task start --profile <profile> --as <identity> --input <path> --output json"
+	dryRunIndex := strings.Index(workflowText, dryRunCommand)
+	startIndex := strings.Index(workflowText, startCommand)
+	if dryRunIndex < 0 || startIndex < 0 || dryRunIndex >= startIndex {
+		t.Fatalf("EveryLine Skill 必须先 dry-run 再正式 start: dry-run=%d start=%d", dryRunIndex, startIndex)
+	}
+	for _, expected := range []string{
+		"review file upload --profile <profile> --as <identity>",
+		"review subject extract --profile <profile> --as <identity>",
+		"checklist list --profile <profile> --as <identity>",
+		"review task result --profile <profile> --as <identity>",
+	} {
+		if !strings.Contains(workflowText, expected) {
+			t.Fatalf("EveryLine 审查流程缺少固定调用上下文的命令 %q", expected)
+		}
+	}
+}
+
 func TestHelpIncludesUpdateCommand(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
 	if err := Execute(context.Background(), runtime, []string{"--help"}); err != nil {

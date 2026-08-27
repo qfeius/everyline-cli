@@ -10,7 +10,10 @@ if [ -n "${EXPECTED_PACKAGE_VERSION:-}" ]; then
   package_root="$temporary_dir/package"
   mkdir -p "$package_root"
   cp package.json README.md "$package_root/"
-  cp -R bin scripts "$package_root/"
+  mkdir -p "$package_root/docs"
+  cp docs/everyline-cli-skill-guide.md docs/everyline-cli-skill-interaction-scenarios.md "$package_root/docs/"
+  # 发布校验使用临时包根目录时，也携带对外分发的 Agent Skill。
+  cp -R bin scripts skills "$package_root/"
   node - "$package_root/package.json" "$EXPECTED_PACKAGE_VERSION" <<'NODE'
 const { readFileSync, writeFileSync } = require("node:fs");
 
@@ -38,11 +41,16 @@ function requiredPackageFiles() {
   const binaries = targets.map((target) => `bin/${target}/everyline-cli${target.startsWith("windows-") ? ".exe" : ""}`);
   return [
     "bin/checksums.txt",
+    "docs/everyline-cli-skill-guide.md",
+    "docs/everyline-cli-skill-interaction-scenarios.md",
     "scripts/install.js",
     "scripts/package-version.js",
     "scripts/platform.js",
     "scripts/run.js",
     "scripts/verify-package-version.js",
+    "skills/everyline-cli/SKILL.md",
+    "skills/everyline-cli/references/management.md",
+    "skills/everyline-cli/references/review-flow.md",
     ...binaries,
   ];
 }
