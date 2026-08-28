@@ -98,7 +98,7 @@ everyline-cli review task start --data '{"businessId":"biz-001","fileId":123,"fi
 everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"xxx公司","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true},"wait":true}' --dry-run
 ```
 
-`checklist batch-create`、`checklist batch-update`、`rule batch-create`、`rule batch-update` 属于非必需批量写能力。它们支持本地 `--dry-run`/`--print-input`，真实调用会在发送 HTTP 请求前失败关闭；单项写入和批量删除不受此限制。
+`checklist batch-create`、`checklist batch-update`、`rule batch-create` 和 `rule batch-update` 均支持一次提交数组并执行真实 HTTP 调用。批量更新数组中的每项必须包含 `id`；`--dry-run`/`--print-input` 仍只做本地校验和请求预览。
 
 `version` 返回当前构建信息及 `latestVersion/isLatest/updateCommand`；检查失败时 `isLatest=null` 并携带 `checkError`，退出码仍为 0。普通业务命令发现新版本时只在 stderr 提示，检查失败不阻断请求。更新地址按命令参数、`EVERYLINE_CLI_UPDATE_MANIFEST_URL`、发布构建内置值选择。
 

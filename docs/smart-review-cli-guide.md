@@ -590,10 +590,10 @@ Agent 可以创建、查询、更新和删除审查清单，并把规则 ID 组�
 | CLI 命令 | 方法与路径 | 入参 | 响应 |
 |---|---|---|---|
 | `checklist create` | `POST /open-apis/review-rules/review-checklists` | 清单对象 | 服务端 `data` 原形 |
-| `checklist batch-create` | `POST /open-apis/review-rules/review-checklists/batch` | 清单对象数组 | 当前仅支持 dry-run |
+| `checklist batch-create` | `POST /open-apis/review-rules/review-checklists/batch` | 清单对象数组 | 服务端 `data` 原形 |
 | `checklist list` | `GET /open-apis/review-rules/review-checklists` | 名称、阶段、分类、时间、状态、人员、排序和分页查询参数 | 服务端 `data` 原形 |
 | `checklist update --id ID` | `PUT /open-apis/review-rules/review-checklists/{id}` | path `id` + 清单对象 | 服务端 `data` 原形 |
-| `checklist batch-update` | `PUT /open-apis/review-rules/review-checklists/batch` | 每项含 `id` 的清单数组 | 当前仅支持 dry-run |
+| `checklist batch-update` | `PUT /open-apis/review-rules/review-checklists/batch` | 每项含 `id` 的清单数组 | 服务端 `data` 原形 |
 | `checklist delete --id ID --yes` | `DELETE /open-apis/review-rules/review-checklists/{id}` | path `id` | 服务端 `data` 原形 |
 | `checklist batch-delete --id ... --yes` | `DELETE /open-apis/review-rules/review-checklists/batch` | `{"ids":["..."]}` | 服务端 `data` 原形 |
 
@@ -658,10 +658,10 @@ everyline-cli checklist create \
 | `rule group update --id ID` | `PUT /open-apis/review-rules/review-rule-groups/{id}` | path `id` + 分组对象 | 服务端 `data` 原形 |
 | `rule group delete --id ID --yes` | `DELETE /open-apis/review-rules/review-rule-groups/{id}` | path `id` | 服务端 `data` 原形 |
 | `rule create --group-id ID` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules` | path `groupId` + 规则对象 | 服务端 `data` 原形 |
-| `rule batch-create --group-id ID` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + 规则数组 | 当前仅支持 dry-run |
+| `rule batch-create --group-id ID` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + 规则数组 | 服务端 `data` 原形 |
 | `rule list --group-id ID` | `GET /open-apis/review-rules/review-rule-groups/{groupId}/rules` | path `groupId` + 排序和分页 | 服务端 `data` 原形 |
 | `rule update --group-id ID --rule-id ID` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/{ruleId}` | 两个 path ID + 规则对象 | 服务端 `data` 原形 |
-| `rule batch-update --group-id ID` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + 每项含 `id` 的规则数组 | 当前仅支持 dry-run |
+| `rule batch-update --group-id ID` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + 每项含 `id` 的规则数组 | 服务端 `data` 原形 |
 | `rule delete --group-id ID --rule-id ID --yes` | `DELETE /open-apis/review-rules/review-rule-groups/{groupId}/rules/{ruleId}` | 两个 path ID | 服务端 `data` 原形 |
 | `rule batch-delete --group-id ID --id ... --yes` | `DELETE /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + `{"ids":["..."]}` | 服务端 `data` 原形 |
 
@@ -762,7 +762,7 @@ everyline-cli review run \
 
 `review run` 和 `review task result` 是 CLI 本地编排，不增加新的远端 Operation。
 
-四个批量创建/更新命令当前仅支持 dry-run：`checklist batch-create`、`checklist batch-update`、`rule batch-create`、`rule batch-update`。其他清单和规则命令成功时输出后端 `data` 原形。
+清单和规则的四个批量创建/更新命令均支持真实调用；成功时与其他管理命令一致，输出后端 `data` 原形。
 
 ## 身份支持速查
 
@@ -1001,16 +1001,9 @@ dry-run 不访问 Profile、token 和后端，只代表 CLI 本地契约通过�
 
 当前 Operation ID 为 `uploadContractFileByURLV3`，实际路径仍是 `/open-apis/contract-review/v1/file/contract/uploadByUrl`。测试、文档和排查日志都应按实际路径判断。
 
-### 哪些批量操作目前只能 dry-run？
+### 批量创建和批量更新支持真实调用吗？
 
-以下四个命令尚未开放真实 HTTP 调用：
-
-- `checklist batch-create`
-- `checklist batch-update`
-- `rule batch-create`
-- `rule batch-update`
-
-真实调用会在发送请求前返回能力或契约错误。
+支持。`checklist batch-create`、`checklist batch-update`、`rule batch-create` 和 `rule batch-update` 均发送一次真实 HTTP 请求；其中两个批量更新命令要求数组中的每项包含 `id`。增加 `--dry-run` 时只做本地校验和请求预览。
 
 ### 本地文件上传支持哪些格式和大小？
 

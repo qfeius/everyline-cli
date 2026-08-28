@@ -3,7 +3,6 @@ package rule
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -57,7 +56,7 @@ func TestGroupOperationMappings(t *testing.T) {
 	assertMappings(t, tests)
 }
 
-// TestRuleOperationMappings 验证七个分组内规则接口的 operation、method 和 path。
+// TestRuleOperationMappings 验证七个分组内规则接口的 operation、method 和 path，包含批量创建与批量更新。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestRuleOperationMappings(t *testing.T) {
@@ -77,12 +76,20 @@ func TestRuleOperationMappings(t *testing.T) {
 			_, err := service.CreateRule(context.Background(), "group-1", payload)
 			return err
 		}},
+		{"batch-create", OperationBatchCreateRule, http.MethodPost, collection + "/batch", func(service *Service) error {
+			_, err := service.BatchCreateRules(context.Background(), "group-1", []Rule{payload})
+			return err
+		}},
 		{"list", OperationListRules, http.MethodGet, collection, func(service *Service) error {
 			_, err := service.ListRules(context.Background(), "group-1", Query{PageSize: 20})
 			return err
 		}},
 		{"update", OperationUpdateRule, http.MethodPut, collection + "/rule-1", func(service *Service) error {
 			_, err := service.UpdateRule(context.Background(), "group-1", "rule-1", payload)
+			return err
+		}},
+		{"batch-update", OperationBatchUpdateRule, http.MethodPut, collection + "/batch", func(service *Service) error {
+			_, err := service.BatchUpdateRules(context.Background(), "group-1", []Rule{updatePayload})
 			return err
 		}},
 		{"delete", OperationDeleteRule, http.MethodDelete, collection + "/rule-1", func(service *Service) error {
@@ -97,32 +104,41 @@ func TestRuleOperationMappings(t *testing.T) {
 	assertMappings(t, tests)
 }
 
-// TestUnverifiedRuleBatchWritesFailClosed 验证未发布字段级详情的规则批量写不会到达 HTTP client。
+// TestBatchUpdateRulesUsesRuleArray 验证规则批量更新直接发送包含 id 的规则数组，不额外包装 data 字段。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
-func TestUnverifiedRuleBatchWritesFailClosed(t *testing.T) {
+func TestBatchUpdateRulesUsesRuleArray(t *testing.T) {
 	riskLevel := int32(1)
-	payload := Rule{Name: "规则", RiskLevel: &riskLevel, Content: "内容"}
-	updatePayload := payload
-	updatePayload.ID = "rule-1"
 	client := &recordingClient{}
-	service := NewService(client, time.Second)
-	for _, invoke := range []func() error{
-		func() error {
-			_, err := service.BatchCreateRules(context.Background(), "group-1", []Rule{payload})
-			return err
-		},
-		func() error {
-			_, err := service.BatchUpdateRules(context.Background(), "group-1", []Rule{updatePayload})
-			return err
-		},
-	} {
-		if err := invoke(); !errors.Is(err, contracts.ErrContractUnverified) {
-			t.Fatalf("err=%v，期望 ErrContractUnverified", err)
-		}
-		if client.request.OperationID != "" {
-			t.Fatalf("未核验接口不应调用 HTTP client: %#v", client.request)
-		}
+	payload := []Rule{{ID: "rule-1", Name: "规则", RiskLevel: &riskLevel, Content: "内容"}}
+	if _, err := NewService(client, time.Second).BatchUpdateRules(context.Background(), "group-1", payload); err != nil {
+		t.Fatal(err)
+	}
+	var body []Rule
+	if err := json.Unmarshal(client.request.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 1 || body[0].ID != "rule-1" || body[0].Name != "规则" {
+		t.Fatalf("body=%#v", body)
+	}
+}
+
+// TestBatchCreateRulesUsesRuleArray 验证规则批量创建直接发送规则数组，不额外包装 data 字段。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败通过 t.Fatal 报告。
+func TestBatchCreateRulesUsesRuleArray(t *testing.T) {
+	riskLevel := int32(2)
+	client := &recordingClient{}
+	payload := []Rule{{Name: "付款期限", RiskLevel: &riskLevel, Content: "付款期限不得超过 60 天"}}
+	if _, err := NewService(client, time.Second).BatchCreateRules(context.Background(), "group-1", payload); err != nil {
+		t.Fatal(err)
+	}
+	var body []Rule
+	if err := json.Unmarshal(client.request.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 1 || body[0].Name != payload[0].Name {
+		t.Fatalf("body=%#v", body)
 	}
 }
 

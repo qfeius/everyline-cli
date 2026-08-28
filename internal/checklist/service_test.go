@@ -3,7 +3,6 @@ package checklist
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -28,7 +27,7 @@ func (client *recordingClient) Do(_ context.Context, request openplatform.Reques
 	return openplatform.Response{Data: json.RawMessage(`{"ok":true}`)}, nil
 }
 
-// TestServiceOperationMappings 验证七个清单接口的 operation、method 和 path。
+// TestServiceOperationMappings 验证七个清单接口的 operation、method 和 path，包含批量创建与批量更新。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestServiceOperationMappings(t *testing.T) {
@@ -44,12 +43,20 @@ func TestServiceOperationMappings(t *testing.T) {
 		invoke      func(*Service) error
 	}{
 		{"create", OperationCreate, http.MethodPost, pathCollection, func(service *Service) error { _, err := service.Create(context.Background(), payload); return err }},
+		{"batch-create", OperationBatchCreate, http.MethodPost, pathBatch, func(service *Service) error {
+			_, err := service.BatchCreate(context.Background(), []Checklist{payload})
+			return err
+		}},
 		{"list", OperationList, http.MethodGet, pathCollection, func(service *Service) error {
 			_, err := service.List(context.Background(), Query{PageIndex: 1, PageSize: 20})
 			return err
 		}},
 		{"update", OperationUpdate, http.MethodPut, pathCollection + "/check-1", func(service *Service) error {
 			_, err := service.Update(context.Background(), "check-1", payload)
+			return err
+		}},
+		{"batch-update", OperationBatchUpdate, http.MethodPut, pathBatch, func(service *Service) error {
+			_, err := service.BatchUpdate(context.Background(), []Checklist{updatePayload})
 			return err
 		}},
 		{"delete", OperationDelete, http.MethodDelete, pathCollection + "/check-1", func(service *Service) error { _, err := service.Delete(context.Background(), "check-1"); return err }},
@@ -71,28 +78,41 @@ func TestServiceOperationMappings(t *testing.T) {
 	}
 }
 
-// TestUnverifiedChecklistBatchWritesFailClosed 验证缺少详情页请求体定义时不会调用批量写接口。
+// TestChecklistBatchWritesUseChecklistArrays 验证清单批量创建和批量更新直接发送清单数组，更新项保留 id。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
-func TestUnverifiedChecklistBatchWritesFailClosed(t *testing.T) {
+func TestChecklistBatchWritesUseChecklistArrays(t *testing.T) {
 	payload := Checklist{Name: "采购清单", ReviewRuleIDs: []string{"rule-1"}}
 	updatePayload := payload
 	updatePayload.ID = "check-1"
-	client := &recordingClient{}
-	service := NewService(client, time.Second)
-	for _, invoke := range []func() error{
-		func() error { _, err := service.BatchCreate(context.Background(), []Checklist{payload}); return err },
-		func() error {
+	tests := []struct {
+		name       string
+		invoke     func(*Service) error
+		expectedID string
+	}{
+		{"batch-create", func(service *Service) error {
+			_, err := service.BatchCreate(context.Background(), []Checklist{payload})
+			return err
+		}, ""},
+		{"batch-update", func(service *Service) error {
 			_, err := service.BatchUpdate(context.Background(), []Checklist{updatePayload})
 			return err
-		},
-	} {
-		if err := invoke(); !errors.Is(err, contracts.ErrContractUnverified) {
-			t.Fatalf("err=%v，期望 ErrContractUnverified", err)
-		}
-		if client.request.OperationID != "" {
-			t.Fatalf("未核验接口不应调用 HTTP client: %#v", client.request)
-		}
+		}, "check-1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &recordingClient{}
+			if err := test.invoke(NewService(client, time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			var body []Checklist
+			if err := json.Unmarshal(client.request.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body) != 1 || body[0].Name != "采购清单" || body[0].ID != test.expectedID {
+				t.Fatalf("body=%#v", body)
+			}
+		})
 	}
 }
 

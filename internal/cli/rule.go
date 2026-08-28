@@ -25,7 +25,7 @@ func newRuleCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	}
 	withNotes(command,
 		"除 rule group 外，规则命令都需要通过 --group-id 指定父分组。",
-		"batch-create 和 batch-update 当前仅支持 dry-run。",
+		"batch-create 和 batch-update 均按全有或全无语义提交数组请求。",
 		"删除规则分组会级联删除其所属规则。",
 	)
 	command.AddCommand(
@@ -255,7 +255,7 @@ func newRuleBatchCreateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use:   "batch-create",
 		Short: "批量创建审查规则",
-		Long:  "批量创建指定分组下的审查规则；当前仅支持 dry-run。",
+		Long:  "批量创建指定分组下的审查规则，使用一次请求提交规则数组。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload []rule.Rule
@@ -367,7 +367,7 @@ func newRuleBatchUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	command := &cobra.Command{
 		Use:   "batch-update",
 		Short: "批量更新审查规则",
-		Long:  "批量更新指定分组下的审查规则；当前仅支持 dry-run。",
+		Long:  "批量更新指定分组下的审查规则，使用一次请求提交包含 id 的规则数组。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload []rule.Rule

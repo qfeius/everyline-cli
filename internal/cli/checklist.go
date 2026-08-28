@@ -22,10 +22,10 @@ func newChecklistCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		Long: `管理审查清单。
 
 审查清单由名称和关联审查规则组成。
-		创建、更新和删除属于写操作；批量创建和批量更新当前仅支持 dry-run。`,
+		创建、更新和删除属于写操作；批量创建和批量更新均使用一次远端请求。`,
 	}
 	withNotes(command,
-		"batch-create 和 batch-update 当前仅支持 dry-run。",
+		"batch-create 和 batch-update 均按全有或全无语义提交数组请求。",
 		"delete 和 batch-delete 必须显式提供 --yes。",
 	)
 	command.AddCommand(
@@ -87,7 +87,7 @@ func newChecklistBatchCreateCommand(runtime *Runtime, root *rootOptions) *cobra.
 	command := &cobra.Command{
 		Use:   "batch-create",
 		Short: "批量创建审查清单",
-		Long:  "批量创建审查清单；当前仅支持 dry-run，真实调用需等待接口契约核验。",
+		Long:  "批量创建审查清单，使用一次请求提交清单数组。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload []checklist.Checklist
@@ -209,7 +209,7 @@ func newChecklistBatchUpdateCommand(runtime *Runtime, root *rootOptions) *cobra.
 	command := &cobra.Command{
 		Use:   "batch-update",
 		Short: "批量更新审查清单",
-		Long:  "批量更新审查清单；当前仅支持 dry-run，真实调用需等待接口契约核验。",
+		Long:  "批量更新审查清单，使用一次请求提交包含 id 的清单数组。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			var payload []checklist.Checklist
