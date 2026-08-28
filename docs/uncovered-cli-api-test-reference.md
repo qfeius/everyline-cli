@@ -83,10 +83,10 @@ CLI stdout 为：
 |---:|---|---|---|---|
 | 1 | `uploadContractFileByURLV3` | `review file upload-url` | `POST /open-apis/contract-review/v1/file/contract/uploadByUrl` | 支持 |
 | 2 | `createReviewChecklist` | `checklist create` | `POST /open-apis/review-rules/review-checklists` | 支持 |
-| 3 | `batchCreateReviewChecklists` | `checklist batch-create` | `POST /open-apis/review-rules/review-checklists/batch` | 仅 dry-run |
+| 3 | `batchCreateReviewChecklists` | `checklist batch-create` | `POST /open-apis/review-rules/review-checklists/batch` | 支持 |
 | 4 | `listReviewChecklists` | `checklist list` | `GET /open-apis/review-rules/review-checklists` | 支持 |
 | 5 | `updateReviewChecklist` | `checklist update` | `PUT /open-apis/review-rules/review-checklists/{id}` | 支持 |
-| 6 | `batchUpdateReviewChecklists` | `checklist batch-update` | `PUT /open-apis/review-rules/review-checklists/batch` | 仅 dry-run |
+| 6 | `batchUpdateReviewChecklists` | `checklist batch-update` | `PUT /open-apis/review-rules/review-checklists/batch` | 支持 |
 | 7 | `deleteReviewChecklist` | `checklist delete` | `DELETE /open-apis/review-rules/review-checklists/{id}` | 支持，需 `--yes` |
 | 8 | `batchDeleteReviewChecklists` | `checklist batch-delete` | `DELETE /open-apis/review-rules/review-checklists/batch` | 支持，需 `--yes` |
 | 9 | `createReviewRuleGroup` | `rule group create` | `POST /open-apis/review-rules/review-rule-groups` | 支持 |
@@ -94,10 +94,10 @@ CLI stdout 为：
 | 11 | `updateReviewRuleGroup` | `rule group update` | `PUT /open-apis/review-rules/review-rule-groups/{id}` | 支持 |
 | 12 | `deleteReviewRuleGroup` | `rule group delete` | `DELETE /open-apis/review-rules/review-rule-groups/{id}` | 支持，需 `--yes`，服务端固定级联 |
 | 13 | `createReviewRule` | `rule create` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules` | 支持 |
-| 14 | `batchCreateReviewRules` | `rule batch-create` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | 仅 dry-run |
+| 14 | `batchCreateReviewRules` | `rule batch-create` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | 支持 |
 | 15 | `listReviewRules` | `rule list` | `GET /open-apis/review-rules/review-rule-groups/{groupId}/rules` | 支持 |
 | 16 | `updateReviewRule` | `rule update` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/{ruleId}` | 支持 |
-| 17 | `batchUpdateReviewRules` | `rule batch-update` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | 仅 dry-run |
+| 17 | `batchUpdateReviewRules` | `rule batch-update` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | 支持 |
 | 18 | `deleteReviewRule` | `rule delete` | `DELETE /open-apis/review-rules/review-rule-groups/{groupId}/rules/{ruleId}` | 支持，需 `--yes` |
 | 19 | `batchDeleteReviewRules` | `rule batch-delete` | `DELETE /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | 支持，需 `--yes` |
 
@@ -217,15 +217,16 @@ HTTP 请求体与 `--data` 对象一致。成功结果为服务端 `data` 原样
 
 定义的 HTTP：`POST /open-apis/review-rules/review-checklists/batch`
 
-当前 CLI 只允许 dry-run：
+真实调用：
 
 ```bash
 everyline-cli checklist batch-create \
+  --profile test --as app \
   --data '[{"name":"采购合同审查清单","reviewRuleIds":["<RULE_ID>"]},{"name":"销售合同审查清单","reviewRuleIds":["<RULE_ID>"]}]' \
-  --dry-run --output json
+  --output json
 ```
 
-dry-run stdout 为规范化后的 Checklist 数组：
+实际 HTTP 请求体是 Checklist 数组。成功时 stdout 为服务端 `data` 原形；若服务端返回创建结果数组，代表性结果为：
 
 ```json
 [
@@ -240,11 +241,7 @@ dry-run stdout 为规范化后的 Checklist 数组：
 ]
 ```
 
-不带 `--dry-run` 时不会发送 HTTP 请求，退出码为 `4`，stderr 包含：
-
-```text
-接口契约尚未核验: batchCreateReviewChecklists；请先补齐接口详情页中的请求体定义
-```
+增加 `--dry-run` 时仍输出规范化后的 Checklist 数组，但不发送 HTTP 请求。
 
 ### 5.4 `listReviewChecklists`
 
@@ -335,15 +332,16 @@ everyline-cli checklist update \
 
 定义的 HTTP：`PUT /open-apis/review-rules/review-checklists/batch`
 
-当前 CLI 只允许 dry-run，且每项必须包含 `id`：
+真实调用要求数组每项包含 `id`：
 
 ```bash
 everyline-cli checklist batch-update \
+  --profile test --as app \
   --data '[{"id":"<CHECK_ID>","name":"采购合同审查清单-批量更新","reviewRuleIds":["<RULE_ID>"]}]' \
-  --dry-run --output json
+  --output json
 ```
 
-dry-run stdout：
+实际 HTTP 请求体是包含 `id` 的 Checklist 数组。成功时 stdout 为服务端 `data` 原形；代表性结果为：
 
 ```json
 [
@@ -355,11 +353,7 @@ dry-run stdout：
 ]
 ```
 
-真实调用不会发送 HTTP 请求，退出码为 `4`，stderr 包含：
-
-```text
-接口契约尚未核验: batchUpdateReviewChecklists；请先补齐接口详情页中的请求体定义
-```
+增加 `--dry-run` 时输出同一规范化数组，但不发送 HTTP 请求。
 
 ### 5.7 `deleteReviewChecklist`
 
@@ -606,39 +600,28 @@ everyline-cli rule create \
 
 定义的 HTTP：`POST /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch`
 
-当前 CLI 只允许 dry-run：
+真实调用：
 
 ```bash
 everyline-cli rule batch-create \
   --group-id '<GROUP_ID>' \
   --data '[{"name":"付款期限规则","riskLevel":2,"content":"付款期限不得超过约定上限"},{"name":"违约责任规则","riskLevel":1,"content":"违约责任应当明确"}]' \
-  --dry-run --output json
+  --output json
 ```
 
-dry-run stdout：
+实际 HTTP 请求体是 Rule 数组，不包含 `groupId` 或 `data` 包装。成功时 stdout 为服务端 `data` 原形，例如：
 
 ```json
-{
-  "groupId": "<GROUP_ID>",
-  "data": [
-    {
-      "name": "付款期限规则",
-      "riskLevel": 2,
-      "content": "付款期限不得超过约定上限"
-    },
-    {
-      "name": "违约责任规则",
-      "riskLevel": 1,
-      "content": "违约责任应当明确"
-    }
-  ]
-}
-```
-
-真实调用不会发送 HTTP 请求，退出码为 `4`，stderr 包含：
-
-```text
-接口契约尚未核验: batchCreateReviewRules；请先补齐接口详情页中的请求体定义
+[
+  {
+    "id": "<RULE_ID_1>",
+    "name": "付款期限规则"
+  },
+  {
+    "id": "<RULE_ID_2>",
+    "name": "违约责任规则"
+  }
+]
 ```
 
 ### 7.4 `listReviewRules`
@@ -717,36 +700,30 @@ everyline-cli rule update \
 
 定义的 HTTP：`PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch`
 
-当前 CLI 只允许 dry-run，数组每项必须包含 `id`：
+真实调用要求数组每项包含 `id`：
 
 ```bash
 everyline-cli rule batch-update \
+  --profile test --as app \
   --group-id '<GROUP_ID>' \
   --data '[{"id":"<RULE_ID>","name":"付款期限规则-批量更新","riskLevel":2,"content":"付款期限不得超过 60 天"}]' \
-  --dry-run --output json
+  --output json
 ```
 
-dry-run stdout：
+实际 HTTP 请求体仅为 Rule 数组，`groupId` 放在 URL 路径中。成功时 stdout 为服务端 `data` 原形；代表性结果为：
 
 ```json
-{
-  "groupId": "<GROUP_ID>",
-  "data": [
-    {
-      "id": "<RULE_ID>",
-      "name": "付款期限规则-批量更新",
-      "riskLevel": 2,
-      "content": "付款期限不得超过 60 天"
-    }
-  ]
-}
+[
+  {
+    "id": "<RULE_ID>",
+    "name": "付款期限规则-批量更新",
+    "riskLevel": 2,
+    "content": "付款期限不得超过 60 天"
+  }
+]
 ```
 
-真实调用不会发送 HTTP 请求，退出码为 `4`，stderr 包含：
-
-```text
-接口契约尚未核验: batchUpdateReviewRules；请先补齐接口详情页中的请求体定义
-```
+增加 `--dry-run` 时输出 `{"groupId":"<GROUP_ID>","data":[...]}` 预览对象，但不发送 HTTP 请求。
 
 ### 7.7 `deleteReviewRule`
 
@@ -819,7 +796,7 @@ everyline-cli rule batch-delete \
 3. `rule create`，保存 `<RULE_ID>`。
 4. `checklist create`，使用 `<RULE_ID>` 并保存 `<CHECK_ID>`。
 5. 执行 Checklist、Rule Group、Rule 的 list 与 update。
-6. 对四个未核验批量创建/更新命令执行 dry-run，并验证不带 dry-run 时退出码为 `4` 且未发出 HTTP 请求。
+6. 对四个批量创建/更新命令先执行 dry-run，再使用隔离数据执行真实请求并记录返回结果。
 7. 测试 Checklist 和 Rule 的 batch-delete 时使用专门创建的可删除数据。
 8. 先删除 Checklist，再删除 Rule，最后级联删除空的 Rule Group。
 
@@ -830,7 +807,7 @@ everyline-cli rule batch-delete \
 - 19 个 operation 均有独立用例编号。
 - 每条用例记录 CLI 版本、Profile、身份、完整命令、退出码、stdout、stderr 和远端 `request_id`。
 - 所有写操作先执行 `--dry-run` 或 `--print-input`，确认规范化请求后再执行真实调用。
-- 四个未核验批量创建/更新 operation 只验证 dry-run 和失败关闭，不把“未发送远端请求”误判为接口成功。
+- 四个批量创建/更新 operation 均验证 dry-run 请求预览和真实远端调用，确认真实请求只发送一次数组 body。
 - URL 上传明确验证 V1 实际路径，并确认请求体不包含 `channelType`。
 - 删除操作验证缺少 `--yes` 时不发送请求，并使用隔离测试资源执行真实删除。
 - 成功 stdout 始终可被 JSON 解析；失败不在 stdout 伪造成功对象。

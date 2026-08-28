@@ -1303,16 +1303,119 @@ func TestExitCodeMapsTaskFailureToAPI(t *testing.T) {
 	}
 }
 
-// TestUnverifiedBatchWriteFailsBeforeProfile 验证真实批量写在装配鉴权前就返回可识别的契约错误。
+// TestRemainingBatchWritesCallRemote 验证清单批量创建、清单批量更新和规则批量更新均发送一次真实数组请求。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；任一命令未请求预期 method/path/body 或未透传响应 data 时通过 t.Fatal 报告。
+func TestRemainingBatchWritesCallRemote(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		args   []string
+	}{
+		{
+			name:   "checklist-batch-create",
+			method: http.MethodPost,
+			path:   "/open-apis/review-rules/review-checklists/batch",
+			args:   []string{"checklist", "batch-create", "--data", `[{"name":"清单","reviewRuleIds":["rule-1"]}]`, "--output", "json"},
+		},
+		{
+			name:   "checklist-batch-update",
+			method: http.MethodPut,
+			path:   "/open-apis/review-rules/review-checklists/batch",
+			args:   []string{"checklist", "batch-update", "--data", `[{"id":"check-1","name":"清单","reviewRuleIds":["rule-1"]}]`, "--output", "json"},
+		},
+		{
+			name:   "rule-batch-update",
+			method: http.MethodPut,
+			path:   "/open-apis/review-rules/review-rule-groups/group-1/rules/batch",
+			args:   []string{"rule", "batch-update", "--group-id", "group-1", "--data", `[{"id":"rule-1","name":"规则","riskLevel":1,"content":"内容"}]`, "--output", "json"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var received []map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.Method != test.method || request.URL.Path != test.path {
+					t.Errorf("request=%s %s", request.Method, request.URL.Path)
+				}
+				if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+					t.Errorf("decode body: %v", err)
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[{"id":"result-1"}]}`))
+			}))
+			defer server.Close()
+
+			t.Setenv("EVERYLINE_ACCESS_TOKEN", "test-token")
+			runtime, stdout, _ := testRuntime(t)
+			runtime.HTTP = server.Client()
+			if err := runtime.Profiles.Add(config.Profile{
+				Name:            "local",
+				BaseURL:         server.URL,
+				TokenURL:        server.URL + "/token",
+				AppID:           "app",
+				DefaultIdentity: config.IdentityApp,
+				DefaultOutput:   "json",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := Execute(context.Background(), runtime, test.args); err != nil {
+				t.Fatal(err)
+			}
+			if len(received) != 1 || !strings.Contains(stdout.String(), `"id": "result-1"`) {
+				t.Fatalf("received=%#v stdout=%s", received, stdout.String())
+			}
+		})
+	}
+}
+
+// TestRuleBatchCreateCallsRemote 验证规则批量创建通过一次 POST 请求发送规则数组，并输出服务端 data。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
-func TestUnverifiedBatchWriteFailsBeforeProfile(t *testing.T) {
-	runtime, _, _ := testRuntime(t)
-	err := Execute(context.Background(), runtime, []string{
-		"checklist", "batch-create", "--data", `[{"name":"清单","reviewRuleIds":["rule-1"]}]`,
-	})
-	if !errors.Is(err, contracts.ErrContractUnverified) {
-		t.Fatalf("err=%v，期望 ErrContractUnverified", err)
+func TestRuleBatchCreateCallsRemote(t *testing.T) {
+	var received []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/open-apis/review-rules/review-rule-groups/group-1/rules/batch" {
+			t.Errorf("request=%s %s", request.Method, request.URL.Path)
+		}
+		if request.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("authorization=%q", request.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[{"id":"rule-1","name":"付款期限"}]}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("EVERYLINE_ACCESS_TOKEN", "test-token")
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{
+		Name:            "local",
+		BaseURL:         server.URL,
+		TokenURL:        server.URL + "/token",
+		AppID:           "app",
+		DefaultIdentity: config.IdentityApp,
+		DefaultOutput:   "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := `[{"name":"付款期限","riskLevel":2,"content":"付款期限不得超过 60 天"},{"name":"违约责任","riskLevel":1,"content":"检查违约责任是否对等"}]`
+	if err := Execute(context.Background(), runtime, []string{
+		"rule", "batch-create", "--group-id", "group-1", "--data", payload, "--output", "json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(received) != 2 || received[0]["name"] != "付款期限" || received[1]["name"] != "违约责任" {
+		t.Fatalf("received=%#v", received)
+	}
+	if !strings.Contains(stdout.String(), `"id": "rule-1"`) {
+		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
 

@@ -12,12 +12,7 @@ var ErrContractUnverified = errors.New("接口契约尚未核验")
 // ErrContractMismatch 表示业务服务生成的 method/path 或逻辑输入与映射目录不一致。
 var ErrContractMismatch = errors.New("请求与接口映射不一致")
 
-var unverifiedOperations = map[string]struct{}{
-	"batchCreateReviewChecklists": {},
-	"batchUpdateReviewChecklists": {},
-	"batchCreateReviewRules":      {},
-	"batchUpdateReviewRules":      {},
-}
+var unverifiedOperations = map[string]struct{}{}
 
 // RequireVerified 阻止缺少字段级详情页依据的远端写操作，同时允许命令层继续执行本地 dry-run。
 // 入参：operationID string 为待执行的远端操作标识。

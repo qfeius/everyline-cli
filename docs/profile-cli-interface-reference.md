@@ -447,10 +447,10 @@ CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自�
 | 6 | `review task status` | `smartAuditTaskStatus` | `GET /open-apis/contract-review/v3/smartAudit/task/status` | Task query | 对象；轮询依赖 `status/message?` |
 | 7 | `review task info` | `smartAuditTaskInfo` | `GET /open-apis/contract-review/v3/smartAudit/task/info` | Task query | 完整详情对象，字段透传 |
 | 8 | `checklist create` | `createReviewChecklist` | `POST /open-apis/review-rules/review-checklists` | Checklist | `data` 原形透传 |
-| 9 | `checklist batch-create` | `batchCreateReviewChecklists` | `POST /open-apis/review-rules/review-checklists/batch` | Checklist[] | 仅支持 dry-run |
+| 9 | `checklist batch-create` | `batchCreateReviewChecklists` | `POST /open-apis/review-rules/review-checklists/batch` | Checklist[] | `data` 原形透传 |
 | 10 | `checklist list` | `listReviewChecklists` | `GET /open-apis/review-rules/review-checklists` | Checklist query | `data` 原形透传 |
 | 11 | `checklist update` | `updateReviewChecklist` | `PUT /open-apis/review-rules/review-checklists/{id}` | path `id` + Checklist | `data` 原形透传 |
-| 12 | `checklist batch-update` | `batchUpdateReviewChecklists` | `PUT /open-apis/review-rules/review-checklists/batch` | Checklist[]，每项含 `id` | 仅支持 dry-run |
+| 12 | `checklist batch-update` | `batchUpdateReviewChecklists` | `PUT /open-apis/review-rules/review-checklists/batch` | Checklist[]，每项含 `id` | `data` 原形透传 |
 | 13 | `checklist delete` | `deleteReviewChecklist` | `DELETE /open-apis/review-rules/review-checklists/{id}` | path `id` | `data` 原形透传 |
 | 14 | `checklist batch-delete` | `batchDeleteReviewChecklists` | `DELETE /open-apis/review-rules/review-checklists/batch` | `{"ids":[]}` | `data` 原形透传 |
 | 15 | `rule group create` | `createReviewRuleGroup` | `POST /open-apis/review-rules/review-rule-groups` | Group | `data` 原形透传 |
@@ -458,10 +458,10 @@ CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自�
 | 17 | `rule group update` | `updateReviewRuleGroup` | `PUT /open-apis/review-rules/review-rule-groups/{id}` | path `id` + Group | `data` 原形透传 |
 | 18 | `rule group delete` | `deleteReviewRuleGroup` | `DELETE /open-apis/review-rules/review-rule-groups/{id}` | path `id` | `data` 原形透传 |
 | 19 | `rule create` | `createReviewRule` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules` | path `groupId` + Rule | `data` 原形透传 |
-| 20 | `rule batch-create` | `batchCreateReviewRules` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + Rule[] | 仅支持 dry-run |
+| 20 | `rule batch-create` | `batchCreateReviewRules` | `POST /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + Rule[] | `data` 原形透传 |
 | 21 | `rule list` | `listReviewRules` | `GET /open-apis/review-rules/review-rule-groups/{groupId}/rules` | path `groupId` + Rule query | `data` 原形透传 |
 | 22 | `rule update` | `updateReviewRule` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/{ruleId}` | path IDs + Rule | `data` 原形透传 |
-| 23 | `rule batch-update` | `batchUpdateReviewRules` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + Rule[]，每项含 `id` | 仅支持 dry-run |
+| 23 | `rule batch-update` | `batchUpdateReviewRules` | `PUT /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + Rule[]，每项含 `id` | `data` 原形透传 |
 | 24 | `rule delete` | `deleteReviewRule` | `DELETE /open-apis/review-rules/review-rule-groups/{groupId}/rules/{ruleId}` | path IDs | `data` 原形透传 |
 | 25 | `rule batch-delete` | `batchDeleteReviewRules` | `DELETE /open-apis/review-rules/review-rule-groups/{groupId}/rules/batch` | path `groupId` + `{"ids":[]}` | `data` 原形透传 |
 
@@ -741,10 +741,10 @@ flowchart TD
 | 命令 | 输入 | dry-run stdout | 实际调用 |
 |---|---|---|---|
 | `checklist create` | `--input/--data` Checklist | Checklist | 支持 |
-| `checklist batch-create` | Checklist[] | Checklist[] | 当前关闭 |
+| `checklist batch-create` | Checklist[] | Checklist[] | 支持，真实请求体为 Checklist[] |
 | `checklist list` | Query flags | 不支持 dry-run | 支持 |
 | `checklist update --id` | Checklist | `{"id":"...","data":{...}}`，data 移除 body id | 支持 |
-| `checklist batch-update` | 每项含 id 的 Checklist[] | Checklist[] | 当前关闭 |
+| `checklist batch-update` | 每项含 id 的 Checklist[] | Checklist[] | 支持，真实请求体为 Checklist[] |
 | `checklist delete --id` | 路径 ID | `{"id":"..."}` | 支持，实际执行需 `--yes` |
 | `checklist batch-delete` | `--id` 或 JSON ID[] | `{"ids":[...]}` | 支持，实际执行需 `--yes` |
 
@@ -801,10 +801,10 @@ flowchart TD
 | `rule group update --id` | Group | `{"id":"...","data":{...}}` | 支持 |
 | `rule group delete --id` | 路径 ID | `{"id":"..."}` | 支持，需 `--yes`；服务端固定级联 |
 | `rule create --group-id` | Rule | `{"groupId":"...","data":{...}}` | 支持 |
-| `rule batch-create --group-id` | Rule[] | `{"groupId":"...","data":[...]}` | 当前关闭 |
+| `rule batch-create --group-id` | Rule[] | `{"groupId":"...","data":[...]}` | 支持，真实请求体为 Rule[] |
 | `rule list --group-id` | Query flags | 不支持 dry-run | 支持 |
 | `rule update --group-id --rule-id` | Rule | `{"groupId":"...","ruleId":"...","data":{...}}` | 支持 |
-| `rule batch-update --group-id` | 每项含 id 的 Rule[] | `{"groupId":"...","data":[...]}` | 当前关闭 |
+| `rule batch-update --group-id` | 每项含 id 的 Rule[] | `{"groupId":"...","data":[...]}` | 支持，真实请求体为 Rule[] |
 | `rule delete --group-id --rule-id` | 路径 IDs | `{"groupId":"...","ruleId":"..."}` | 支持，需 `--yes` |
 | `rule batch-delete --group-id` | `--id` 或 JSON ID[] | `{"groupId":"...","ids":[...]}` | 支持，需 `--yes`；HTTP body 仅发送 `ids` |
 

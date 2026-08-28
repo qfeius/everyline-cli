@@ -6,19 +6,13 @@ import (
 	"testing"
 )
 
-// TestVerificationStatus 验证仅四个缺失请求体详情的批量写操作被显式保护。
+// TestVerificationStatus 验证目录中的全部接口都已核验并允许进入真实 HTTP 调用。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestVerificationStatus(t *testing.T) {
-	unverified := map[string]bool{
-		"batchCreateReviewChecklists": true,
-		"batchUpdateReviewChecklists": true,
-		"batchCreateReviewRules":      true,
-		"batchUpdateReviewRules":      true,
-	}
 	for _, spec := range All() {
-		if IsVerified(spec.OperationID) == unverified[spec.OperationID] {
-			t.Errorf("operation=%s verified=%t", spec.OperationID, IsVerified(spec.OperationID))
+		if !IsVerified(spec.OperationID) {
+			t.Errorf("operation=%s 尚未开放真实调用", spec.OperationID)
 		}
 	}
 	if IsVerified("unknownOperation") {
