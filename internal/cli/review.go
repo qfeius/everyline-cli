@@ -110,7 +110,7 @@ func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 
 // newReviewFileUploadURLCommand 创建 JSON URL 上传命令。
 // 入参：runtime *Runtime 为运行时；root *rootOptions 为公共 flags。
-// 返回值：*cobra.Command，支持 fileUrl/fileName 精确契约。
+// 返回值：*cobra.Command，支持 V3 fileUrl/name 精确契约。
 func newReviewFileUploadURLCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var fileURL string
 	var name string
@@ -129,7 +129,7 @@ func newReviewFileUploadURLCommand(runtime *Runtime, root *rootOptions) *cobra.C
 			if err := review.ValidateFileName(name); err != nil {
 				return err
 			}
-			input := map[string]any{"fileUrl": fileURL, "fileName": name}
+			input := map[string]any{"fileUrl": fileURL, "name": name}
 			if dryRun || printInput {
 				return render(runtime, root, "json", input)
 			}
@@ -451,8 +451,8 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
   - config.selectedCheckListIds array<string>（条件必填）：指定自定义审查清单 ID。
   - config.matchContractTypeRulePackage boolean（条件必填）：是否匹配合同类型规则包；仅 true 生效。
 - 规则来源至少提供一项；两项同时提供时组合执行，互不覆盖且没有优先级。
-- businessId string：URL 来源必填；文件来源优先使用上传接口返回值。
-- fileHash string：URL 来源必填；fileHash 使用上传接口返回值。
+- businessId string：兼容字段；正常由上传接口返回，无需手动提供。
+- fileHash string：兼容字段；正常由上传接口返回，无需手动提供。
 - extractSubjects boolean：可选，是否先提取合同参与方。
 - wait boolean：可选，是否等待任务完成并获取最终详情。
 
@@ -505,7 +505,7 @@ func newReviewRunCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		"输入中的 wait=true 才会等待任务终态并返回最终详情。",
 		"config 及其三个必填子字段必须提供。",
 		"规则来源至少提供一项；自定义清单和合同类型清单同时提供时组合执行。",
-		"URL 来源需要额外提供 businessId 和上传接口返回的 fileHash。",
+		"URL 来源会使用 V3 上传响应中的 businessId 和 fileHash 继续审查。",
 		"CLI 仅接受以上字段，其他字段会按未知字段拒绝。",
 	)
 	addJSONInputFlags(command, &inputPath, &inline)

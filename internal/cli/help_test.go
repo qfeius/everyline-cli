@@ -231,7 +231,7 @@ func TestHelpExplainsReviewRunInputContract(t *testing.T) {
 		`selectedAuditRole":"甲方"`,
 		`selectedCheckListIds":["2001001"]`,
 		`matchContractTypeRulePackage":true`,
-		"fileHash 使用上传接口返回值",
+		"URL 来源会使用 V3 上传响应中的 businessId 和 fileHash",
 	} {
 		if !strings.Contains(help, expected) {
 			t.Fatalf("review run 帮助缺少 %q: %s", expected, help)

@@ -50,7 +50,7 @@ func validContractInput(schema string) any {
 	case "review-upload.schema.json":
 		return map[string]any{"file": "contract.pdf", "name": "contract.pdf", "appType": "THIRD_PARTY"}
 	case "review-upload-url.schema.json":
-		return map[string]any{"fileUrl": "https://open.qfei.cn/contract.pdf", "fileName": "contract.pdf"}
+		return map[string]any{"fileUrl": "https://open.qfei.cn/contract.pdf", "name": "contract.pdf"}
 	case "review-subject.schema.json":
 		return map[string]any{"businessId": "biz", "appType": "THIRD_PARTY", "fileId": "1"}
 	case "review-start.schema.json":

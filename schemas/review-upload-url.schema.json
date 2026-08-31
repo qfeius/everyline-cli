@@ -4,10 +4,9 @@
   "title": "uploadContractFileByURLV3",
   "type": "object",
   "additionalProperties": false,
-  "required": ["fileUrl", "fileName"],
+  "required": ["fileUrl", "name"],
   "properties": {
     "fileUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
-    "fileName": {"type": "string", "pattern": "(?i)\\.(doc|docx|pdf)$"}
+    "name": {"type": "string", "pattern": "(?i)\\.(doc|docx|pdf)$"}
   }
 }
-

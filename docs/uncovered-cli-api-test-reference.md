@@ -81,7 +81,7 @@ CLI stdout 为：
 
 | # | Operation ID | CLI 命令 | 方法与路径 | 当前真实调用状态 |
 |---:|---|---|---|---|
-| 1 | `uploadContractFileByURLV3` | `review file upload-url` | `POST /open-apis/contract-review/v1/file/contract/uploadByUrl` | 支持 |
+| 1 | `uploadContractFileByURLV3` | `review file upload-url` | `POST /open-apis/contract-review/v3/file/contract/uploadByUrl` | 支持 |
 | 2 | `createReviewChecklist` | `checklist create` | `POST /open-apis/review-rules/review-checklists` | 支持 |
 | 3 | `batchCreateReviewChecklists` | `checklist batch-create` | `POST /open-apis/review-rules/review-checklists/batch` | 支持 |
 | 4 | `listReviewChecklists` | `checklist list` | `GET /open-apis/review-rules/review-checklists` | 支持 |
@@ -108,7 +108,7 @@ CLI stdout 为：
 HTTP：
 
 ```text
-POST /open-apis/contract-review/v1/file/contract/uploadByUrl
+POST /open-apis/contract-review/v3/file/contract/uploadByUrl
 Content-Type: application/json
 ```
 
@@ -117,7 +117,7 @@ Content-Type: application/json
 | CLI 参数 | HTTP JSON 字段 | 必填 | 约束 |
 |---|---|---|---|
 | `--file-url` | `fileUrl` | 是 | 完整的 `http` 或 `https` URL |
-| `--name` | `fileName` | 是 | 以 `.doc`、`.docx` 或 `.pdf` 结尾 |
+| `--name` | `name` | 是 | 以 `.doc`、`.docx` 或 `.pdf` 结尾 |
 
 CLI 调用：
 
@@ -134,15 +134,17 @@ everyline-cli review file upload-url \
 ```json
 {
   "fileUrl": "https://files.example.com/采购合同.pdf",
-  "fileName": "采购合同.pdf"
+  "name": "采购合同.pdf"
 }
 ```
 
-成功结果：退出码 `0`，stdout 为服务端 `data`。后续工作流至少需要能从实际结果中读取 `fileId`。代表性结果：
+成功结果：退出码 `0`，stdout 为服务端 `data`。后续工作流会从实际结果中读取 `fileId/businessId/fileHash`。代表性结果：
 
 ```json
 {
-  "fileId": 997024795
+  "fileId": 997024795,
+  "businessId": "auto:third_party:<TENANT_ID>:<BUSINESS_KEY>",
+  "fileHash": "<64_HEX_SHA256>"
 }
 ```
 
@@ -160,11 +162,11 @@ dry-run stdout：
 ```json
 {
   "fileUrl": "https://files.example.com/采购合同.pdf",
-  "fileName": "采购合同.pdf"
+  "name": "采购合同.pdf"
 }
 ```
 
-建议至少补充以下场景：成功上传、非法 URL、非法扩展名、请求体不含 `channelType`、V1 实际路径，以及 `review run` 的 URL 来源链路。
+建议至少补充以下场景：成功上传、非法 URL、非法扩展名、请求体不含 `channelType`、V3 实际路径、响应包含完整文件身份，以及 `review run` 的 URL 来源链路。
 
 ## 5. Checklist 接口
 
@@ -808,7 +810,7 @@ everyline-cli rule batch-delete \
 - 每条用例记录 CLI 版本、Profile、身份、完整命令、退出码、stdout、stderr 和远端 `request_id`。
 - 所有写操作先执行 `--dry-run` 或 `--print-input`，确认规范化请求后再执行真实调用。
 - 四个批量创建/更新 operation 均验证 dry-run 请求预览和真实远端调用，确认真实请求只发送一次数组 body。
-- URL 上传明确验证 V1 实际路径，并确认请求体不包含 `channelType`。
+- URL 上传明确验证 V3 实际路径、`fileUrl/name` 请求字段、完整文件身份响应，并确认请求体不包含 `channelType`。
 - 删除操作验证缺少 `--yes` 时不发送请求，并使用隔离测试资源执行真实删除。
 - 成功 stdout 始终可被 JSON 解析；失败不在 stdout 伪造成功对象。
 - Checklist、Rule Group、Rule 的实际 `data` 全量保存，后续获得正式 response schema 后再升级字段级断言。

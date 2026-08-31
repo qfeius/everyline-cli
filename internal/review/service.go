@@ -26,7 +26,7 @@ const (
 	OperationTaskInfo        = "smartAuditTaskInfo"
 
 	pathUploadFile      = "/open-apis/contract-review/v3/file/contract/upload"
-	pathUploadFileURL   = "/open-apis/contract-review/v1/file/contract/uploadByUrl"
+	pathUploadFileURL   = "/open-apis/contract-review/v3/file/contract/uploadByUrl"
 	pathExtractSubjects = "/open-apis/contract-review/v3/smartAudit/contract/subjects"
 	pathStartReview     = "/open-apis/contract-review/v3/smartAudit/task/startReview"
 	pathTaskStatus      = "/open-apis/contract-review/v3/smartAudit/task/status"
@@ -127,7 +127,7 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 	return DecodeDocument(response.Data)
 }
 
-// UploadURL 通过远端 URL 上传合同，JSON 字段严格使用 fileUrl/fileName。
+// UploadURL 通过远端 URL 上传合同，JSON 字段严格使用 V3 契约的 fileUrl/name。
 // 入参：ctx context.Context；fileURL string 为 http/https 地址；name string 为文件名。
 // 返回值：Document 为上传结果；error 为输入或 API 失败。
 func (service *Service) UploadURL(ctx context.Context, fileURL string, name string) (Document, error) {
@@ -138,7 +138,7 @@ func (service *Service) UploadURL(ctx context.Context, fileURL string, name stri
 	if err := ValidateFileName(name); err != nil {
 		return nil, err
 	}
-	input := map[string]string{"fileUrl": fileURL, "fileName": name}
+	input := map[string]string{"fileUrl": fileURL, "name": name}
 	body, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("编码 URL 上传请求: %w", err)
