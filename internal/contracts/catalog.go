@@ -12,7 +12,7 @@ type Spec struct {
 var catalog = []Spec{
 	{"tenantAccessTokenInternal", "auth login", "POST", "profile.token_url", "auth-login.schema.json"},
 	{"uploadContractFileV3", "review file upload", "POST", "/open-apis/contract-review/v3/file/contract/upload", "review-upload.schema.json"},
-	{"uploadContractFileByURLV3", "review file upload-url", "POST", "/open-apis/contract-review/v1/file/contract/uploadByUrl", "review-upload-url.schema.json"},
+	{"uploadContractFileByURLV3", "review file upload-url", "POST", "/open-apis/contract-review/v3/file/contract/uploadByUrl", "review-upload-url.schema.json"},
 	{"smartAuditContractSubjects", "review subject extract", "POST", "/open-apis/contract-review/v3/smartAudit/contract/subjects", "review-subject.schema.json"},
 	{"smartAuditTaskStartReview", "review task start", "POST", "/open-apis/contract-review/v3/smartAudit/task/startReview", "review-start.schema.json"},
 	{"smartAuditTaskStatus", "review task status", "GET", "/open-apis/contract-review/v3/smartAudit/task/status", "review-task-query.schema.json"},

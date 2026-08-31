@@ -104,6 +104,30 @@ func TestServiceExtractSubjectsUsesStringFileID(t *testing.T) {
 	}
 }
 
+// TestServiceUploadURLUsesV3Contract 验证 URL 上传调用 V3 地址并发送 fileUrl/name。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；路径或 JSON 字段回退到旧 V1 契约时通过 t.Fatal 报告。
+func TestServiceUploadURLUsesV3Contract(t *testing.T) {
+	client := &recordingClient{data: `{"fileId":"12","businessId":"biz-url","fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`}
+	service := NewService(client, time.Second)
+	if _, err := service.UploadURL(context.Background(), "https://files.example.com/contract.pdf", "合同.pdf"); err != nil {
+		t.Fatal(err)
+	}
+	if client.request.Path != "/open-apis/contract-review/v3/file/contract/uploadByUrl" {
+		t.Fatalf("path=%q", client.request.Path)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(client.request.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["fileUrl"] != "https://files.example.com/contract.pdf" || body["name"] != "合同.pdf" {
+		t.Fatalf("body=%#v", body)
+	}
+	if _, exists := body["fileName"]; exists {
+		t.Fatalf("body=%#v，不应发送旧 V1 字段 fileName", body)
+	}
+}
+
 // TestServiceOperationMappings 验证其余 MVP operation ID、method 和 path 不发生契约漂移。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

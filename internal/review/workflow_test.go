@@ -47,8 +47,13 @@ type missingFileHashAPI struct {
 	fakeAPI
 }
 
-// urlUploadAPI 模拟 URL 上传接口只返回 fileId，业务身份由工作流输入补齐。
+// urlUploadAPI 模拟 V3 URL 上传接口返回完整文件身份。
 type urlUploadAPI struct {
+	fakeAPI
+}
+
+// missingURLIdentityAPI 模拟异常 V3 URL 上传响应，验证工作流不会发送不完整 startReview。
+type missingURLIdentityAPI struct {
 	fakeAPI
 }
 
@@ -60,8 +65,20 @@ func (api *missingFileHashAPI) UploadFile(context.Context, string, string, strin
 	return Document{"fileId": int64(11), "businessId": "biz-1"}, nil
 }
 
-// UploadURL 返回标准 URL 上传接口的最小文件结果。
+// UploadURL 返回 V3 URL 上传接口的完整文件身份。
 func (api *urlUploadAPI) UploadURL(context.Context, string, string) (Document, error) {
+	api.calls = append(api.calls, "upload-url")
+	return Document{
+		"fileId":     int64(12),
+		"businessId": "biz-url",
+		"fileHash":   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}, nil
+}
+
+// UploadURL 返回缺少业务身份的异常上传结果。
+// 入参：context 和字符串参数仅满足 API。
+// 返回值：Document 仅含 fileId；error 为 nil。
+func (api *missingURLIdentityAPI) UploadURL(context.Context, string, string) (Document, error) {
 	api.calls = append(api.calls, "upload-url")
 	return Document{"fileId": int64(12)}, nil
 }
@@ -368,15 +385,13 @@ func TestWorkflowWaitPreservesSnapshotOnCancellation(t *testing.T) {
 	}
 }
 
-// TestWorkflowRunURLUsesExplicitFileIdentity 验证 URL 上传响应缺少业务身份时可使用调用方提供的元数据继续链路。
-func TestWorkflowRunURLUsesExplicitFileIdentity(t *testing.T) {
+// TestWorkflowRunURLUsesUploadedFileIdentity 验证 URL 一键审查直接使用 V3 上传响应继续链路。
+func TestWorkflowRunURLUsesUploadedFileIdentity(t *testing.T) {
 	api := &urlUploadAPI{}
 	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
 	result, err := workflow.Run(context.Background(), RunSpec{
-		Source:     RunSource{Type: "url", FileURL: "https://files.example.com/contract.pdf", Name: "合同.pdf"},
-		BusinessID: "biz-url",
-		FileHash:   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		Config:     validReviewConfig(),
+		Source: RunSource{Type: "url", FileURL: "https://files.example.com/contract.pdf", Name: "合同.pdf"},
+		Config: validReviewConfig(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -395,18 +410,18 @@ func TestWorkflowRunURLUsesExplicitFileIdentity(t *testing.T) {
 	}
 }
 
-// TestWorkflowRunURLRequiresFileIdentity 验证 URL 链路缺少业务身份时在 Schema 层提前拦截。
-func TestWorkflowRunURLRequiresFileIdentity(t *testing.T) {
-	api := &urlUploadAPI{}
+// TestWorkflowRunURLRejectsIncompleteUploadIdentity 验证异常 V3 响应缺少业务身份时停止发起审查。
+func TestWorkflowRunURLRejectsIncompleteUploadIdentity(t *testing.T) {
+	api := &missingURLIdentityAPI{}
 	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
 	_, err := workflow.Run(context.Background(), RunSpec{
 		Source: RunSource{Type: "url", FileURL: "https://files.example.com/contract.pdf", Name: "合同.pdf"},
 		Config: validReviewConfig(),
 	})
-	if err == nil || !strings.Contains(err.Error(), "businessId") {
+	if err == nil || !strings.Contains(err.Error(), "V3 URL 上传响应缺少 businessId 或 fileHash") {
 		t.Fatalf("err=%v", err)
 	}
-	if len(api.calls) != 0 {
+	if len(api.calls) != 1 || api.calls[0] != "upload-url" {
 		t.Fatalf("calls=%#v", api.calls)
 	}
 }

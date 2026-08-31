@@ -64,18 +64,5 @@
     },
     "extractSubjects": {"type": "boolean", "default": false},
     "wait": {"type": "boolean"}
-  },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "source": {
-            "properties": {"type": {"const": "url"}},
-            "required": ["type"]
-          }
-        }
-      },
-      "then": {"required": ["businessId", "fileHash"]}
-    }
-  ]
+  }
 }

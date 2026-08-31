@@ -441,7 +441,7 @@ CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自�
 |---:|---|---|---|---|---|
 | 1 | `auth login --as app` | `tenantAccessTokenInternal` | `POST profile.token_url` | `appId/appSecret` | CLI 登录状态对象 |
 | 2 | `review file upload` | `uploadContractFileV3` | `POST /open-apis/contract-review/v3/file/contract/upload` | multipart `file/name` | 对象；工作流依赖 `fileId/businessId/fileHash` |
-| 3 | `review file upload-url` | `uploadContractFileByURLV3` | `POST /open-apis/contract-review/v1/file/contract/uploadByUrl` | `fileUrl/fileName` | 对象；至少可读取 `fileId` |
+| 3 | `review file upload-url` | `uploadContractFileByURLV3` | `POST /open-apis/contract-review/v3/file/contract/uploadByUrl` | `fileUrl/name` | 对象；工作流依赖 `fileId/businessId/fileHash` |
 | 4 | `review subject extract` | `smartAuditContractSubjects` | `POST /open-apis/contract-review/v3/smartAudit/contract/subjects` | `businessId/fileId/fileHash?` | 主体信息对象，字段透传 |
 | 5 | `review task start` | `smartAuditTaskStartReview` | `POST /open-apis/contract-review/v3/smartAudit/task/startReview` | Start body + 固定 `usageReportContext` | 对象；等待流程依赖 `taskId` |
 | 6 | `review task status` | `smartAuditTaskStatus` | `GET /open-apis/contract-review/v3/smartAudit/task/status` | Task query | 对象；轮询依赖 `status/message?` |
@@ -512,10 +512,20 @@ everyline-cli review file upload-url \
 请求：
 
 ```json
-{"fileUrl":"https://<HOST>/contract.pdf","fileName":"合同.pdf"}
+{"fileUrl":"https://<HOST>/contract.pdf","name":"合同.pdf"}
 ```
 
-响应为透传对象。URL 上传链路只保证可读取 `fileId`；一键工作流还要求调用方在 RunSpec 中提供 `businessId` 和已知的 `fileHash`。
+响应为透传对象，V3 URL 上传会返回后续审查所需的文件身份：
+
+```json
+{
+  "fileId": 11,
+  "businessId": "biz-1",
+  "fileHash": "<64_HEX_SHA256>"
+}
+```
+
+`review run` 会直接使用这些字段，调用方无需在 RunSpec 中重复提供。
 
 ### 7.3 主体提取
 
@@ -645,8 +655,6 @@ URL 来源输入：
     "fileUrl": "https://<HOST>/contract.pdf",
     "name": "合同.pdf"
   },
-  "businessId": "biz-1",
-  "fileHash": "<64_HEX_SHA256>",
   "config": {
     "selectedPosition": "xxx公司",
     "selectedAuditRole": "甲方",

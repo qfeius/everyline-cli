@@ -108,7 +108,7 @@ func (workflow *Workflow) Run(ctx context.Context, spec RunSpec) (RunResult, err
 	}
 	if businessID == "" || fileHash == "" {
 		if spec.Source.Type == "url" {
-			return result, fmt.Errorf("URL 来源需要在工作流输入中提供 businessId 和 fileHash（文件内容的 SHA-256）")
+			return result, fmt.Errorf("V3 URL 上传响应缺少 businessId 或 fileHash")
 		}
 		return result, fmt.Errorf("上传响应缺少 businessId 或 fileHash")
 	}

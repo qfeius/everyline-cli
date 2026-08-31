@@ -1107,14 +1107,14 @@ func TestReviewStartRejectsUsageReportContext(t *testing.T) {
 	}
 }
 
-// TestReviewRunURLDryRunDefaultsConfig 验证 URL 工作流的身份字段和默认配置在 CLI 层可见。
-func TestReviewRunURLDryRunDefaultsConfig(t *testing.T) {
+// TestReviewRunURLDryRunUsesUploadIdentity 验证 URL 工作流无需调用方预填上传响应身份。
+func TestReviewRunURLDryRunUsesUploadIdentity(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
-	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"businessId":"biz-url","fileHash":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","config":{"selectedPosition":"xxx公司","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
+	payload := `{"source":{"type":"url","fileUrl":"https://files.example.com/contract.pdf","name":"合同.pdf"},"config":{"selectedPosition":"xxx公司","selectedAuditRole":"甲方","reviewStrength":1,"selectedCheckListIds":["2001001"],"matchContractTypeRulePackage":true}}`
 	if err := Execute(context.Background(), runtime, []string{"review", "run", "--data", payload, "--dry-run", "--output", "json"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"businessId": "biz-url"`) || !strings.Contains(stdout.String(), `"fileHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`) || !strings.Contains(stdout.String(), `"selectedAuditRole": "甲方"`) || !strings.Contains(stdout.String(), `"reviewStrength": 1`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
+	if strings.Contains(stdout.String(), `"businessId"`) || strings.Contains(stdout.String(), `"fileHash"`) || !strings.Contains(stdout.String(), `"selectedAuditRole": "甲方"`) || !strings.Contains(stdout.String(), `"reviewStrength": 1`) || !strings.Contains(stdout.String(), `"selectedCheckListIds"`) || !strings.Contains(stdout.String(), `"matchContractTypeRulePackage": true`) || strings.Contains(stdout.String(), `"appType"`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }

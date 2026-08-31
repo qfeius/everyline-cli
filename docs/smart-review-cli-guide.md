@@ -306,8 +306,8 @@ Agent 负责整理审查配置、先 dry-run，再调用 `review run` 完成上�
 | `source.path` | string | 条件 | `type=file` 时必填 |
 | `source.fileUrl` | string | 条件 | `type=url` 时必填，必须为 HTTP/HTTPS URL |
 | `source.name` | string | 是 | 文件名只支持 `.doc`、`.docx`、`.pdf` |
-| `businessId` | string | 条件 | URL 来源必填；文件来源优先使用上传响应 |
-| `fileHash` | string | 条件 | URL 来源必填，64 位 SHA-256 十六进制 |
+| `businessId` | string | 否 | 兼容字段；正常由 V3 上传响应提供 |
+| `fileHash` | string | 否 | 兼容字段；正常由 V3 上传响应提供，格式为 64 位 SHA-256 十六进制 |
 | `config.selectedPosition` | string | 是 | 审查立场，填写合同主体精确名称 |
 | `config.selectedAuditRole` | string | 是 | 审查角色，填写同一主体的角色，例如甲方或乙方 |
 | `config.reviewStrength` | string 或 integer | 是 | 推荐 `弱势`、`中立`、`强势`，兼容旧版 `0/1/2`；CLI 转换为后端 `0/1/2` |
@@ -320,7 +320,7 @@ Agent 负责整理审查配置、先 dry-run，再调用 `review run` 完成上�
 
 ### 场景 2：URL 合同一键审查
 
-URL 上传链路当前只保证返回 `fileId`，所以一键审查输入还要显式提供 `businessId` 和 `fileHash`。
+URL 上传链路会返回 `fileId/businessId/fileHash`，一键审查会直接使用这些字段继续发起任务。
 
 | 用户输入提示词 | Agent 会使用的命令 |
 |---|---|
@@ -334,8 +334,6 @@ URL 上传链路当前只保证返回 `fileId`，所以一键审查输入还要�
     "fileUrl": "https://<FILE_HOST>/contract.pdf",
     "name": "采购合同.pdf"
   },
-  "businessId": "<BUSINESS_ID>",
-  "fileHash": "<64_HEX_SHA256>",
   "config": {
     "selectedPosition": "xxx公司",
     "selectedAuditRole": "甲方",
@@ -397,14 +395,14 @@ everyline-cli review file upload-url \
 当前实际调用路径和请求：
 
 ```http
-POST /open-apis/contract-review/v1/file/contract/uploadByUrl
+POST /open-apis/contract-review/v3/file/contract/uploadByUrl
 Content-Type: application/json
 ```
 
 ```json
 {
   "fileUrl": "https://<FILE_HOST>/contract.pdf",
-  "fileName": "采购合同.pdf"
+  "name": "采购合同.pdf"
 }
 ```
 
@@ -736,7 +734,7 @@ everyline-cli review run \
 |---:|---|---|---|
 | 1 | `auth login --as app` | `tenantAccessTokenInternal` | `POST profile.token_url` |
 | 2 | `review file upload` | `uploadContractFileV3` | `POST /open-apis/contract-review/v3/file/contract/upload` |
-| 3 | `review file upload-url` | `uploadContractFileByURLV3` | `POST /open-apis/contract-review/v1/file/contract/uploadByUrl` |
+| 3 | `review file upload-url` | `uploadContractFileByURLV3` | `POST /open-apis/contract-review/v3/file/contract/uploadByUrl` |
 | 4 | `review subject extract` | `smartAuditContractSubjects` | `POST /open-apis/contract-review/v3/smartAudit/contract/subjects` |
 | 5 | `review task start` | `smartAuditTaskStartReview` | `POST /open-apis/contract-review/v3/smartAudit/task/startReview` |
 | 6 | `review task status` | `smartAuditTaskStatus` | `GET /open-apis/contract-review/v3/smartAudit/task/status` |
@@ -997,9 +995,9 @@ dry-run 不访问 Profile、token 和后端，只代表 CLI 本地契约通过�
 
 本地上传、URL 上传和 startReview 都不注入 `channelType`。startReview 会在 HTTP 边界固定注入 `usageReportContext.reportBusinessCode=everyLine_100_openApi_cli`，调用方无需提供且不能覆盖。
 
-### 为什么 URL 上传的 Operation 名称是 V3，路径却是 V1？
+### URL 上传会返回哪些后续审查字段？
 
-当前 Operation ID 为 `uploadContractFileByURLV3`，实际路径仍是 `/open-apis/contract-review/v1/file/contract/uploadByUrl`。测试、文档和排查日志都应按实际路径判断。
+`uploadContractFileByURLV3` 实际调用 `/open-apis/contract-review/v3/file/contract/uploadByUrl`，响应包含 `fileId/businessId/fileHash`。`review run` 会直接复用这些字段，无需调用方手工拼接。
 
 ### 批量创建和批量更新支持真实调用吗？
 
