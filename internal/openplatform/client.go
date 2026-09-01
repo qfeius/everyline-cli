@@ -22,6 +22,8 @@ import (
 
 const maxResponseBytes = 32 << 20
 
+const invalidUserSessionCode = "110004"
+
 // Request 描述 HTTP Adapter 内部的一个远端操作。
 type Request struct {
 	OperationID string
@@ -125,6 +127,9 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		response, retry, err := client.doOnce(operationContext, operation, token.AccessToken)
+		if sessionError := client.invalidateExpiredUserSession(identity, token.AccessToken, err); sessionError != nil {
+			return Response{}, sessionError
+		}
 		if err == nil || !retry || attempt == maxAttempts {
 			return response, err
 		}
@@ -134,6 +139,29 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 		}
 	}
 	return Response{}, fmt.Errorf("请求未执行")
+}
+
+// invalidateExpiredUserSession 在服务端返回 110004 时安全删除本次请求使用的 user token，并生成明确的重新授权错误。
+// 入参：identity config.IdentityKind 为本次请求身份；rejectedAccessToken string 为本次请求实际使用的 access token；requestErr error 为远端请求结果。
+// 返回值：error，非 user 会话失效时为 nil；命中时包含重新授权提示及原始 API 定位信息。
+func (client *Client) invalidateExpiredUserSession(identity config.IdentityKind, rejectedAccessToken string, requestErr error) error {
+	if identity != config.IdentityUser || requestErr == nil {
+		return nil
+	}
+	var apiError *APIError
+	if !errors.As(requestErr, &apiError) || apiError.Code != invalidUserSessionCode {
+		return nil
+	}
+	invalidator, ok := client.tokens.(interface {
+		InvalidateForIdentity(string, config.IdentityKind, string) error
+	})
+	if !ok {
+		return fmt.Errorf("%w；清理本地 token 缓存失败: token provider 不支持身份失效；%v", auth.ErrUserSessionExpired, apiError)
+	}
+	if err := invalidator.InvalidateForIdentity(client.profile.Name, identity, rejectedAccessToken); err != nil {
+		return fmt.Errorf("%w；清理本地 token 缓存失败: %v；%v", auth.ErrUserSessionExpired, err, apiError)
+	}
+	return fmt.Errorf("%w；%v", auth.ErrUserSessionExpired, apiError)
 }
 
 // requestContractInput 对 JSON 操作解析最终 HTTP body，其他操作使用显式的 query/path/multipart 逻辑输入。

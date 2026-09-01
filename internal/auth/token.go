@@ -20,6 +20,7 @@ var (
 	ErrCredentialsMissing = errors.New("缺少应用密钥或有效 token")
 	ErrAuthentication     = errors.New("鉴权失败")
 	ErrUserAuthentication = errors.New("用户 OAuth 认证未完成，请执行 auth login --as user")
+	ErrUserSessionExpired = errors.New("登录已失效，请执行 auth login --as user 重新授权")
 )
 
 const OperationTenantAccessTokenInternal = "tenantAccessTokenInternal"
@@ -133,6 +134,25 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 		return Token{}, ErrCredentialsMissing
 	}
 	return provider.Login(ctx, profile, secret)
+}
+
+// InvalidateForIdentity 删除服务端已判定失效且仍与请求一致的本地凭证，并保持并发更新及同一 Profile 的另一身份不变。
+// 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为需要失效的业务身份；rejectedAccessToken string 为服务端拒绝的 access token。
+// 返回值：error，身份非法、token store 不支持身份隔离或删除失败时非 nil。
+func (provider *Provider) InvalidateForIdentity(profileName string, identity config.IdentityKind, rejectedAccessToken string) error {
+	parsedIdentity, err := config.ParseIdentityKind(string(identity))
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(rejectedAccessToken) == "" {
+		return fmt.Errorf("被拒绝的 access token 为空")
+	}
+	if identityStore, ok := provider.store.(interface {
+		DeleteForIdentityIfAccessTokenMatches(string, config.IdentityKind, string) error
+	}); ok {
+		return identityStore.DeleteForIdentityIfAccessTokenMatches(profileName, parsedIdentity, rejectedAccessToken)
+	}
+	return fmt.Errorf("token store 不支持按 access token 安全失效身份")
 }
 
 // Login 使用 appId/appSecret 获取 tenant token，并仅缓存 token 而不保存 app secret。

@@ -7,6 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -151,6 +155,101 @@ func TestClientAPIError(t *testing.T) {
 	}
 	if apiError.Code != "429001" || apiError.RequestID != "req-rate" || apiError.RetryAfter != 3*time.Second || !apiError.Retryable {
 		t.Fatalf("apiError=%#v", apiError)
+	}
+}
+
+// TestClientInvalidatesRevokedUserSession 验证 110004 会清理当前 Profile 的 user token，同时保留 app token。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失效范围、错误提示或 API 定位信息不正确时通过 t.Fatal 报告。
+func TestClientInvalidatesRevokedUserSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("X-Request-Id", "req-expired")
+		writer.WriteHeader(http.StatusBadRequest)
+		_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
+	}))
+	defer server.Close()
+
+	store := auth.NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
+	if err := store.SaveForIdentity("test-user", config.IdentityApp, auth.Token{AccessToken: "app-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveForIdentity("test-user", config.IdentityUser, auth.Token{AccessToken: "user-token"}); err != nil {
+		t.Fatal(err)
+	}
+	profile := config.Profile{Name: "test-user", BaseURL: server.URL, UserBaseURL: server.URL}
+	provider := auth.NewProvider(store, server.Client(), time.Now)
+	client := NewClientForIdentity(profile, provider, server.Client(), config.IdentityUser)
+	_, err := client.Do(context.Background(), Request{
+		OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{},
+	})
+	if !errors.Is(err, auth.ErrUserSessionExpired) || !strings.Contains(err.Error(), "req-expired") {
+		t.Fatalf("err=%v，期望重新授权提示和 request ID", err)
+	}
+	if _, loadErr := store.LoadForIdentity("test-user", config.IdentityUser); !errors.Is(loadErr, os.ErrNotExist) {
+		t.Fatalf("user token 未失效: %v", loadErr)
+	}
+	if appToken, loadErr := store.LoadForIdentity("test-user", config.IdentityApp); loadErr != nil || appToken.AccessToken != "app-token" {
+		t.Fatalf("app token 被误删: token=%#v err=%v", appToken, loadErr)
+	}
+}
+
+// TestClientPreservesReauthenticatedUserSession 验证旧请求返回 110004 时不会删除请求期间重新登录写入的新 user token。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；请求时序、错误类型或新 token 保留状态不符合预期时通过 t.Fatal 报告。
+func TestClientPreservesReauthenticatedUserSession(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() { close(releaseResponse) })
+	}
+	defer release()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		close(requestStarted)
+		<-releaseResponse
+		writer.Header().Set("X-Request-Id", "req-stale-session")
+		writer.WriteHeader(http.StatusBadRequest)
+		_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
+	}))
+	defer server.Close()
+
+	tokenPath := filepath.Join(t.TempDir(), "tokens.json")
+	requestStore := auth.NewFileTokenStore(tokenPath)
+	loginStore := auth.NewFileTokenStore(tokenPath)
+	if err := requestStore.SaveForIdentity("test-user", config.IdentityUser, auth.Token{AccessToken: "old-token"}); err != nil {
+		t.Fatal(err)
+	}
+	profile := config.Profile{Name: "test-user", BaseURL: server.URL, UserBaseURL: server.URL}
+	provider := auth.NewProvider(requestStore, server.Client(), time.Now)
+	client := NewClientForIdentity(profile, provider, server.Client(), config.IdentityUser)
+	requestResult := make(chan error, 1)
+	go func() {
+		_, err := client.Do(context.Background(), Request{
+			OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{},
+		})
+		requestResult <- err
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("旧 token 请求未按时发出")
+	}
+	// 模拟另一个 CLI 进程在旧请求返回前完成重新授权并写入新 token。
+	if err := loginStore.SaveForIdentity("test-user", config.IdentityUser, auth.Token{AccessToken: "new-token"}); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	select {
+	case err := <-requestResult:
+		if !errors.Is(err, auth.ErrUserSessionExpired) {
+			t.Fatalf("err=%v，期望旧请求报告登录失效", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("旧请求未按时返回")
+	}
+	if token, err := loginStore.LoadForIdentity("test-user", config.IdentityUser); err != nil || token.AccessToken != "new-token" {
+		t.Fatalf("新 user token 被旧请求误删: token=%#v err=%v", token, err)
 	}
 }
 

@@ -343,6 +343,53 @@ func TestAuthUserUseAndStatus(t *testing.T) {
 	}
 }
 
+// TestBusinessCallRevocationUpdatesAuthStatus 验证业务调用收到 110004 后，auth status 立即报告 user 未授权。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；退出码、提示或缓存状态不符合预期时通过 t.Fatal 报告。
+func TestBusinessCallRevocationUpdatesAuthStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("X-Request-Id", "req-revoked")
+		writer.WriteHeader(http.StatusBadRequest)
+		_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
+	}))
+	defer server.Close()
+
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{
+		Name: "test-user", BaseURL: server.URL, UserBaseURL: server.URL, AuthURL: "https://test-contract-agent.qtech.cn/login",
+		TokenURL: server.URL + "/token", DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	identityStore, ok := runtime.Tokens.(interface {
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	if !ok {
+		t.Fatal("token store 不支持 user 身份")
+	}
+	if err := identityStore.SaveForIdentity(profile.Name, config.IdentityUser, auth.Token{AccessToken: "revoked-token", ExpiresAt: time.Now().Add(10 * 24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute(context.Background(), runtime, []string{"checklist", "list", "--profile", profile.Name, "--as", "user", "--output", "json"})
+	if !errors.Is(err, auth.ErrUserSessionExpired) || ExitCode(err) != ExitAuth {
+		t.Fatalf("err=%v exit=%d，期望 user 鉴权失效", err, ExitCode(err))
+	}
+	if !strings.Contains(err.Error(), "登录已失效，请执行 auth login --as user 重新授权") || !strings.Contains(err.Error(), "req-revoked") {
+		t.Fatalf("错误缺少重新授权提示或 request ID: %v", err)
+	}
+
+	stdout.Reset()
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--profile", profile.Name, "--as", "user", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"authenticated": false`) || !strings.Contains(stdout.String(), `"source": "cache"`) {
+		t.Fatalf("status output=%s", stdout.String())
+	}
+}
+
 // TestAuthUserLoginIgnoresLegacyEnvironmentToken 验证 user 登录不再接受原始 token 环境变量。
 func TestAuthUserLoginIgnoresLegacyEnvironmentToken(t *testing.T) {
 	t.Setenv("EVERYLINE_USER_ACCESS_TOKEN", "legacy-user-token")
