@@ -123,6 +123,28 @@ func (store *FileTokenStore) DeleteForIdentity(profileName string, identity conf
 	})
 }
 
+// DeleteForIdentityIfAccessTokenMatches 仅在缓存仍是服务端拒绝的 token 时删除指定身份凭证，避免旧请求误删并发登录写入的新 token。
+// 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为业务身份；rejectedAccessToken string 为本次被服务端拒绝的 access token。
+// 返回值：error，读取或落盘失败时非 nil；缓存不存在或已被更新时保持幂等成功。
+func (store *FileTokenStore) DeleteForIdentityIfAccessTokenMatches(profileName string, identity config.IdentityKind, rejectedAccessToken string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return filelock.With(store.path+".lock", func() error {
+		tokens, err := store.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		key := tokenStorageKey(profileName, identity)
+		cached, exists := tokens[key]
+		// 关键约束：只删除本次请求实际使用的旧 token，保留期间重新授权写入的新 token。
+		if !exists || cached.AccessToken != rejectedAccessToken {
+			return nil
+		}
+		delete(tokens, key)
+		return store.saveUnlocked(tokens)
+	})
+}
+
 // tokenStorageKey 为 user 身份生成隔离 key；旧 app token 仍使用 profile 名称。
 // 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为业务身份。
 // 返回值：string，为 tokens.json 中的稳定 key。

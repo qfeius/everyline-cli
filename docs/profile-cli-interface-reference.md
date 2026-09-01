@@ -386,7 +386,7 @@ user OAuth 使用 Profile 中的动态端点，不计入固定的 25 个 operati
    }
    ```
 
-CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自动使用 `refresh_token`；业务请求收到服务端 `code=110004` 时会删除当前 Profile 的 user token，并提示重新登录。后续 `auth status` 返回 `authenticated=false`，不再继续采用缓存中的声明过期时间。
+CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自动使用 `refresh_token`；业务请求收到服务端 `code=110004` 时会删除当前 Profile 中被服务端拒绝的 user token，并提示重新登录。后续 `auth status` 返回 `authenticated=false`；如果缓存已由并发重新登录更新，CLI 会保留新 token。
 
 `auth status` 字段：
 
