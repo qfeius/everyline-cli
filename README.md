@@ -61,6 +61,8 @@ everyline-cli auth status \
   --output json
 ~~~
 
+`auth status` 默认读取本地缓存。任一业务请求收到服务端 `code=110004` 时，CLI 会立即删除当前 Profile 的 user token，并提示重新执行 `auth login --as user`；之后 `auth status` 将返回 `authenticated=false`，不会继续按 JWT 声明过期时间误报已授权。
+
 如果 prod 预设尚未包含正式的 OAuth metadata、client ID 和 loopback redirect，需要由平台提供确认后的配置，再通过 --oauth-* 参数补充。CLI 不猜测 OAuth 地址，也不把 AuthURL 直接当作 OAuth authorization endpoint。
 
 ## app 应用授权

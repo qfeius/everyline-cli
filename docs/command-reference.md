@@ -32,7 +32,7 @@ auth logout [--as app|user]
 
 `config use <name>` 会切换当前默认 Profile；`auth use [profile] --as app|user` 会修改指定 Profile 的默认身份。只对当前命令临时指定 Profile 或身份时，使用 `--profile` 或 `--as`。
 
-`auth status` 对服务端提供过期时间的 token 输出 `expiresAt` 和 `expiresInSeconds`；对 app 环境变量交接的未知过期 token 输出 `expiresKnown=false`，不输出虚假时间。当前服务端 OAuth token endpoint 只支持 `authorization_code`，缓存的 `refresh_token` 不会被 CLI 自动使用。
+`auth status` 对服务端提供过期时间的 token 输出 `expiresAt` 和 `expiresInSeconds`；对 app 环境变量交接的未知过期 token 输出 `expiresKnown=false`，不输出虚假时间。该命令默认读取本地缓存；业务请求收到服务端 `code=110004` 时，CLI 会删除当前 Profile 的 user token、返回鉴权退出码 3 并提示重新执行 `auth login --as user`，后续 status 将报告 `authenticated=false`。当前服务端 OAuth token endpoint 只支持 `authorization_code`，缓存的 `refresh_token` 不会被 CLI 自动使用。
 
 app 身份的 status 只输出 `appSecretConfigured` 布尔值，不输出 secret 内容；`auth logout` 只删除 token 缓存，不删除已显式保存的 app secret。
 

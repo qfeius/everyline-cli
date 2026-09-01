@@ -27,6 +27,9 @@ func ExitCode(err error) int {
 	if err == nil {
 		return ExitSuccess
 	}
+	if errors.Is(err, auth.ErrUserSessionExpired) {
+		return ExitAuth
+	}
 	var apiError *openplatform.APIError
 	if errors.As(err, &apiError) {
 		return ExitAPI

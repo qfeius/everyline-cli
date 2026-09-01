@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -151,6 +154,41 @@ func TestClientAPIError(t *testing.T) {
 	}
 	if apiError.Code != "429001" || apiError.RequestID != "req-rate" || apiError.RetryAfter != 3*time.Second || !apiError.Retryable {
 		t.Fatalf("apiError=%#v", apiError)
+	}
+}
+
+// TestClientInvalidatesRevokedUserSession 验证 110004 会清理当前 Profile 的 user token，同时保留 app token。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失效范围、错误提示或 API 定位信息不正确时通过 t.Fatal 报告。
+func TestClientInvalidatesRevokedUserSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("X-Request-Id", "req-expired")
+		writer.WriteHeader(http.StatusBadRequest)
+		_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
+	}))
+	defer server.Close()
+
+	store := auth.NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
+	if err := store.SaveForIdentity("test-user", config.IdentityApp, auth.Token{AccessToken: "app-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveForIdentity("test-user", config.IdentityUser, auth.Token{AccessToken: "user-token"}); err != nil {
+		t.Fatal(err)
+	}
+	profile := config.Profile{Name: "test-user", BaseURL: server.URL, UserBaseURL: server.URL}
+	provider := auth.NewProvider(store, server.Client(), time.Now)
+	client := NewClientForIdentity(profile, provider, server.Client(), config.IdentityUser)
+	_, err := client.Do(context.Background(), Request{
+		OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{},
+	})
+	if !errors.Is(err, auth.ErrUserSessionExpired) || !strings.Contains(err.Error(), "req-expired") {
+		t.Fatalf("err=%v，期望重新授权提示和 request ID", err)
+	}
+	if _, loadErr := store.LoadForIdentity("test-user", config.IdentityUser); !errors.Is(loadErr, os.ErrNotExist) {
+		t.Fatalf("user token 未失效: %v", loadErr)
+	}
+	if appToken, loadErr := store.LoadForIdentity("test-user", config.IdentityApp); loadErr != nil || appToken.AccessToken != "app-token" {
+		t.Fatalf("app token 被误删: token=%#v err=%v", appToken, loadErr)
 	}
 }
 
