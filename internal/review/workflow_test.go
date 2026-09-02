@@ -233,7 +233,7 @@ func TestWorkflowRunSkipsSubjectsWhenDisabled(t *testing.T) {
 // 该测试覆盖从 Run 中抽取的共享结果编排，属于行为回归验证，不单独计为 RED。
 func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
 	// signedPreviewURL 表示后端已签发的完整免登录链接，CLI 必须连同查询参数原样保留。
-	const signedPreviewURL = "https://review.example.com/intelligent-review?id=88&token=preview-token"
+	const signedPreviewURL = "https://test-everyline.qtech.cn/intelligent-review?id=998960487&version=v3&source=history&businessId=auto%3Athird_party%3A1167918398407966837%3Af4da8538d0d8455da14165491c311922&taskId=2092175373579059803&entry=taskHistory&appType=THIRD_PARTY&token=preview-token"
 	api := &fakeAPI{
 		statuses: []Document{{"status": "running"}, {"status": "success"}},
 		info: Document{

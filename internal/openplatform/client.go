@@ -125,8 +125,25 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 	if operation.Method == http.MethodGet {
 		maxAttempts = 3
 	}
+	userRefreshAttempted := false
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		response, retry, err := client.doOnce(operationContext, operation, token.AccessToken)
+		if client.isExpiredUserSession(identity, err) && !userRefreshAttempted {
+			userRefreshAttempted = true
+			refreshed, refreshErr := client.refreshUserSession(operationContext, identity, token.AccessToken)
+			if refreshErr == nil {
+				token = refreshed
+				// token 刷新重放不消耗 GET 网络故障重试次数，POST 也只额外重放这一次可信鉴权失败。
+				attempt--
+				continue
+			}
+			if errors.Is(refreshErr, auth.ErrUserTokenRefreshUnavailable) || errors.Is(refreshErr, auth.ErrUserTokenChanged) {
+				if sessionError := client.invalidateExpiredUserSession(identity, token.AccessToken, err); sessionError != nil {
+					return Response{}, sessionError
+				}
+			}
+			return Response{}, fmt.Errorf("刷新 user token 失败: %w；原请求: %v", refreshErr, err)
+		}
 		if sessionError := client.invalidateExpiredUserSession(identity, token.AccessToken, err); sessionError != nil {
 			return Response{}, sessionError
 		}
@@ -139,6 +156,37 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 		}
 	}
 	return Response{}, fmt.Errorf("请求未执行")
+}
+
+// isExpiredUserSession 判断业务错误是否是允许触发一次 token 刷新的可信 user 会话码。
+// 入参：identity config.IdentityKind 为本次身份；requestErr error 为远端错误。
+// 返回值：bool，仅 user 且 API code=110004 时为 true。
+func (client *Client) isExpiredUserSession(identity config.IdentityKind, requestErr error) bool {
+	if identity != config.IdentityUser || requestErr == nil {
+		return false
+	}
+	var apiError *APIError
+	return errors.As(requestErr, &apiError) && apiError.Code == invalidUserSessionCode
+}
+
+// refreshUserSession 调用支持强制刷新的 TokenProvider，并要求返回非空 access token。
+// 入参：ctx context.Context 控制刷新；identity config.IdentityKind 为 user；rejectedAccessToken string 为服务端拒绝的 token。
+// 返回值：auth.Token 为刷新或并发更新后的凭证；error 为 provider 不支持或刷新失败。
+func (client *Client) refreshUserSession(ctx context.Context, identity config.IdentityKind, rejectedAccessToken string) (auth.Token, error) {
+	refresher, ok := client.tokens.(interface {
+		RefreshForIdentity(context.Context, config.Profile, config.IdentityKind, string) (auth.Token, error)
+	})
+	if !ok {
+		return auth.Token{}, fmt.Errorf("token provider 不支持 user token 刷新")
+	}
+	token, err := refresher.RefreshForIdentity(ctx, client.profile, identity, rejectedAccessToken)
+	if err != nil {
+		return auth.Token{}, err
+	}
+	if strings.TrimSpace(token.AccessToken) == "" {
+		return auth.Token{}, fmt.Errorf("刷新响应缺少 access token")
+	}
+	return token, nil
 }
 
 // invalidateExpiredUserSession 在服务端返回 110004 时安全删除本次请求使用的 user token，并生成明确的重新授权错误。

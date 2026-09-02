@@ -27,6 +27,7 @@ everyline-cli version
 | 使用场景 | 推荐身份 | 授权方式 |
 |---|---|---|
 | Codex、人工用户、本地交互 | user | 浏览器 OAuth 授权 |
+| 豆包、WorkBuddy 远端沙箱 | user | `auth init` / `auth complete` Device Grant |
 | CI、定时任务、无浏览器 Agent | app | app-id + app secret |
 
 user 身份不需要 app-id；app 身份必须配置 app-id。建议为不同身份创建不同 Profile，并在每次调用时显式指定 --profile 和 --as。
@@ -52,6 +53,16 @@ everyline-cli auth login \
 
 CLI 会打开浏览器完成用户登录，通过本机 loopback 回调接收授权结果，并缓存 user token。auth login 不使用 --env；环境在 config add 时指定。
 
+豆包或 WorkBuddy 沙箱与宿主浏览器不共享 loopback 端口时，使用 Device Grant：
+
+~~~bash
+everyline-cli auth init --profile prod-user --as user --output json
+# 用户打开 verification_uri_complete 并完成授权后：
+everyline-cli auth complete --profile prod-user --as user --output json
+~~~
+
+`auth init` 不监听 `127.0.0.1`。认证服务需要在 metadata 中发布 `device_authorization_endpoint` 和 Device client；也可把平台确认的 endpoint/client ID 写入 Profile。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
+
 检查授权状态：
 
 ~~~bash
@@ -61,7 +72,7 @@ everyline-cli auth status \
   --output json
 ~~~
 
-`auth status` 默认读取本地缓存。任一业务请求收到服务端 `code=110004` 时，CLI 会删除当前 Profile 中被服务端拒绝的 user token，并提示重新执行 `auth login --as user`；之后 `auth status` 将返回 `authenticated=false`。如果请求期间已重新登录，CLI 会保留新 token，避免旧请求再次清空授权状态。
+`auth status` 默认读取当前身份对应的安全缓存。OAuth metadata 声明 refresh grant 时，CLI 会在过期前五分钟尝试刷新；业务请求收到可信 `code=110004` 时只刷新并重放一次。服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token；并发写入的新 token 会保留。
 
 如果 prod 预设尚未包含正式的 OAuth metadata、client ID 和 loopback redirect，需要由平台提供确认后的配置，再通过 --oauth-* 参数补充。CLI 不猜测 OAuth 地址，也不把 AuthURL 直接当作 OAuth authorization endpoint。
 
@@ -99,9 +110,9 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 ## Codex/Agent 最佳实践
 
-仓库和 npm 发布包都包含可独立分发的交互式 Skill：`skills/everyline-cli/`。它负责在对话中固定 Profile 和身份，接收单个合同附件、本地路径或 URL 形式的合同来源，收集审查立场方、审查清单和审查强度，再调用现有 CLI 完成授权、上传、主体提取、dry-run、任务发起和结果查询。全局安装 npm 包时，`postinstall` 会同步把包内 Skill 登记到 Codex 的用户级 Skill 目录；安装或导入 Skill 时仍会检查本机 CLI，缺失时使用用户指定的版本或本地 `.tgz` 安装。
+仓库和 npm 发布包包含三项职责分离的交互式 Skill：`everyline-shared` 负责首次配置、身份和授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单、规则和规则分组。三项 Skill 共用当前 CLI 的实时帮助和结构化输出约束；旧 `skills/everyline-cli/` 作为兼容内容继续随包发布。
 
-Skill 不会修改或替代 CLI 接口。项目局部安装和 `npx` 临时执行不会登记 Skill；WorkBuddy、豆包等其他宿主仍由各自的导入入口安装完整的 `skills/everyline-cli/` 目录。
+全局安装 npm 包时，`postinstall` 会把三项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills` 和 WorkBuddy 的 `$HOME/.workbuddy/skills`。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包通过 `make skill-assets` 生成的三个独立 ZIP 从界面导入。Skill 不修改或替代 CLI 接口。
 
 在 Codex、WorkBuddy 或豆包电脑版安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)；评审全部对话分支，请参阅 [EveryLine CLI Skill 全量交互场景](docs/everyline-cli-skill-interaction-scenarios.md)。
 
@@ -116,7 +127,7 @@ Agent 执行 CLI 时建议遵循固定流程：
 7. 已有 task-id 时使用 review task result，不要重复发起任务。
 8. 遇到超时不要盲目重试 review task start，优先查询已有任务状态。
 
-无浏览器 Agent 应使用 app 身份。user OAuth 需要用户在浏览器中完成首次授权，适合在 Codex 所在的交互式电脑上由用户完成一次授权后复用。
+长期无人值守任务仍使用 app 身份。人工参与的豆包/WorkBuddy 沙箱可通过 Device Grant 使用 user 身份；Codex 本地交互继续使用 `auth login`。
 
 Agent 调用示例：
 
@@ -207,6 +218,12 @@ everyline-cli review file upload \
   --output json > upload.json
 ~~~
 
+沙箱宿主只提供原始附件字节流时，可保持相同上传契约并改用 stdin：
+
+~~~bash
+everyline-cli review file upload --profile prod-user --as user --stdin --name 采购合同.pdf --output json < attachment.pdf
+~~~
+
 使用上传结果中的 businessId、fileId 和 fileHash 发起任务：
 
 ~~~bash
@@ -227,7 +244,7 @@ everyline-cli review task result \
   --output json > result.json
 ~~~
 
-review task result 会在 stderr 输出 running 等任务状态，并把最终审查结果输出到 stdout；后端提供顶层 `url` 时会规范化为 `reviewDetailUrl`。飞书用户 OAuth 响应缺少预览链接时仍返回完整成功详情。
+review task result 会在 stderr 输出 running 等任务状态，并把最终审查结果输出到 stdout；后端提供顶层 `url` 时会规范化为 `reviewDetailUrl`。JSON/raw 不对 URL 中的 `&` 做 HTML 转义，Skill 必须逐字展示包含完整 `token` query 的字段值。飞书用户 OAuth 响应缺少预览链接时仍返回完整成功详情。
 
 CLI 已移除 --app-type 参数；文件上传也不再接受 --business-id。发起审查输入只接受当前契约声明的字段，未知字段会被拒绝；`usageReportContext` 仅由 CLI 在 HTTP 边界固定生成。
 

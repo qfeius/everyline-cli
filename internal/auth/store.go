@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -143,6 +145,14 @@ func (store *FileTokenStore) DeleteForIdentityIfAccessTokenMatches(profileName s
 		delete(tokens, key)
 		return store.saveUnlocked(tokens)
 	})
+}
+
+// WithRefreshLock 使用 Profile 和身份隔离的跨进程锁串行化 OAuth token 刷新。
+// 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为 user/app；action func() error 为锁内刷新操作。
+// 返回值：error，为加锁或 action 失败。
+func (store *FileTokenStore) WithRefreshLock(profileName string, identity config.IdentityKind, action func() error) error {
+	digest := sha256.Sum256([]byte(tokenStorageKey(profileName, identity)))
+	return filelock.With(store.path+"."+hex.EncodeToString(digest[:])+".refresh.lock", action)
 }
 
 // tokenStorageKey 为 user 身份生成隔离 key；旧 app token 仍使用 profile 名称。

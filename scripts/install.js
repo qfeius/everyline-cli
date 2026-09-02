@@ -5,6 +5,9 @@ const { homedir } = require("node:os");
 const { dirname, join, resolve } = require("node:path");
 const { resolvePlatformTarget } = require("./platform");
 
+// skillNames 是同一份 npm 包向 Codex、WorkBuddy 和豆包发布的三项职责分离 Skill。
+const skillNames = ["everyline-shared", "everyline-review", "everyline-review-config"];
+
 /**
  * shouldInstallCodexSkill 判断本次 npm 生命周期是否应登记 Codex Skill。
  * 入参：environment（NodeJS.ProcessEnv），当前进程环境变量。
@@ -15,11 +18,20 @@ function shouldInstallCodexSkill(environment) {
 }
 
 /**
- * registerCodexSkill 将 npm 包内 Skill 以目录链接登记到 Codex 用户级目录。
- * 入参：source（string）为包内 Skill 绝对路径；target（string）为 Codex Skill 目标路径；platform（string）为 Node 平台名。
+ * shouldInstallWorkBuddySkills 判断本次 npm 生命周期是否应登记 WorkBuddy Skills。
+ * 入参：environment（NodeJS.ProcessEnv），当前进程环境变量。
+ * 返回值：boolean，仅全局安装且未显式跳过全部 Skill 或 WorkBuddy Skill 时为 true。
+ */
+function shouldInstallWorkBuddySkills(environment) {
+  return shouldInstallCodexSkill(environment) && environment.EVERYLINE_SKIP_WORKBUDDY_SKILL_INSTALL !== "1";
+}
+
+/**
+ * registerAgentSkill 将 npm 包内单项 Skill 以目录链接登记到指定 Agent 宿主目录。
+ * 入参：source（string）为包内 Skill 绝对路径；target（string）为宿主 Skill 目标路径；platform（string）为 Node 平台名；hostName（string）为错误提示中的宿主名。
  * 返回值："created" | "existing"，分别表示新建链接或已存在同源链接。
  */
-function registerCodexSkill(source, target, platform = process.platform) {
+function registerAgentSkill(source, target, platform = process.platform, hostName = "Agent") {
   const resolvedSource = resolve(source);
   if (!existsSync(join(resolvedSource, "SKILL.md"))) {
     throw new Error(`npm 包缺少 EveryLine Skill: ${resolvedSource}`);
@@ -42,7 +54,7 @@ function registerCodexSkill(source, target, platform = process.platform) {
         return "existing";
       }
     }
-    throw new Error(`Codex Skill 目标已存在，请先确认并移走原目录: ${target}`);
+    throw new Error(`${hostName} Skill 目标已存在，请先确认并移走原目录: ${target}`);
   }
 
   // 使用链接让 npm 原地升级后自动切换到同一包内的新 Skill，避免 CLI 与 Skill 版本漂移。
@@ -52,9 +64,34 @@ function registerCodexSkill(source, target, platform = process.platform) {
 }
 
 /**
- * installPackage 完成原生 CLI 校验，并在全局安装时同步登记 Codex Skill。
+ * registerCodexSkill 保留既有单项登记接口，兼容安装器调用方和发布测试。
+ * 入参：source（string）为包内 Skill 绝对路径；target（string）为 Codex Skill 目标路径；platform（string）为 Node 平台名。
+ * 返回值："created" | "existing"，含义与 registerAgentSkill 一致。
+ */
+function registerCodexSkill(source, target, platform = process.platform) {
+  return registerAgentSkill(source, target, platform, "Codex");
+}
+
+/**
+ * registerSkillSet 将职责分离的三项 EveryLine Skill 登记到一个宿主根目录。
+ * 入参：packageRoot（string）为 npm 包根目录；skillRoot（string）为宿主 Skill 根目录；platform（string）为 Node 平台名；hostName（string）为宿主名。
+ * 返回值：Array<object>，每项包含 name、target 和 created/existing 状态。
+ */
+function registerSkillSet(packageRoot, skillRoot, platform, hostName) {
+  return skillNames.map((name) => {
+    const target = join(skillRoot, name);
+    return {
+      name,
+      target,
+      status: registerAgentSkill(join(packageRoot, "skills", name), target, platform, hostName),
+    };
+  });
+}
+
+/**
+ * installPackage 完成原生 CLI 校验，并在全局安装时同步登记 Codex 与 WorkBuddy Skills。
  * 入参：options（object，可选），可注入 packageRoot、platform、architecture、environment 和 userHome 供安装与测试使用。
- * 返回值：object，包含 binary、skillTarget 和 skillStatus；未登记 Skill 时后两项为空。
+ * 返回值：object，包含 binary、兼容的首个 Codex skillTarget/skillStatus，以及按宿主分组的 skills。
  */
 function installPackage(options = {}) {
   const packageRoot = options.packageRoot || join(__dirname, "..");
@@ -74,20 +111,45 @@ function installPackage(options = {}) {
   }
 
   if (!shouldInstallCodexSkill(environment)) {
-    return { binary, skillTarget: "", skillStatus: "" };
+    return { binary, skillTarget: "", skillStatus: "", skills: { codex: [], workBuddy: [] } };
   }
 
-  const skillRoot = environment.EVERYLINE_CODEX_SKILLS_DIR || join(userHome, ".agents", "skills");
-  const skillTarget = join(skillRoot, "everyline-cli");
-  const skillStatus = registerCodexSkill(join(packageRoot, "skills", "everyline-cli"), skillTarget, platform);
-  return { binary, skillTarget, skillStatus };
+  const codexSkillRoot = environment.EVERYLINE_CODEX_SKILLS_DIR || join(userHome, ".agents", "skills");
+  const codexSkills = registerSkillSet(packageRoot, codexSkillRoot, platform, "Codex");
+  const workBuddySkills = shouldInstallWorkBuddySkills(environment)
+    ? registerSkillSet(
+      packageRoot,
+      environment.EVERYLINE_WORKBUDDY_SKILLS_DIR || join(userHome, ".workbuddy", "skills"),
+      platform,
+      "WorkBuddy",
+    )
+    : [];
+  return {
+    binary,
+    skillTarget: codexSkills[0].target,
+    skillStatus: codexSkills[0].status,
+    skills: { codex: codexSkills, workBuddy: workBuddySkills },
+  };
 }
 
 if (require.main === module) {
   const result = installPackage();
   if (result.skillTarget) {
-    process.stdout.write(`EveryLine CLI 与 Codex Skill 安装完成\nSkill: ${result.skillTarget} (${result.skillStatus})\n`);
+    process.stdout.write("EveryLine CLI 与 Agent Skills 安装完成\n");
+    for (const [hostName, skills] of Object.entries(result.skills)) {
+      for (const skill of skills) {
+        process.stdout.write(`${hostName}: ${skill.target} (${skill.status})\n`);
+      }
+    }
   }
 }
 
-module.exports = { installPackage, registerCodexSkill, shouldInstallCodexSkill };
+module.exports = {
+  installPackage,
+  registerAgentSkill,
+  registerCodexSkill,
+  registerSkillSet,
+  shouldInstallCodexSkill,
+  shouldInstallWorkBuddySkills,
+  skillNames,
+};

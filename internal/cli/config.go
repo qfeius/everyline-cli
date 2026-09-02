@@ -47,8 +47,12 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var oauthMetadataURL string
 	var oauthBusinessType string
 	var oauthClientID string
+	var oauthDeviceClientID string
 	var oauthRedirectURL string
 	var oauthScopes []string
+	var oauthDeviceAuthorizationURL string
+	var oauthRevocationURL string
+	var oauthResource string
 	var userBaseURL string
 	var defaultIdentity string
 	var defaultOutput string
@@ -92,19 +96,23 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				return fmt.Errorf("必须指定 --env，或同时指定 --base-url 和 --token-url")
 			}
 			profile := config.Profile{
-				Name:              args[0],
-				BaseURL:           baseURL,
-				UserBaseURL:       userBaseURL,
-				AuthURL:           authURL,
-				TokenURL:          tokenURL,
-				AppID:             appID,
-				OAuthMetadataURL:  oauthMetadataURL,
-				OAuthBusinessType: oauthBusinessType,
-				OAuthClientID:     oauthClientID,
-				OAuthRedirectURL:  oauthRedirectURL,
-				OAuthScopes:       oauthScopes,
-				DefaultIdentity:   config.IdentityApp,
-				DefaultOutput:     defaultOutput,
+				Name:                        args[0],
+				BaseURL:                     baseURL,
+				UserBaseURL:                 userBaseURL,
+				AuthURL:                     authURL,
+				TokenURL:                    tokenURL,
+				AppID:                       appID,
+				OAuthMetadataURL:            oauthMetadataURL,
+				OAuthBusinessType:           oauthBusinessType,
+				OAuthClientID:               oauthClientID,
+				OAuthDeviceClientID:         oauthDeviceClientID,
+				OAuthRedirectURL:            oauthRedirectURL,
+				OAuthScopes:                 oauthScopes,
+				OAuthDeviceAuthorizationURL: oauthDeviceAuthorizationURL,
+				OAuthRevocationURL:          oauthRevocationURL,
+				OAuthResource:               oauthResource,
+				DefaultIdentity:             config.IdentityApp,
+				DefaultOutput:               defaultOutput,
 			}
 			if existing, existingErr := runtime.Profiles.Get(profile.Name); existingErr == nil {
 				profile.DefaultIdentity = existing.DefaultIdentity
@@ -126,11 +134,23 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				if profile.OAuthClientID == "" {
 					profile.OAuthClientID = existing.OAuthClientID
 				}
+				if profile.OAuthDeviceClientID == "" {
+					profile.OAuthDeviceClientID = existing.OAuthDeviceClientID
+				}
 				if profile.OAuthRedirectURL == "" {
 					profile.OAuthRedirectURL = existing.OAuthRedirectURL
 				}
 				if len(profile.OAuthScopes) == 0 {
 					profile.OAuthScopes = slices.Clone(existing.OAuthScopes)
+				}
+				if profile.OAuthDeviceAuthorizationURL == "" {
+					profile.OAuthDeviceAuthorizationURL = existing.OAuthDeviceAuthorizationURL
+				}
+				if profile.OAuthRevocationURL == "" {
+					profile.OAuthRevocationURL = existing.OAuthRevocationURL
+				}
+				if profile.OAuthResource == "" {
+					profile.OAuthResource = existing.OAuthResource
 				}
 			} else if !errors.Is(existingErr, config.ErrProfileNotFound) {
 				return existingErr
@@ -173,8 +193,12 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().StringVar(&oauthMetadataURL, "oauth-metadata-url", "", "用户 OAuth authorization server metadata URL")
 	command.Flags().StringVar(&oauthBusinessType, "oauth-business-type", "", "用户 OAuth business type")
 	command.Flags().StringVar(&oauthClientID, "oauth-client-id", "", "用户 OAuth public client ID")
+	command.Flags().StringVar(&oauthDeviceClientID, "oauth-device-client-id", "", "用户 OAuth Device Grant client ID；为空时复用 oauth-client-id")
 	command.Flags().StringVar(&oauthRedirectURL, "oauth-redirect-url", "", "用户 OAuth loopback 回调 URL")
 	command.Flags().StringSliceVar(&oauthScopes, "oauth-scope", nil, "用户 OAuth scope，可重复传入")
+	command.Flags().StringVar(&oauthDeviceAuthorizationURL, "oauth-device-authorization-url", "", "可选 Device Authorization endpoint；默认从 metadata 发现")
+	command.Flags().StringVar(&oauthRevocationURL, "oauth-revocation-url", "", "可选 OAuth token revocation endpoint；默认从 metadata 发现")
+	command.Flags().StringVar(&oauthResource, "oauth-resource", "", "可选 OAuth resource；默认使用 user 业务基础 URL")
 	command.Flags().StringVar(&defaultIdentity, "default-identity", "", "默认业务身份：app|user")
 	command.Flags().StringVar(&defaultOutput, "default-output", "", "默认输出格式，省略时为 json")
 	return command
@@ -186,13 +210,19 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 func profileCredentialIdentityChanged(before config.Profile, after config.Profile) bool {
 	return before.BaseURL != after.BaseURL || before.UserBaseURL != after.UserBaseURL || before.TokenURL != after.TokenURL || before.AppID != after.AppID ||
 		before.OAuthMetadataURL != after.OAuthMetadataURL || before.OAuthBusinessType != after.OAuthBusinessType || before.OAuthClientID != after.OAuthClientID ||
-		before.OAuthRedirectURL != after.OAuthRedirectURL || !slices.Equal(before.OAuthScopes, after.OAuthScopes)
+		before.OAuthDeviceClientID != after.OAuthDeviceClientID || before.OAuthRedirectURL != after.OAuthRedirectURL || !slices.Equal(before.OAuthScopes, after.OAuthScopes) ||
+		before.OAuthDeviceAuthorizationURL != after.OAuthDeviceAuthorizationURL || before.OAuthRevocationURL != after.OAuthRevocationURL || before.OAuthResource != after.OAuthResource
 }
 
 // deleteProfileTokens 清理 Profile 下 app/user 两套 token，防止连接配置更新后残留旧身份凭证。
 // 入参：runtime *Runtime 为 token 存储依赖；profileName string 为 Profile 名称。
 // 返回值：error，任一身份清理失败时非 nil。
 func deleteProfileTokens(runtime *Runtime, profileName string) error {
+	if runtime.DeviceCredentials != nil {
+		if err := runtime.DeviceCredentials.Delete(profileName); err != nil {
+			return err
+		}
+	}
 	if identityStore, ok := runtime.Tokens.(interface {
 		DeleteForIdentity(string, config.IdentityKind) error
 	}); ok {

@@ -253,6 +253,70 @@ func TestClientPreservesReauthenticatedUserSession(t *testing.T) {
 	}
 }
 
+// TestClientRefreshesAndReplaysTrustedExpiredUserSession 验证 110004 只触发一次 refresh_token grant 并原样重放业务请求。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；刷新次数、Bearer 更新或缓存写入不正确时通过 t.Fatal 报告。
+func TestClientRefreshesAndReplaysTrustedExpiredUserSession(t *testing.T) {
+	var businessAttempts atomic.Int32
+	var refreshAttempts atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/metadata":
+			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token"}`))
+		case "/token":
+			refreshAttempts.Add(1)
+			if err := request.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if request.Form.Get("grant_type") != "refresh_token" || request.Form.Get("refresh_token") != "old-refresh" || request.Form.Get("client_id") != "oauth-client" {
+				t.Errorf("refresh form=%v", request.Form)
+			}
+			_, _ = writer.Write([]byte(`{"access_token":"new-user-token","token_type":"Bearer","refresh_token":"new-refresh","expires_in":3600}`))
+		case "/open-apis/review-rules/review-checklists":
+			businessAttempts.Add(1)
+			if request.Header.Get("Authorization") == "Bearer old-user-token" {
+				writer.WriteHeader(http.StatusBadRequest)
+				_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
+				return
+			}
+			if request.Header.Get("Authorization") != "Bearer new-user-token" {
+				t.Errorf("authorization=%q", request.Header.Get("Authorization"))
+			}
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	store := auth.NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
+	if err := store.SaveForIdentity("test-user", config.IdentityUser, auth.Token{
+		AccessToken: "old-user-token", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	profile := config.Profile{
+		Name: "test-user", BaseURL: server.URL, UserBaseURL: server.URL,
+		OAuthMetadataURL: server.URL + "/metadata", OAuthClientID: "oauth-client",
+	}
+	provider := auth.NewProvider(store, server.Client(), time.Now)
+	client := NewClientForIdentity(profile, provider, server.Client(), config.IdentityUser)
+	if _, err := client.Do(context.Background(), Request{
+		OperationID: "listReviewChecklists", Method: http.MethodGet,
+		Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if businessAttempts.Load() != 2 || refreshAttempts.Load() != 1 {
+		t.Fatalf("businessAttempts=%d refreshAttempts=%d", businessAttempts.Load(), refreshAttempts.Load())
+	}
+	stored, err := store.LoadForIdentity("test-user", config.IdentityUser)
+	if err != nil || stored.AccessToken != "new-user-token" || stored.RefreshToken != "new-refresh" {
+		t.Fatalf("stored=%#v err=%v", stored, err)
+	}
+}
+
 // TestClientRetriesNonJSONRateLimit 验证 GET 在网关返回非 JSON 429 时仍按安全重试策略继续执行。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

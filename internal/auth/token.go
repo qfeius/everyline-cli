@@ -17,13 +17,17 @@ import (
 )
 
 var (
-	ErrCredentialsMissing = errors.New("缺少应用密钥或有效 token")
-	ErrAuthentication     = errors.New("鉴权失败")
-	ErrUserAuthentication = errors.New("用户 OAuth 认证未完成，请执行 auth login --as user")
-	ErrUserSessionExpired = errors.New("登录已失效，请执行 auth login --as user 重新授权")
+	ErrCredentialsMissing          = errors.New("缺少应用密钥或有效 token")
+	ErrAuthentication              = errors.New("鉴权失败")
+	ErrUserAuthentication          = errors.New("用户 OAuth 认证未完成，请执行 auth login --as user")
+	ErrUserSessionExpired          = errors.New("登录已失效，请执行 auth login --as user 重新授权")
+	ErrUserTokenRefreshUnavailable = errors.New("user token 不支持刷新")
+	ErrUserTokenChanged            = errors.New("user token 已被并发更新")
 )
 
 const OperationTenantAccessTokenInternal = "tenantAccessTokenInternal"
+
+const userTokenRefreshWindow = 5 * time.Minute
 
 // Token 是缓存中的访问凭证及其可选生命周期信息。
 type Token struct {
@@ -69,6 +73,7 @@ type Provider struct {
 	secretStore AppSecretStore
 	httpClient  *http.Client
 	now         func() time.Time
+	deviceStore DeviceCredentialStore
 }
 
 // NewProvider 创建 token 提供器。
@@ -88,6 +93,14 @@ func NewProvider(store TokenStore, httpClient *http.Client, now func() time.Time
 	return &Provider{store: store, secretStore: secretStore, httpClient: httpClient, now: now}
 }
 
+// WithDeviceCredentials 为 Provider 接入豆包或 WorkBuddy 的安全 Device 凭证存储。
+// 入参：store DeviceCredentialStore 为按会话隔离的安全存储。
+// 返回值：*Provider 为同一实例，便于链式装配。
+func (provider *Provider) WithDeviceCredentials(store DeviceCredentialStore) *Provider {
+	provider.deviceStore = store
+	return provider
+}
+
 // Token 优先读取显式环境变量，其次读取有效缓存，最后用环境变量中的 app secret 重新获取 app token。
 // 入参：ctx context.Context 控制请求取消；profile config.Profile 指定凭证和 token 地址。
 // 返回值：Token 为可用凭证；error 在缺少凭证或远端失败时非 nil。
@@ -105,11 +118,49 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 	}
 	identity = parsedIdentity
 	if identity == config.IdentityUser {
+		if provider.deviceStore != nil {
+			credential, loadErr := provider.deviceStore.Load(profile.Name)
+			if loadErr == nil && credential.Token != nil && credential.Token.AccessToken != "" {
+				if credential.Token.ValidAt(provider.now(), userTokenRefreshWindow) {
+					return *credential.Token, nil
+				}
+				refreshed, refreshErr := provider.refreshDeviceUserToken(ctx, profile, credential.Token.AccessToken)
+				if refreshErr == nil {
+					return refreshed, nil
+				}
+				// 提前刷新失败时仍允许使用尚未真正过期的旧 token，避免临时网络波动强制登出。
+				if credential.Token.ValidAt(provider.now(), 0) {
+					return *credential.Token, nil
+				}
+				return Token{}, refreshErr
+			}
+			if loadErr == nil && credential.Pending != nil {
+				return Token{}, fmt.Errorf("%w；Device 授权尚未完成，请执行 auth complete --profile %s --as user", ErrUserAuthentication, profile.Name)
+			}
+			if loadErr != nil && !errors.Is(loadErr, ErrDeviceCredentialNotFound) {
+				return Token{}, loadErr
+			}
+		}
 		if identityStore, ok := provider.store.(interface {
 			LoadForIdentity(string, config.IdentityKind) (Token, error)
 		}); ok {
-			if cached, err := identityStore.LoadForIdentity(profile.Name, identity); err == nil && cached.ValidAt(provider.now(), time.Minute) {
-				return cached, nil
+			if cached, loadErr := identityStore.LoadForIdentity(profile.Name, identity); loadErr == nil {
+				if cached.ValidAt(provider.now(), userTokenRefreshWindow) {
+					return cached, nil
+				}
+				if cached.RefreshToken != "" {
+					refreshed, refreshErr := provider.refreshFileUserToken(ctx, profile, cached.AccessToken)
+					if refreshErr == nil {
+						return refreshed, nil
+					}
+					if cached.ValidAt(provider.now(), 0) {
+						return cached, nil
+					}
+					return Token{}, refreshErr
+				}
+				if cached.ValidAt(provider.now(), 0) {
+					return cached, nil
+				}
 			}
 		}
 		return Token{}, ErrUserAuthentication
@@ -136,6 +187,126 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 	return provider.Login(ctx, profile, secret)
 }
 
+// RefreshForIdentity 在服务端可信地拒绝当前 user access token 后强制刷新一次。
+// 入参：ctx context.Context 控制刷新；profile config.Profile 为 OAuth 配置；identity config.IdentityKind 为身份；rejectedAccessToken string 为刚被拒绝的 token。
+// 返回值：Token 为刷新或并发更新后的凭证；error 为不支持、失效或刷新失败。
+func (provider *Provider) RefreshForIdentity(ctx context.Context, profile config.Profile, identity config.IdentityKind, rejectedAccessToken string) (Token, error) {
+	if identity != config.IdentityUser || strings.TrimSpace(rejectedAccessToken) == "" {
+		return Token{}, fmt.Errorf("仅 user 身份支持 OAuth token 刷新")
+	}
+	if provider.deviceStore != nil {
+		credential, err := provider.deviceStore.Load(profile.Name)
+		if err == nil && credential.Token != nil {
+			if credential.Token.AccessToken != rejectedAccessToken {
+				return *credential.Token, nil
+			}
+			return provider.refreshDeviceUserToken(ctx, profile, rejectedAccessToken)
+		}
+		if err != nil && !errors.Is(err, ErrDeviceCredentialNotFound) {
+			return Token{}, err
+		}
+	}
+	return provider.refreshFileUserToken(ctx, profile, rejectedAccessToken)
+}
+
+// refreshDeviceUserToken 在安全存储的跨进程锁内刷新 Device user token。
+// 入参：ctx context.Context 控制请求；profile config.Profile 为 OAuth 配置；expectedAccessToken string 为调用方看到的旧 token。
+// 返回值：Token 为刷新或并发更新后的凭证；error 为凭证缺失、invalid_grant 或网络失败。
+func (provider *Provider) refreshDeviceUserToken(ctx context.Context, profile config.Profile, expectedAccessToken string) (Token, error) {
+	var result Token
+	err := provider.deviceStore.WithRefreshLock(profile.Name, func() error {
+		credential, err := provider.deviceStore.Load(profile.Name)
+		if err != nil {
+			return err
+		}
+		if credential.Token == nil || credential.Token.AccessToken == "" {
+			return ErrUserAuthentication
+		}
+		if credential.Token.AccessToken != expectedAccessToken {
+			return ErrUserTokenChanged
+		}
+		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, *credential.Token, profile.EffectiveOAuthDeviceClientID())
+		if err != nil {
+			if IsDeviceGrantError(err, "invalid_grant") {
+				credential.Token = nil
+				if saveErr := provider.deviceStore.Save(profile.Name, credential); saveErr != nil {
+					return fmt.Errorf("清理已拒绝的 Device 凭证: %w", saveErr)
+				}
+				return fmt.Errorf("%w；请重新执行 auth init --profile %s --as user", ErrUserSessionExpired, profile.Name)
+			}
+			return err
+		}
+		credential.Token = &refreshed
+		if err := provider.deviceStore.Save(profile.Name, credential); err != nil {
+			return fmt.Errorf("保存刷新的 Device 凭证: %w", err)
+		}
+		result = refreshed
+		return nil
+	})
+	return result, err
+}
+
+// refreshFileUserToken 在兼容 token store 的跨进程锁内刷新 authorization-code user token。
+// 入参：ctx context.Context 控制请求；profile config.Profile 为 OAuth 配置；expectedAccessToken string 为调用方看到的旧 token。
+// 返回值：Token 为刷新或并发更新后的凭证；error 为 store 能力、invalid_grant 或网络失败。
+func (provider *Provider) refreshFileUserToken(ctx context.Context, profile config.Profile, expectedAccessToken string) (Token, error) {
+	identityStore, ok := provider.store.(interface {
+		LoadForIdentity(string, config.IdentityKind) (Token, error)
+		SaveForIdentity(string, config.IdentityKind, Token) error
+		DeleteForIdentityIfAccessTokenMatches(string, config.IdentityKind, string) error
+		WithRefreshLock(string, config.IdentityKind, func() error) error
+	})
+	if !ok {
+		return Token{}, fmt.Errorf("token store 不支持 user token 刷新")
+	}
+	var result Token
+	err := identityStore.WithRefreshLock(profile.Name, config.IdentityUser, func() error {
+		current, err := identityStore.LoadForIdentity(profile.Name, config.IdentityUser)
+		if err != nil {
+			return ErrUserAuthentication
+		}
+		if current.AccessToken != expectedAccessToken {
+			return ErrUserTokenChanged
+		}
+		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, current, profile.OAuthClientID)
+		if err != nil {
+			if IsDeviceGrantError(err, "invalid_grant") {
+				if deleteErr := identityStore.DeleteForIdentityIfAccessTokenMatches(profile.Name, config.IdentityUser, expectedAccessToken); deleteErr != nil {
+					return deleteErr
+				}
+				return fmt.Errorf("%w；请重新执行 auth login --profile %s --as user", ErrUserSessionExpired, profile.Name)
+			}
+			return err
+		}
+		if err := identityStore.SaveForIdentity(profile.Name, config.IdentityUser, refreshed); err != nil {
+			return err
+		}
+		result = refreshed
+		return nil
+	})
+	return result, err
+}
+
+// refreshOAuthUserToken 发现 token endpoint 并提交标准 refresh_token grant。
+// 入参：ctx context.Context 控制请求；profile config.Profile 为 metadata 配置；current Token 为当前凭证；clientID string 为签发当前 token 的 OAuth client。
+// 返回值：Token 为刷新结果；error 为配置、发现或 token endpoint 错误。
+func (provider *Provider) refreshOAuthUserToken(ctx context.Context, profile config.Profile, current Token, clientID string) (Token, error) {
+	if current.RefreshToken == "" {
+		return Token{}, fmt.Errorf("%w：缺少 refresh_token", ErrUserTokenRefreshUnavailable)
+	}
+	metadata, err := DiscoverOAuthMetadata(ctx, provider.httpClient, profile.OAuthMetadataURL)
+	if err != nil {
+		return Token{}, err
+	}
+	if strings.TrimSpace(metadata.TokenEndpoint) == "" {
+		return Token{}, fmt.Errorf("OAuth metadata 缺少 token_endpoint")
+	}
+	if len(metadata.GrantTypes) > 0 && !containsFold(metadata.GrantTypes, "refresh_token") {
+		return Token{}, fmt.Errorf("%w：OAuth metadata 未声明 refresh_token grant", ErrUserTokenRefreshUnavailable)
+	}
+	return RefreshOAuthToken(ctx, provider.httpClient, metadata.TokenEndpoint, clientID, current.RefreshToken, provider.now)
+}
+
 // InvalidateForIdentity 删除服务端已判定失效且仍与请求一致的本地凭证，并保持并发更新及同一 Profile 的另一身份不变。
 // 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为需要失效的业务身份；rejectedAccessToken string 为服务端拒绝的 access token。
 // 返回值：error，身份非法、token store 不支持身份隔离或删除失败时非 nil。
@@ -146,6 +317,16 @@ func (provider *Provider) InvalidateForIdentity(profileName string, identity con
 	}
 	if strings.TrimSpace(rejectedAccessToken) == "" {
 		return fmt.Errorf("被拒绝的 access token 为空")
+	}
+	if parsedIdentity == config.IdentityUser && provider.deviceStore != nil {
+		credential, loadErr := provider.deviceStore.Load(profileName)
+		if loadErr == nil && credential.Token != nil && credential.Token.AccessToken == rejectedAccessToken {
+			credential.Token = nil
+			return provider.deviceStore.Save(profileName, credential)
+		}
+		if loadErr != nil && !errors.Is(loadErr, ErrDeviceCredentialNotFound) {
+			return loadErr
+		}
 	}
 	if identityStore, ok := provider.store.(interface {
 		DeleteForIdentityIfAccessTokenMatches(string, config.IdentityKind, string) error

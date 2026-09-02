@@ -17,12 +17,14 @@
 ## Profile 与鉴权
 
 ```text
-config add <name> [--env dev|test|blue|prod] [--app-id ID] [--base-url URL --user-base-url URL --auth-url URL --token-url URL] [--oauth-metadata-url URL --oauth-business-type TYPE --oauth-client-id ID --oauth-redirect-url URL --oauth-scope SCOPE] [--default-identity app|user] [--default-output]
+config add <name> [--env dev|test|blue|prod] [--app-id ID] [--base-url URL --user-base-url URL --auth-url URL --token-url URL] [--oauth-metadata-url URL --oauth-business-type TYPE --oauth-client-id ID --oauth-device-client-id ID --oauth-redirect-url URL --oauth-scope SCOPE --oauth-device-authorization-url URL --oauth-revocation-url URL --oauth-resource URL] [--default-identity app|user] [--default-output]
 config list
 config use <name>
 config show [name]
 
 auth login [--as app|user] [--app-id ID] [--app-secret SECRET|--app-secret-stdin] [--save-app-secret] [--no-open-browser]
+auth init [--as user] [--restart]
+auth complete [--as user]
 auth status [--as app|user]
 auth use [profile] --as app|user
 auth logout [--as app|user]
@@ -32,7 +34,9 @@ auth logout [--as app|user]
 
 `config use <name>` 会切换当前默认 Profile；`auth use [profile] --as app|user` 会修改指定 Profile 的默认身份。只对当前命令临时指定 Profile 或身份时，使用 `--profile` 或 `--as`。
 
-`auth status` 对服务端提供过期时间的 token 输出 `expiresAt` 和 `expiresInSeconds`；对 app 环境变量交接的未知过期 token 输出 `expiresKnown=false`，不输出虚假时间。该命令默认读取本地缓存；业务请求收到服务端 `code=110004` 时，CLI 会删除当前 Profile 中被服务端拒绝的 user token、返回鉴权退出码 3 并提示重新执行 `auth login --as user`，后续 status 将报告 `authenticated=false`。如果缓存已由并发重新登录更新，CLI 会保留新 token。当前服务端 OAuth token endpoint 只支持 `authorization_code`，缓存的 `refresh_token` 不会被 CLI 自动使用。
+`auth init`/`auth complete` 为豆包与 WorkBuddy 沙箱提供不依赖 `127.0.0.1` callback 的 Device Grant。豆包 AgentKit 使用工作区加密文件并要求 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`（base64 编码 32 字节）；豆包工作任务按 `SESSION_ID` 派生会话隔离密钥；WorkBuddy 按 `CODEBUDDY_SESSION_ID` 使用系统 Credential Manager/Keychain/Secret Service。加密凭证中携带非敏感 Device Profile 快照，沙箱重建后可通过显式 `--profile` 恢复。OAuth metadata 尚未发布 `device_authorization_endpoint` 时，CLI 会明确报告服务端能力缺口；不会在远端沙箱自动回退到 loopback 登录。
+
+`auth status` 对服务端提供过期时间的 token 输出 `expiresAt` 和 `expiresInSeconds`；对 app 环境变量交接的未知过期 token 输出 `expiresKnown=false`，不输出虚假时间。OAuth metadata 声明 `refresh_token` grant 时，user token 进入五分钟刷新窗口会在跨进程锁内尝试 refresh；临时刷新失败会保留尚未真正过期的旧 token。业务请求收到可信 `code=110004` 时只强制刷新并原样重放一次；服务端未声明刷新能力时保持原有失效清理和重新登录提示，`invalid_grant` 也会清理失效凭证并要求重新授权。如果缓存已由并发重新登录更新，CLI 会保留新 token。
 
 app 身份的 status 只输出 `appSecretConfigured` 布尔值，不输出 secret 内容；`auth logout` 只删除 token 缓存，不删除已显式保存的 app secret。
 
@@ -48,7 +52,7 @@ app 身份的 status 只输出 `appSecretConfigured` 布尔值，不输出 secre
 - 使用 `rule` 管理规则分组和审查规则。
 
 ```text
-review file upload --file --name [--dry-run|--print-input]
+review file upload (--file PATH | --stdin) --name [--dry-run|--print-input]
 review file upload-url --file-url --name [--dry-run|--print-input]
 review subject extract --business-id --file-id [--file-hash] [--dry-run|--print-input]
 
@@ -85,7 +89,7 @@ version [--manifest-url HTTPS_URL]
 update [--manifest-url HTTPS_URL] [--dry-run]
 ```
 
-所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端；两者当前行为一致。`review task result` 是 CLI 本地编排，不对应新的远端接口；它会轮询任务状态，默认把每次 `status` 输出到 stderr，成功后自动获取最终详情；后端提供顶层 `url` 时补充规范化的 `reviewDetailUrl`。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。
+所有写操作的 `--dry-run` 和 `--print-input` 都只校验并输出规范化请求，不调用远端；两者当前行为一致。`review file upload --stdin` 从标准输入读取不超过 2 MiB 的原始 DOC/DOCX/PDF 字节，适合沙箱附件流；`--file` 保持原行为。`review task result` 是 CLI 本地编排，不对应新的远端接口；它会轮询任务状态，默认把每次 `status` 输出到 stderr，成功后自动获取最终详情；后端提供顶层 `url` 时补充规范化的 `reviewDetailUrl`。JSON/raw 输出关闭 HTML 转义，因此链接里的 `&` 和完整 `token` query 会逐字保留。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。
 
 `review run` 使用 URL 来源时，上传接口只返回 `fileId`；输入还需提供 `businessId` 和上传接口返回的 `fileHash`，工作流才会继续发起审查。需要完整闭环时在输入中显式设置 `"wait": true`；省略或设置为 `false` 时命令在发起任务后返回。
 

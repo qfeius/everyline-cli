@@ -1105,6 +1105,29 @@ func TestReviewFileUploadDryRunOmitsOptionalAppType(t *testing.T) {
 	}
 }
 
+// TestReviewFileUploadDryRunAcceptsStdinSource 验证沙箱可选择 stdin 且不再被 --file 必填规则阻断。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；参数互斥或规范化输出错误时通过 t.Fatal 报告。
+func TestReviewFileUploadDryRunAcceptsStdinSource(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	runtime.Input = strings.NewReader("sandbox document")
+	if err := Execute(context.Background(), runtime, []string{
+		"review", "file", "upload", "--stdin", "--name", "合同.docx", "--dry-run",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"file": "stdin"`) || !strings.Contains(stdout.String(), `"name": "合同.docx"`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+	stdout.Reset()
+	err := Execute(context.Background(), runtime, []string{
+		"review", "file", "upload", "--stdin", "--file", "contract.docx", "--name", "合同.docx", "--dry-run",
+	})
+	if err == nil || !strings.Contains(err.Error(), "只能选择一个") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 // TestReviewFileUploadRejectsRemovedAppTypeFlag 验证旧 app-type flag 在参数解析阶段即被拒绝。
 func TestReviewFileUploadRejectsRemovedAppTypeFlag(t *testing.T) {
 	runtime, _, _ := testRuntime(t)

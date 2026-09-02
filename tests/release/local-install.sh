@@ -30,29 +30,42 @@ npm install --silent --prefix "$temporary_dir/install" "$temporary_dir/$package_
 output=$("$temporary_dir/install/node_modules/.bin/everyline-cli" version --output json)
 package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$temporary_dir/install/node_modules/everyline-cli/package.json")
 
-# 外部消费者应能从 npm 包中取得完整 Skill，而无需 postinstall 写入用户目录。
+# 外部消费者应能从 npm 包中取得职责分离的三项 Skill，并保留旧版兼容 Skill。
 test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/SKILL.md"
+test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-shared/SKILL.md"
+test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review/SKILL.md"
+test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review/references/review-flow.md"
+test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review-config/SKILL.md"
+test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review-config/references/management.md"
 test -f "$temporary_dir/install/node_modules/everyline-cli/docs/everyline-cli-skill-guide.md"
 test -f "$temporary_dir/install/node_modules/everyline-cli/docs/everyline-cli-skill-interaction-scenarios.md"
 # 安装包必须保留主体展示项到后端 name/role 的映射，避免发布后回退为两个字段都填写公司名称。
 grep -F '用户回复完整展示项 `猎聘123（乙方）`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/references/review-flow.md" >/dev/null
 grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/references/review-flow.md" >/dev/null
 
-# 全局安装必须在同一次 npm 生命周期中登记 Codex Skill；测试目录显式隔离，避免写入执行者的真实用户目录。
+# 全局安装必须在同一次 npm 生命周期中登记 Codex 与 WorkBuddy Skills；两个宿主目录都显式隔离。
 global_prefix="$temporary_dir/global"
 codex_skills_dir="$temporary_dir/codex-skills"
-EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
+workbuddy_skills_dir="$temporary_dir/workbuddy-skills"
+EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
 global_package_root=$(npm root --global --prefix "$global_prefix")
-skill_target="$codex_skills_dir/everyline-cli"
-test -L "$skill_target"
-test -f "$skill_target/SKILL.md"
-node - "$skill_target" "$global_package_root/everyline-cli/skills/everyline-cli" <<'NODE'
+for skill_name in everyline-shared everyline-review everyline-review-config; do
+  codex_skill_target="$codex_skills_dir/$skill_name"
+  workbuddy_skill_target="$workbuddy_skills_dir/$skill_name"
+  test -L "$codex_skill_target"
+  test -f "$codex_skill_target/SKILL.md"
+  test -L "$workbuddy_skill_target"
+  test -f "$workbuddy_skill_target/SKILL.md"
+  node - "$codex_skill_target" "$workbuddy_skill_target" "$global_package_root/everyline-cli/skills/$skill_name" <<'NODE'
 const { realpathSync } = require("node:fs");
 
-if (realpathSync(process.argv[2]) !== realpathSync(process.argv[3])) {
-  throw new Error("Codex Skill 未指向当前安装包中的 Skill");
+for (const target of [process.argv[2], process.argv[3]]) {
+  if (realpathSync(target) !== realpathSync(process.argv[4])) {
+    throw new Error("Agent Skill 未指向当前安装包中的 Skill");
+  }
 }
 NODE
+done
 global_output=$("$global_prefix/bin/everyline-cli" version --output json)
 
 # 可选的期望版本同时约束 manifest 和 ldflags，防止两个发布版本源漂移。
