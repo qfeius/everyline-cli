@@ -202,6 +202,33 @@ func TestWorkflowRun(t *testing.T) {
 	}
 }
 
+// TestWorkflowRunSkipsSubjectsWhenDisabled 验证显式关闭主体提取时只执行上传和发起任务。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；调用序列包含 subjects 或缺少 start 时通过 t.Fatal 报告。
+func TestWorkflowRunSkipsSubjectsWhenDisabled(t *testing.T) {
+	api := &fakeAPI{}
+	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Deadline: time.Second})
+	_, err := workflow.Run(context.Background(), RunSpec{
+		Source:          RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
+		BusinessID:      "biz-1",
+		Config:          validReviewConfig(),
+		ExtractSubjects: false,
+		Wait:            false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{"upload", "start"}
+	if len(api.calls) != len(expected) {
+		t.Fatalf("calls=%#v，期望关闭主体提取后调用序列=%#v", api.calls, expected)
+	}
+	for index := range expected {
+		if api.calls[index] != expected[index] {
+			t.Fatalf("calls=%#v，期望关闭主体提取后调用序列=%#v", api.calls, expected)
+		}
+	}
+}
+
 // TestWorkflowWaitForResultPollsThenLoadsInfo 验证已有任务的结果流程只轮询状态，并在成功后加载一次详情。
 // 该测试覆盖从 Run 中抽取的共享结果编排，属于行为回归验证，不单独计为 RED。
 func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
