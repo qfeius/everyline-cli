@@ -1,6 +1,6 @@
 # EveryLine CLI 交互 Skill 安装与验证（Codex / WorkBuddy / 豆包）
 
-本文用于在一台全新设备上安装 `everyline-cli` 及配套交互 Skill，并验证合同审查的多轮对话流程。Skill 负责对话和流程编排，CLI 继续负责授权、文件上传、主体提取、清单查询、任务发起和结果查询；安装 Skill 不会改变 CLI 的命令、参数或 JSON 接口。
+本文用于在一台全新设备上安装 `everyline-cli` 及配套交互 Skill，并验证合同审查的多轮对话流程。Skill 负责对话和流程编排，CLI 继续负责授权、文件上传、主体提取、清单查询、任务发起和结果查询；安装 Skill 默认同时安装 CLI，但不会改变 CLI 的命令、参数或 JSON 接口。
 
 需要逐项评审或测试当前 Skill 的全部分支时，请结合 [EveryLine CLI Skill 全量交互场景](everyline-cli-skill-interaction-scenarios.md)。
 
@@ -21,14 +21,24 @@ OpenAI 官方文档将 Skill 定义为包含 `SKILL.md` 及可选 references、s
 - 已安装准备验证的 Agent 宿主：Codex、WorkBuddy，或带有“工作任务”和“技能·连接器·伙伴”的豆包电脑版。
 - Node.js 18 或更高版本。
 - `everyline-cli` 的 npm 版本号，或待验证的 `.tgz` 发布包。
-- 一个可访问智审开放平台的 user 或 app 身份。
+- 一个可访问 EveryLine 的 user 或 app 身份。
 - 一份用于验证的 DOC、DOCX 或 PDF 合同；建议使用测试文件。
 
 WorkBuddy 和豆包必须在安装 CLI 的同一台电脑、同一系统用户下执行本地任务。豆包选择“本地电脑”模式，并按客户端提示授予读取合同文件和执行本地命令所需的权限；云电脑不复用本机的 CLI、Profile 或授权缓存。
 
 CLI 和 Skill 应来自同一个发布版本，避免 Skill 使用了新流程而 CLI 仍是旧命令。
 
-## 2. 安装 CLI
+## 2. Skill 默认联动安装 CLI
+
+安装或导入 `everyline-cli` Skill 时，默认先执行 `command -v everyline-cli`：
+
+- 已安装时直接复用当前版本，不自动升级。
+- 未安装且安装请求提供了版本或本地 `.tgz` 时，安装指定来源。
+- 未指定来源时，执行 `npm install -g everyline-cli`。
+- Codex、WorkBuddy 或豆包只完成静态 Skill 导入时，在该 Skill 第一次本地运行时补做 CLI 安装。
+- 用户明确要求只导入 Skill 时跳过 CLI 安装。
+
+需要手工安装或锁定版本时使用以下命令。
 
 ### 从 npm 仓库安装
 
@@ -65,7 +75,7 @@ npm 包内的 Skill 位于：
 <npm-global-root>/everyline-cli/skills/everyline-cli/
 ```
 
-安装过程只向对应宿主登记 Skill，不执行远端业务请求。
+安装过程向对应宿主登记 Skill，并按上一节确保 CLI 可用；不会创建 Profile、发起授权或执行远端业务请求。
 
 以下命令默认使用 npm 的标准全局目录。CLI 若通过 `npm install -g --prefix "$HOME/.local"` 安装，先在当前终端设置：
 
@@ -342,30 +352,31 @@ $everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/采
 
 1. Skill 解析并固定 `prod-user` Profile 与 user 身份，检查 CLI 版本、`review task start/result` 帮助和授权状态。
 2. CLI 上传合同并返回内部文件身份。
-3. CLI 提取合同主体；Skill 展示真实主体名称，让用户选择审查立场方。
-4. Skill 查询真实自定义清单和内置规则包选项，让用户选择审查规则来源。
+3. Skill 查询并保存全部真实清单；每页展示 4 个真实清单，跨页累计选择，直到用户选择“完成选择”。
+4. 清单确定后，CLI 提取合同主体；Skill 在下一次独立交互中展示真实主体名称，让用户选择审查立场方。
 5. Skill 询问审查强度：弱势、中立或强势。
 6. 四项业务输入完整后，Skill 使用同一输入执行 dry-run；失败时不发送正式请求。
 7. dry-run 通过后，Skill 使用同一 Profile 和身份自动发起一次任务并记录 task ID。
-8. Skill 只查询该 task ID，等待终态后返回实际状态及 `reviewDetailUrl`（服务端提供时）。
+8. Skill 只查询该 task ID，等待终态后完整原样返回 `reviewDetailUrl`（服务端提供时），并提示免登录链接默认两小时有效。
 
 示例对话：
 
 ```text
 用户：$everyline-cli 使用 prod-user Profile 和 user 身份审查 /Users/me/Documents/采购合同.pdf
 
+Agent：请选择审查规则来源。第 1/1 页，已选择 0 项：
+0. 按合同类型自动匹配内置规则包
+1. 实际查询到的自定义清单 A
+2. 实际查询到的自定义清单 B
+操作：完成选择 / 按名称搜索
+
+用户：选择 0 和 1，完成选择
+
 Agent：检测到以下合同主体，请选择审查立场方：
 1. 示例采购有限公司（甲方）
 2. 示例供应有限公司（乙方）
 
 用户：选择 1
-
-Agent：请选择审查规则来源：
-0. 按合同类型自动匹配内置规则包
-1. 实际查询到的自定义清单 A
-2. 实际查询到的自定义清单 B
-
-用户：选择 0 和 1
 
 Agent：请选择审查强度：弱势、中立、强势。
 
@@ -395,11 +406,13 @@ $everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/采
 | 输入交互 | 用户只需提供合同附件、路径或 URL 形式的合同来源，以及立场方、清单和强度；单附件不再追问路径 |
 | 内部参数 | Skill 不向用户索要 `businessId/fileId/fileHash/selectedAuditRole/wait` |
 | 候选数据 | 主体、清单、规则均来自实时 CLI 查询 |
+| 清单分页 | 先读取全部候选，每页展示 4 个真实清单；稳定全局编号、跨页累计、全局名称搜索均可用 |
+| 阶段隔离 | 先用独立交互完成清单选择，再用下一次独立交互选择立场方；同一选择卡片不混合两类问题 |
 | 主体映射 | 主体按 `name（role）` 展示；用户回复完整展示项或唯一名称时，所选候选的 `name` 写入 `selectedPosition`，同一候选的 `role` 写入 `selectedAuditRole` |
 | 规则编号 | `0` 固定表示内置规则包，自定义清单从 `1` 开始，展示与解析使用同一映射 |
 | 正式请求门 | 同一输入的 dry-run 成功后才发起真实任务 |
 | 任务幂等 | 取得 task ID 后只查询该任务，不重复创建 |
-| 最终结果 | 返回真实终态；服务端提供链接时返回 `reviewDetailUrl` |
+| 最终结果 | 返回真实终态；服务端提供链接时完整原样返回签名 `reviewDetailUrl`，不脱敏或重新拼接 |
 | CLI 兼容 | 原有命令、参数和 JSON 接口保持不变 |
 
 ## 9. 常见问题
@@ -453,6 +466,10 @@ $everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/采
 ### 成功状态没有预览链接
 
 记录任务成功及原始结果。Skill 不会自行拼接 `reviewDetailUrl`。
+
+### 预览链接包含 token 参数
+
+`reviewDetailUrl` 是后端签发的用户可访问免登录链接。Skill 完整原样展示该链接，不解析、脱敏、改写或单独输出其中的 token，并提示链接默认两小时有效。
 
 ## 10. 更新与卸载
 

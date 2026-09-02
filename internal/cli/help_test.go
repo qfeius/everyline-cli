@@ -502,6 +502,14 @@ func TestHelpGroupsTopLevelCommands(t *testing.T) {
 	}
 
 	help := stdout.String()
+	if !strings.Contains(help, "EveryLine 命令行工具") {
+		t.Fatalf("根帮助缺少 EveryLine 产品名称: %s", help)
+	}
+	for _, legacyDescription := range []string{"智审开放平台", "开放平台 V3"} {
+		if strings.Contains(help, legacyDescription) {
+			t.Fatalf("根帮助仍包含旧产品描述 %q: %s", legacyDescription, help)
+		}
+	}
 	for _, title := range []string{"Review", "CLI Management"} {
 		if !strings.Contains(help, title) {
 			t.Fatalf("根帮助缺少分组 %q: %s", title, help)

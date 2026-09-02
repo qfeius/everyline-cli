@@ -251,8 +251,8 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var printInput bool
 	command := &cobra.Command{
 		Use:   "start",
-		Short: "发起智审任务",
-		Long: `使用 JSON 请求发起智审任务；本命令不会上传文件。
+		Short: "发起 EveryLine 审查任务",
+		Long: `使用 JSON 请求发起 EveryLine 审查任务；本命令不会上传文件。
 
 请求字段（仅支持以下字段）：
 - businessId string（必填）：上传接口返回的业务对象 ID。

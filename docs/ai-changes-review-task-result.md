@@ -32,3 +32,22 @@
 - `make build`：通过
 - 实际检查 `review task -h`：显示 `result`，不显示 `wait`
 - 实际检查 `review task result -h`：显示“等待审查完成并获取最终结果”及自动获取详情说明
+
+## 签名预览链接透传补充
+
+### 需求目标
+
+- 后端 `task/info` 已返回携带预览 token 的免登录 `url`，CLI 必须完整保留原字段并将同一地址规范化为 `reviewDetailUrl`。
+- Codex、WorkBuddy 和豆包使用 EveryLine Skill 时直接展示 CLI 返回的签名链接，不自行拼接、脱敏或改写。
+- access token、app secret 等授权凭证仍不得输出；签名 `reviewDetailUrl` 只作为完整用户链接展示，不单独提取其中的 token。
+
+### 实现内容
+
+- 修订 Skill 与交互流程，明确签名预览链接是 token 保密规则的受控例外，并提示默认两小时有效。
+- 补充工作流回归断言，验证后端 `url` 及 CLI `reviewDetailUrl` 与原始签名链接完全一致。
+
+### 验证
+
+- `go test ./...`：通过。
+- Skill `quick_validate.py`：通过。
+- `git diff --check`：通过。

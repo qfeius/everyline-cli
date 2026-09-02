@@ -205,7 +205,16 @@ func TestWorkflowRun(t *testing.T) {
 // TestWorkflowWaitForResultPollsThenLoadsInfo 验证已有任务的结果流程只轮询状态，并在成功后加载一次详情。
 // 该测试覆盖从 Run 中抽取的共享结果编排，属于行为回归验证，不单独计为 RED。
 func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
-	api := &fakeAPI{statuses: []Document{{"status": "running"}, {"status": "success"}}}
+	// signedPreviewURL 表示后端已签发的完整免登录链接，CLI 必须连同查询参数原样保留。
+	const signedPreviewURL = "https://review.example.com/intelligent-review?id=88&token=preview-token"
+	api := &fakeAPI{
+		statuses: []Document{{"status": "running"}, {"status": "success"}},
+		info: Document{
+			"taskId": int64(88),
+			"status": "success",
+			"url":    signedPreviewURL,
+		},
+	}
 	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
 	result, err := workflow.WaitForResult(context.Background(), TaskQuery{
 		TaskID:          88,
@@ -218,6 +227,12 @@ func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
 	}
 	if status, _ := StringValue(result, "status"); status != "success" {
 		t.Fatalf("result=%#v，期望返回最终详情", result)
+	}
+	if originalURL, _ := StringValue(result, "url"); originalURL != signedPreviewURL {
+		t.Fatalf("result=%#v，后端原始签名链接必须完整保留", result)
+	}
+	if detailURL, _ := StringValue(result, "reviewDetailUrl"); detailURL != signedPreviewURL {
+		t.Fatalf("result=%#v，reviewDetailUrl 必须与后端 url 完全一致", result)
 	}
 	expected := []string{"status", "status", "info"}
 	if len(api.calls) != len(expected) {

@@ -14,7 +14,7 @@ var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 type IdentityKind string
 
 const (
-	// IdentityApp 使用 tenant_access_token 访问开放平台。
+	// IdentityApp 使用 tenant_access_token 访问 EveryLine。
 	IdentityApp IdentityKind = "app"
 	// IdentityUser 使用用户认证页面产生的用户访问 token。
 	IdentityUser IdentityKind = "user"
@@ -34,7 +34,7 @@ func ParseIdentityKind(value string) (IdentityKind, error) {
 	}
 }
 
-// Profile 保存一个智审开放平台环境的非敏感连接信息。
+// Profile 保存一个 EveryLine 环境的非敏感连接信息。
 type Profile struct {
 	Name              string       `json:"name" yaml:"name"`
 	BaseURL           string       `json:"base_url" yaml:"base_url"`

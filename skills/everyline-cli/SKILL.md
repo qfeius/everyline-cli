@@ -12,7 +12,7 @@ description: Use the installed EveryLine/智审 CLI as an interactive Agent work
 - Agent 负责识别意图、只追问缺失信息、展示真实候选项、维护本次对话状态，以及在危险写操作前取得确认。
 - CLI 负责授权、上传、主体提取、查询、字段校验、任务发起、结果轮询和资源写入。
 - 不修改、替换或模拟 CLI 现有接口；只调用实时帮助中存在的命令和参数。
-- 不把合同正文、token、app secret、授权码或回调参数输出到对话。
+- 不把合同正文、access token、app secret、授权码或回调参数输出到对话。CLI 返回的 `reviewDetailUrl` 是面向用户的签名预览链接，即使包含 `token` 查询参数也要完整原样展示；不得提取、单独输出或改写其中的 token。
 
 合同审查或授权任务必须读取 [references/review-flow.md](references/review-flow.md)。只有用户明确要求管理清单或规则时，才读取 [references/management.md](references/management.md)。
 
@@ -83,6 +83,7 @@ everyline-cli review task result --help
 - 用户输入能唯一匹配候选项时直接采用；无匹配或匹配不唯一时，展示可区分候选项并继续询问。
 - 主体候选按 `name（role）` 展示；用户回复完整展示项或唯一主体名称时，必须选中本次查询中的同一个结构化候选，并分别使用其 `name` 和 `role`，不得把主体名称写入角色字段。
 - Agent 可以使用编号帮助用户选择，但传给 CLI 的 ID 必须来自本次查询，不能让用户手工输入内部 ID。
+- 合同审查必须先用独立交互完成审查清单选择，再用下一次独立交互完成立场方选择；不得把清单和立场方合并到同一个宿主选择卡片。清单候选超过 4 个时按审查流程进行对话级分页。
 - 审查输入完整后按审查流程自动发起，不额外询问是否开始或是否消耗点数。
 - 创建、更新、删除等管理写操作必须遵循管理参考中的确认规则；一次审查中的清单选择不授权修改清单。
 

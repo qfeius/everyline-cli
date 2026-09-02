@@ -173,7 +173,7 @@ func (service *Service) ExtractSubjects(ctx context.Context, request StartReques
 	return service.doJSON(ctx, OperationExtractSubjects, http.MethodPost, pathExtractSubjects, nil, body, input)
 }
 
-// Start 发起普通 V3 智审任务，完整透传冻结的 typed request。
+// Start 发起普通 V3 EveryLine 审查任务，完整透传冻结的 typed request。
 // 入参：ctx context.Context；request StartRequest 为已定义字段的发起请求。
 // 返回值：Document 为任务快照；error 为校验或 API 失败。
 func (service *Service) Start(ctx context.Context, request StartRequest) (Document, error) {

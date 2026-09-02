@@ -31,8 +31,8 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	options := &rootOptions{}
 	command := &cobra.Command{
 		Use:   "everyline-cli",
-		Short: "智审开放平台命令行客户端",
-		Long: `智审开放平台命令行客户端。
+		Short: "EveryLine 命令行工具",
+		Long: `EveryLine 命令行工具。
 
 用于合同文件准备、智能审查任务执行、审查清单管理和审查规则管理。
 
