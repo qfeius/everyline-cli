@@ -1,4 +1,5 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf '0.0.0-development')
+# package.json 是当前正式版本的唯一来源；CI 仍可通过 VERSION 注入 tag 或提交构建版本。
+VERSION ?= $(shell node -p 'require("./package.json").version')
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf 'uncommitted')
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 UPDATE_MANIFEST_URL ?=

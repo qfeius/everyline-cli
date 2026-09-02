@@ -1,6 +1,6 @@
 {
   "name": "everyline-cli",
-  "version": "0.0.0-development",
+  "version": "0.0.1",
   "description": "EveryLine CLI 工具的 npm/npx 薄包装",
   "license": "UNLICENSED",
   "bin": {
@@ -26,7 +26,7 @@
   "scripts": {
     "postinstall": "node scripts/install.js",
     "prepack": "node scripts/verify-package-version.js",
-    "test": "node --test tests/release/platform.test.js"
+    "test": "node --test tests/release/*.test.js"
   },
   "engines": {
     "node": ">=18"

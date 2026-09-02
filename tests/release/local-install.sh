@@ -38,9 +38,27 @@ test -f "$temporary_dir/install/node_modules/everyline-cli/docs/everyline-cli-sk
 grep -F '用户回复完整展示项 `猎聘123（乙方）`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/references/review-flow.md" >/dev/null
 grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/references/review-flow.md" >/dev/null
 
+# 全局安装必须在同一次 npm 生命周期中登记 Codex Skill；测试目录显式隔离，避免写入执行者的真实用户目录。
+global_prefix="$temporary_dir/global"
+codex_skills_dir="$temporary_dir/codex-skills"
+EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
+global_package_root=$(npm root --global --prefix "$global_prefix")
+skill_target="$codex_skills_dir/everyline-cli"
+test -L "$skill_target"
+test -f "$skill_target/SKILL.md"
+node - "$skill_target" "$global_package_root/everyline-cli/skills/everyline-cli" <<'NODE'
+const { realpathSync } = require("node:fs");
+
+if (realpathSync(process.argv[2]) !== realpathSync(process.argv[3])) {
+  throw new Error("Codex Skill 未指向当前安装包中的 Skill");
+}
+NODE
+global_output=$("$global_prefix/bin/everyline-cli" version --output json)
+
 # 可选的期望版本同时约束 manifest 和 ldflags，防止两个发布版本源漂移。
 if [ -n "${EXPECTED_VERSION:-}" ]; then
   test "$package_version" = "$EXPECTED_VERSION"
   printf '%s' "$output" | grep -F '"version": "'"$EXPECTED_VERSION"'"' >/dev/null
+  printf '%s' "$global_output" | grep -F '"version": "'"$EXPECTED_VERSION"'"' >/dev/null
 fi
 printf '%s\n' "$output"

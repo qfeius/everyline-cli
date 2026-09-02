@@ -1,6 +1,6 @@
 # EveryLine CLI 交互 Skill 安装与验证（Codex / WorkBuddy / 豆包）
 
-本文用于在一台全新设备上安装 `everyline-cli` 及配套交互 Skill，并验证合同审查的多轮对话流程。Skill 负责对话和流程编排，CLI 继续负责授权、文件上传、主体提取、清单查询、任务发起和结果查询；安装 Skill 默认同时安装 CLI，但不会改变 CLI 的命令、参数或 JSON 接口。
+本文用于在一台全新设备上安装 `everyline-cli` 及配套交互 Skill，并验证合同审查的多轮对话流程。Skill 负责对话和流程编排，CLI 继续负责授权、文件上传、主体提取、清单查询、任务发起和结果查询；全局安装 npm 包默认同时登记 Codex Skill，但不会改变 CLI 的命令、参数或 JSON 接口。
 
 需要逐项评审或测试当前 Skill 的全部分支时，请结合 [EveryLine CLI Skill 全量交互场景](everyline-cli-skill-interaction-scenarios.md)。
 
@@ -28,34 +28,34 @@ WorkBuddy 和豆包必须在安装 CLI 的同一台电脑、同一系统用户�
 
 CLI 和 Skill 应来自同一个发布版本，避免 Skill 使用了新流程而 CLI 仍是旧命令。
 
-## 2. Skill 默认联动安装 CLI
+## 2. 全局安装包默认同时安装 CLI 和 Codex Skill
 
-安装或导入 `everyline-cli` Skill 时，默认先执行 `command -v everyline-cli`：
+全局安装 `everyline-cli` npm 包时，`postinstall` 会校验原生 CLI，并将包内 Skill 链接到 `$HOME/.agents/skills/everyline-cli`：
 
-- 已安装时直接复用当前版本，不自动升级。
-- 未安装且安装请求提供了版本或本地 `.tgz` 时，安装指定来源。
-- 未指定来源时，执行 `npm install -g everyline-cli`。
-- Codex、WorkBuddy 或豆包只完成静态 Skill 导入时，在该 Skill 第一次本地运行时补做 CLI 安装。
-- 用户明确要求只导入 Skill 时跳过 CLI 安装。
+- 只有全局安装登记 Codex Skill；项目局部安装和 `npx` 临时执行不会写入用户 Skill 目录。
+- 已存在并指向同一 npm 包的 Skill 链接会直接复用，重复安装不会嵌套目录。
+- 已存在普通目录或指向其他来源的同名链接时停止安装，不覆盖用户文件。
+- 显式设置 `EVERYLINE_SKIP_SKILL_INSTALL=1` 时只安装 CLI。
+- 测试或自定义宿主可以通过 `EVERYLINE_CODEX_SKILLS_DIR` 改写 Skill 根目录。
 
-需要手工安装或锁定版本时使用以下命令。
+新版 npm 可能要求显式批准依赖包的安装脚本，因此推荐使用以下命令。该批准只针对 `everyline-cli`，用于执行包内的 CLI 校验和 Skill 登记。
 
 ### 从 npm 仓库安装
 
 ```bash
-npm install -g everyline-cli@RELEASE_VERSION
+npm install -g --allow-scripts=everyline-cli everyline-cli@RELEASE_VERSION
 ```
 
 ### 从待发布的 tgz 安装
 
 ```bash
-npm install -g /absolute/path/everyline-cli-RELEASE_VERSION.tgz
+npm install -g --allow-scripts=everyline-cli /absolute/path/everyline-cli-RELEASE_VERSION.tgz
 ```
 
 Windows PowerShell 同样可以使用：
 
 ```powershell
-npm install -g C:\absolute\path\everyline-cli-RELEASE_VERSION.tgz
+npm install -g --allow-scripts=everyline-cli C:\absolute\path\everyline-cli-RELEASE_VERSION.tgz
 ```
 
 检查安装结果：
@@ -67,6 +67,12 @@ everyline-cli --help
 
 预期结果：命令可以执行，版本与待验证版本一致，stdout 返回 JSON 版本信息。
 
+同时检查 Codex Skill：
+
+```bash
+test -f "$HOME/.agents/skills/everyline-cli/SKILL.md"
+```
+
 ## 3. 按宿主安装 Skill
 
 npm 包内的 Skill 位于：
@@ -75,7 +81,7 @@ npm 包内的 Skill 位于：
 <npm-global-root>/everyline-cli/skills/everyline-cli/
 ```
 
-安装过程向对应宿主登记 Skill，并按上一节确保 CLI 可用；不会创建 Profile、发起授权或执行远端业务请求。
+全局 npm 安装会自动登记 Codex Skill。WorkBuddy 和豆包仍需要按本节使用各自的目录或界面导入；安装过程不会创建 Profile、发起授权或执行远端业务请求。
 
 以下命令默认使用 npm 的标准全局目录。CLI 若通过 `npm install -g --prefix "$HOME/.local"` 安装，先在当前终端设置：
 
@@ -90,7 +96,7 @@ export EVERYLINE_NPM_ROOT="$(npm root -g --prefix "$EVERYLINE_NPM_PREFIX")"
 
 #### macOS 或 Linux
 
-使用符号链接可以让后续 npm 升级自动切换到包内的新 Skill：
+正常情况下上一节的全局安装已经创建符号链接。若使用旧版 npm、跳过了生命周期脚本或需要手工修复，可执行等价命令：
 
 ```bash
 npm_global_root="${EVERYLINE_NPM_ROOT:-$(npm root -g)}"
@@ -107,7 +113,7 @@ ln -s "$skill_source" "$skill_target"
 
 #### Windows PowerShell
 
-使用 npm 标准全局目录时直接读取：
+正常安装使用目录联接指向 npm 包内 Skill，后续原地升级会自动使用新内容。需要手工修复时执行：
 
 ```powershell
 $NpmRoot = (npm root -g).Trim()
@@ -123,7 +129,7 @@ if (Test-Path $SkillTarget) {
 }
 
 New-Item -ItemType Directory -Force -Path $SkillTargetRoot | Out-Null
-Copy-Item -Recurse -Path $SkillSource -Destination $SkillTarget
+New-Item -ItemType Junction -Path $SkillTarget -Target $SkillSource | Out-Null
 ```
 
 CLI 通过自定义 prefix 安装时，先把第一行替换为以下两行，并使用原安装位置：
@@ -133,7 +139,7 @@ $EverylineNpmPrefix = Join-Path $HOME ".local"
 $NpmRoot = (npm root -g --prefix $EverylineNpmPrefix).Trim()
 ```
 
-Windows 采用复制方式；升级 npm 包后，需要在确认旧目录内容后重新复制 Skill。
+Windows 目录联接与 macOS/Linux 符号链接一样，会持续指向 npm 包内的同一路径。
 
 #### 从源码目录验证
 
@@ -476,7 +482,7 @@ $everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/采
 使用 npm 标准全局目录时更新 CLI：
 
 ```bash
-npm install -g everyline-cli@NEW_RELEASE_VERSION
+npm install -g --allow-scripts=everyline-cli everyline-cli@NEW_RELEASE_VERSION
 ```
 
 使用自定义 prefix 时，必须复用安装时的原始 prefix：
@@ -484,17 +490,17 @@ npm install -g everyline-cli@NEW_RELEASE_VERSION
 ```bash
 export EVERYLINE_NPM_PREFIX="$HOME/.local"
 export EVERYLINE_NPM_ROOT="$(npm root -g --prefix "$EVERYLINE_NPM_PREFIX")"
-npm install -g --prefix "$EVERYLINE_NPM_PREFIX" everyline-cli@NEW_RELEASE_VERSION
+npm install -g --allow-scripts=everyline-cli --prefix "$EVERYLINE_NPM_PREFIX" everyline-cli@NEW_RELEASE_VERSION
 ```
 
 Windows PowerShell 使用自定义 prefix 时：
 
 ```powershell
 $EverylineNpmPrefix = Join-Path $HOME ".local"
-npm install -g --prefix $EverylineNpmPrefix everyline-cli@NEW_RELEASE_VERSION
+npm install -g --allow-scripts=everyline-cli --prefix $EverylineNpmPrefix everyline-cli@NEW_RELEASE_VERSION
 ```
 
-macOS/Linux 使用符号链接时，Skill 会指向新 npm 包中的同名目录。Windows 使用复制安装时，需要核对并替换 `$HOME/.agents/skills/everyline-cli` 中的旧副本。
+macOS/Linux 使用符号链接、Windows 使用目录联接时，Skill 都会指向新 npm 包中的同名目录。
 
 WorkBuddy 使用符号链接安装时，同样由 npm 包更新 Skill 内容；其目标路径是 `$HOME/.workbuddy/skills/everyline-cli`。豆包使用上传 ZIP 安装，更新 npm 包后需要重新生成 ZIP，并在豆包「我的技能」中更新或重新上传。
 
@@ -516,7 +522,7 @@ unlink "$HOME/.workbuddy/skills/everyline-cli"
 
 豆包在「我的技能」中移除 `everyline-cli`；不要手工删除豆包客户端的内部数据目录，也不要因此卸载其他宿主仍在使用的 CLI。
 
-Windows 复制安装可以在确认路径后删除 `$HOME\.agents\skills\everyline-cli`。WorkBuddy 通过界面安装时，也只在其「专家·技能·连接器」中移除对应技能。
+Windows 目录联接可以在确认路径后使用 `Remove-Item "$HOME\.agents\skills\everyline-cli"` 删除。WorkBuddy 通过界面安装时，也只在其「专家·技能·连接器」中移除对应技能。
 
 ### 全局卸载 CLI 和 npm 包
 

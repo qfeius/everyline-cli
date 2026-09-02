@@ -99,9 +99,9 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 ## Codex/Agent 最佳实践
 
-仓库和 npm 发布包都包含可独立分发的交互式 Skill：`skills/everyline-cli/`。它负责在对话中固定 Profile 和身份，接收单个合同附件、本地路径或 URL 形式的合同来源，收集审查立场方、审查清单和审查强度，再调用现有 CLI 完成授权、上传、主体提取、dry-run、任务发起和结果查询。安装或导入 Skill 时默认检查本机 CLI，缺失时同步执行 `npm install -g everyline-cli`；用户指定版本或本地 `.tgz` 时优先使用指定来源。
+仓库和 npm 发布包都包含可独立分发的交互式 Skill：`skills/everyline-cli/`。它负责在对话中固定 Profile 和身份，接收单个合同附件、本地路径或 URL 形式的合同来源，收集审查立场方、审查清单和审查强度，再调用现有 CLI 完成授权、上传、主体提取、dry-run、任务发起和结果查询。全局安装 npm 包时，`postinstall` 会同步把包内 Skill 登记到 Codex 的用户级 Skill 目录；安装或导入 Skill 时仍会检查本机 CLI，缺失时使用用户指定的版本或本地 `.tgz` 安装。
 
-Skill 不会修改或替代 CLI 接口，安装 npm 包时也不会自动写入用户的 Skill 目录。需要使用时，由 Agent 宿主或发布平台导入完整的 `skills/everyline-cli/` 目录；宿主界面只完成静态导入时，CLI 联动安装会在 Skill 第一次本地运行时补做。
+Skill 不会修改或替代 CLI 接口。项目局部安装和 `npx` 临时执行不会登记 Skill；WorkBuddy、豆包等其他宿主仍由各自的导入入口安装完整的 `skills/everyline-cli/` 目录。
 
 在 Codex、WorkBuddy 或豆包电脑版安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)；评审全部对话分支，请参阅 [EveryLine CLI Skill 全量交互场景](docs/everyline-cli-skill-interaction-scenarios.md)。
 
