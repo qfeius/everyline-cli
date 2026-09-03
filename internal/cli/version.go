@@ -18,12 +18,15 @@ const versionCheckTimeout = 2 * time.Second
 
 // versionOutput 在构建信息之外稳定返回最新版本判断和可执行更新命令。
 type versionOutput struct {
-	build.Info     `yaml:",inline"`
-	LatestVersion  string `json:"latestVersion" yaml:"latestVersion"`
-	IsLatest       *bool  `json:"isLatest" yaml:"isLatest"`
-	UpdateRequired bool   `json:"updateRequired" yaml:"updateRequired"`
-	UpdateCommand  string `json:"updateCommand" yaml:"updateCommand"`
-	CheckError     string `json:"checkError,omitempty" yaml:"checkError,omitempty"`
+	build.Info            `yaml:",inline"`
+	LatestVersion         string `json:"latestVersion" yaml:"latestVersion"`
+	IsLatest              *bool  `json:"isLatest" yaml:"isLatest"`
+	UpdateRequired        bool   `json:"updateRequired" yaml:"updateRequired"`
+	UpdateCommand         string `json:"updateCommand" yaml:"updateCommand"`
+	CheckError            string `json:"checkError,omitempty" yaml:"checkError,omitempty"`
+	FirstInstall          bool   `json:"firstInstall" yaml:"firstInstall"`
+	AuthorizationRequired bool   `json:"authorizationRequired" yaml:"authorizationRequired"`
+	NextAction            string `json:"nextAction,omitempty" yaml:"nextAction,omitempty"`
 }
 
 // deferredUpdateNotice 是写入 stderr 的机器可读延迟更新状态。
@@ -68,6 +71,13 @@ func newVersionCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 // 返回值：versionOutput，检查未知时 IsLatest 为 nil。
 func inspectVersion(ctx context.Context, runtime *Runtime, manifestURL string) versionOutput {
 	result := versionOutput{Info: build.Current()}
+	if state, required, err := pendingFirstInstallAuthorization(runtime); err == nil {
+		result.FirstInstall = state.FirstInstall
+		result.AuthorizationRequired = required
+		if required {
+			result.NextAction = "authorize"
+		}
+	}
 	if manifestURL == "" {
 		result.CheckError = "未配置更新 manifest URL"
 		return result

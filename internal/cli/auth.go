@@ -59,6 +59,10 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 		Long:  "初始化 OAuth Device Grant，返回宿主浏览器可直接打开的完整授权 URL；不监听 127.0.0.1 回调。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
+			_, firstInstallRequired, err := pendingFirstInstallAuthorization(runtime)
+			if err != nil {
+				return err
+			}
 			if root.Identity != "" {
 				identity, err := config.ParseIdentityKind(root.Identity)
 				if err != nil {
@@ -83,7 +87,8 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 			if loadErr != nil && !errors.Is(loadErr, auth.ErrDeviceCredentialNotFound) {
 				return loadErr
 			}
-			if !restart && loadErr == nil && existing.Pending != nil {
+			forceRestart := restart || firstInstallRequired
+			if !forceRestart && loadErr == nil && existing.Pending != nil {
 				status := string(existing.Pending.Status)
 				if status == "" {
 					status = string(auth.DevicePending)
@@ -95,7 +100,7 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 					Status: status, VerificationURIComplete: existing.Pending.VerificationURIComplete, ExpiresAt: formatOptionalTime(existing.Pending.ExpiresAt),
 				})
 			}
-			if !restart && loadErr == nil && existing.Token != nil && existing.Token.AccessToken != "" {
+			if !forceRestart && loadErr == nil && existing.Token != nil && existing.Token.AccessToken != "" {
 				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(existing.Token.ExpiresAt)})
 			}
 			authContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
@@ -134,7 +139,10 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 			// Device Profile 只用于 user 沙箱恢复，去除无关的 app 标识，避免跨身份带入配置。
 			profileSnapshot.AppID = ""
 			existing.Profile = &profileSnapshot
-			existing.Token = nil
+			// 首次安装强制新授权时保留旧 token 作为回滚材料，但业务门禁不会使用它；成功后由新 token 覆盖。
+			if !firstInstallRequired {
+				existing.Token = nil
+			}
 			existing.Pending = &auth.DevicePendingTransaction{
 				Status: auth.DevicePending, DeviceCode: response.DeviceCode,
 				VerificationURIComplete: response.VerificationURIComplete,
@@ -250,6 +258,9 @@ func completeDeviceAuthorization(ctx context.Context, runtime *Runtime, root *ro
 		if err := store.Save(profile.Name, credential); err != nil {
 			return fmt.Errorf("保存 Device 授权结果失败，状态可能不确定，请先修复安全存储再重新开始授权: %w", err)
 		}
+		if err := completeFirstInstallAuthorization(runtime); err != nil {
+			return err
+		}
 		return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(token.ExpiresAt)})
 	})
 }
@@ -358,7 +369,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 					appSecret = auth.SecretFromEnvironment(profile.Name)
 				}
 				if secretFromStdin {
-					appSecret, err = readSecret(runtime.Input)
+					appSecret, err = readSecret(runtime.Input, runtime.Error)
 					if err != nil {
 						return fmt.Errorf("%w: %v", auth.ErrCredentialsMissing, err)
 					}
@@ -428,6 +439,9 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 					}
 				}
 			}
+			if err := completeFirstInstallAuthorization(runtime); err != nil {
+				return err
+			}
 			result := map[string]any{
 				"profile":       profile.Name,
 				"identity":      identity,
@@ -439,7 +453,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
-	command.Flags().BoolVar(&secretFromStdin, "app-secret-stdin", false, "从 stdin 读取 app secret")
+	command.Flags().BoolVar(&secretFromStdin, "app-secret-stdin", false, "从 stdin 读取 app secret；交互终端隐藏输入并按回车结束")
 	command.Flags().BoolVar(&noOpenBrowser, "no-open-browser", false, "不自动打开浏览器，仅输出用户 OAuth 授权链接")
 	command.Flags().BoolVar(&saveAppSecret, "save-app-secret", false, "授权成功后将 app secret 保存到本地安全存储（macOS Keychain，其他系统 secrets.json）")
 	command.Flags().StringVar(&appIDFlag, "app-id", "", "app 登录使用的 app ID；优先于环境变量和 Profile")
@@ -467,6 +481,19 @@ func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			}
 			if err := validateDeviceCredentialRuntime(runtime, identity); err != nil {
 				return err
+			}
+			if installState, firstInstallRequired, err := pendingFirstInstallAuthorization(runtime); err != nil {
+				return err
+			} else if firstInstallRequired {
+				return render(runtime, root, profile.DefaultOutput, map[string]any{
+					"profile":               profile.Name,
+					"identity":              identity,
+					"authenticated":         false,
+					"source":                "first_install",
+					"firstInstall":          installState.FirstInstall,
+					"authorizationRequired": true,
+					"nextAction":            firstInstallAuthorizationCommand(runtime, profile, identity),
+				})
 			}
 			if identity == config.IdentityApp && strings.TrimSpace(os.Getenv("EVERYLINE_ACCESS_TOKEN")) != "" {
 				status := map[string]any{

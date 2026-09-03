@@ -38,6 +38,7 @@ CLI 和 Skill 应来自同一个发布版本。每次 Skill 发布（包括纯�
 - 显式设置 `EVERYLINE_SKIP_SKILL_INSTALL=1` 时只安装 CLI。
 - 只跳过 WorkBuddy 时设置 `EVERYLINE_SKIP_WORKBUDDY_SKILL_INSTALL=1`。
 - 测试或自定义宿主可分别通过 `EVERYLINE_CODEX_SKILLS_DIR`、`EVERYLINE_WORKBUDDY_SKILLS_DIR` 改写根目录。
+- 首次创建 Agent Skill 时，安装器会在 `$HOME/.everyline-cli/install-state.json` 写入不含凭证的授权门禁。旧 token 保留，但在完成一次新授权前不会被当作已登录，`review/checklist/rule` 也不会发起远端请求。
 
 新版 npm 可能要求显式批准依赖包的安装脚本，因此推荐使用以下命令。该批准只针对 `everyline-cli`，用于执行包内的 CLI 校验和 Skill 登记。
 
@@ -66,7 +67,7 @@ everyline-cli version --output json
 everyline-cli --help
 ```
 
-预期结果：命令可以执行，版本与待验证版本一致，stdout 返回 JSON 版本信息。
+预期结果：命令可以执行，版本与待验证版本一致，stdout 返回 JSON 版本信息。首次安装时还应包含 `firstInstall=true`、`authorizationRequired=true` 和 `nextAction=authorize`，随后必须通过 `everyline-shared` 完成一次新的 user 或 app 授权。
 
 同时检查 Codex 与 WorkBuddy Skills：
 
@@ -87,7 +88,7 @@ npm 包内的三项 Skill 位于：
 <npm-global-root>/everyline-cli/skills/everyline-review-config/
 ```
 
-全局 npm 安装会自动登记 Codex 和 WorkBuddy。豆包仍从界面导入独立 ZIP；安装过程不创建 Profile、不发起授权，也不执行远端业务请求。
+全局 npm 安装会自动登记 Codex 和 WorkBuddy。豆包仍从界面导入独立 ZIP；安装过程不创建 Profile、不直接发起远端授权或业务请求，而是建立首次安装门禁，等待 Agent 确定 Profile 和身份后执行对应的新授权流程。
 
 以下命令默认使用 npm 的标准全局目录。CLI 若通过 `npm install -g --prefix "$HOME/.local"` 安装，先在当前终端设置：
 
@@ -99,6 +100,8 @@ export EVERYLINE_NPM_ROOT="$(npm root -g --prefix "$EVERYLINE_NPM_PREFIX")"
 `EVERYLINE_NPM_PREFIX` 表示执行安装、更新和卸载时必须复用的 npm prefix；`EVERYLINE_NPM_ROOT` 表示该 prefix 下的 package root。后续命令会优先使用 `EVERYLINE_NPM_ROOT`，从而取得同一份 npm 包中的 CLI 和 Skill。重新打开终端后，应先按原安装位置重新设置这两个变量。
 
 ### 3.1 Codex
+
+Codex 当前回合提供原生结构化选项工具时，EveryLine Skill 会像 WorkBuddy 一样优先使用可点击选项卡收集互斥单选。立场方与审查强度在候选数量符合组件限制时使用选项卡；审查清单需要多选、分页和搜索时继续使用稳定编号文字协议。当前模式没有选项工具时自动使用相同的编号回退，不需要切换协作模式。
 
 #### macOS 或 Linux
 
@@ -243,23 +246,25 @@ $everyline-shared 使用当前 prod-user Profile 和 user 身份检查 CLI 版�
 
 ## 5. 配置身份与授权
 
+用户本轮没有指定 Profile 或环境时，Codex、WorkBuddy 和豆包统一默认 test：user 复用或创建 `test-user`，app 复用 `test-app`，缺少时在取得非敏感 app ID 后创建。当前 dev、blue、prod Profile 不会被默认继承；用户本轮显式指定的 Profile 或环境优先。宿主差异只影响 user 的授权协议：Codex 本地使用 OAuth/PKCE，豆包和 WorkBuddy 使用 Device Grant。
+
 ### user 身份：推荐用于人工交互验证
 
-创建并选中 prod Profile：
+默认 test Profile 可由 Agent 自动创建；手工等价命令为：
 
 ```bash
-everyline-cli config add prod-user \
-  --env prod \
+everyline-cli config add test-user \
+  --env test \
   --default-identity user
 
-everyline-cli config use prod-user
+everyline-cli config use test-user
 ```
 
 Codex 本地交互可完成浏览器 OAuth 登录：
 
 ```bash
 everyline-cli auth login \
-  --profile prod-user \
+  --profile test-user \
   --as user \
   --timeout 3m
 ```
@@ -268,23 +273,23 @@ everyline-cli auth login \
 
 ```bash
 everyline-cli auth status \
-  --profile prod-user \
+  --profile test-user \
   --as user \
   --output json
 ```
 
-只有输出中的 `authenticated=true` 表示授权完成。如果发布包中的 prod 预设尚未包含正式 OAuth metadata、client ID 和 loopback redirect，应先由平台补齐配置，再继续 user 流程。
+只有输出中的 `authenticated=true` 表示授权完成。
 
 豆包或 WorkBuddy 沙箱不使用 loopback callback。先执行：
 
 ```bash
-everyline-cli auth init --profile prod-user --as user --output json
+everyline-cli auth init --profile test-user --as user --output json
 ```
 
 把 `verification_uri_complete` 从 `https://` 到最后一个 query 参数完整原样交给用户。用户完成授权后只检查一次：
 
 ```bash
-everyline-cli auth complete --profile prod-user --as user --output json
+everyline-cli auth complete --profile test-user --as user --output json
 ```
 
 只有 `status=succeeded` 才继续。dev/test 的 `contract-review` metadata、独立 EveryLine Device client `zscli_c77221e810ce3977` 和 `contract-review:full` scope 由环境预设提供；已有旧 Profile 也会自动选择该 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
@@ -297,22 +302,32 @@ macOS 或 Linux：
 export EVERYLINE_APP_ID='<APP_ID>'
 export EVERYLINE_APP_SECRET='<APP_SECRET>'
 
-everyline-cli config add prod-app \
-  --env prod \
+everyline-cli config add test-app \
+  --env test \
   --default-identity app \
   --app-id "$EVERYLINE_APP_ID"
 
-everyline-cli config use prod-app
+everyline-cli config use test-app
 
 printf '%s' "$EVERYLINE_APP_SECRET" | \
   everyline-cli auth login \
-    --profile prod-app \
+    --profile test-app \
     --as app \
     --app-secret-stdin \
     --output json
 ```
 
 不要在 Agent 对话、命令参数、截图或日志中粘贴 app secret。测试完成后清理当前终端中的临时 secret 环境变量。
+
+Agent 需要 app secret 时，只引导用户在自己的终端或平台密钥入口完成安全输入，不得在对话中索取 secret。user 与 app 凭据独立保存，发起 app 授权不先退出 user。app token 过期不等于凭据失效；服务端返回 `http=200 code=10003 msg=invalid param` 时只报告通用参数错误，CLI 未明确指出字段时不推断 app ID/secret 已变更或轮换，也不自动切换 Profile 或身份。
+
+WorkBuddy app 登录不使用对话输入组件。Skill 展示一行已填入真实 Node `bin` 路径、Profile 和 app ID 的命令，由用户在自己的 WorkBuddy 终端执行：
+
+```bash
+export PATH=<WORKBUDDY_NODE_BIN>:$PATH && everyline-cli auth login --profile <profile> --as app --app-id <app-id> --app-secret-stdin
+```
+
+CLI 显示 `App secret:` 后关闭终端回显，用户输入并按回车即可；secret 不进入 shell 历史。用户回到对话确认完成后，Skill 通过 `auth status --profile <profile> --as app --output json` 验证，不要求粘贴登录输出。`<WORKBUDDY_NODE_BIN>` 必须来自当前 WorkBuddy 安装，例如 `/Users/<user>/.workbuddy/binaries/node/versions/<version>/bin`，不固定到某个用户或版本。
 
 ## 6. 检查 CLI 版本能力
 
@@ -351,9 +366,9 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 1. Skill 解析并固定 `prod-user` Profile 与 user 身份，检查 CLI 版本、`review task start/result` 帮助和授权状态。
 2. CLI 上传合同并返回内部文件身份。
-3. Skill 查询并保存全部真实清单；每页展示 4 个真实清单，跨页累计选择，直到用户选择“完成选择”。
-4. 清单确定后，CLI 提取合同主体；Skill 在下一次独立交互中展示真实主体名称，让用户选择审查立场方。
-5. Skill 询问审查强度：弱势、中立或强势。
+3. Skill 查询并保存全部真实清单；每页展示 4 个真实清单，用户一次回复一个或多个有效编号后立即冻结选择。Codex 当前的互斥单选选项工具不用于承载这一步多选。
+4. 清单选择后无需额外完成或确认；CLI 提取合同主体，并在下一次独立交互中展示真实主体名称。Codex 或 WorkBuddy 的原生选项卡可用且候选数量符合限制时，用选项卡选择审查立场方。
+5. Skill 询问审查强度：弱势、中立或强势；Codex 或 WorkBuddy 原生选项卡可用时使用单选选项卡。
 6. 四项业务输入完整后，Skill 使用同一输入执行 dry-run；失败时不发送正式请求。
 7. dry-run 通过后，Skill 使用同一 Profile 和身份自动发起一次任务并记录 task ID。
 8. Skill 只查询该 task ID；等待成功后仅返回审查结果概要、以“审查结果详情”为文字的可点击链接和默认两小时的有效期提示，不展示 task ID、终态字段或其他服务端参数。
@@ -363,13 +378,13 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 ```text
 用户：$everyline-review 使用 prod-user Profile 和 user 身份审查 /Users/me/Documents/采购合同.pdf
 
-Agent：请选择审查规则来源。第 1/1 页，已选择 0 项：
+Agent：请选择审查规则来源。第 1/1 页：
 0. 按合同类型自动匹配内置规则包
 1. 实际查询到的自定义清单 A
 2. 实际查询到的自定义清单 B
-操作：完成选择 / 按名称搜索
+操作：可多选，请一次回复全部编号；也可按名称搜索
 
-用户：选择 0 和 1，完成选择
+用户：选择 0 和 1
 
 Agent：检测到以下合同主体，请选择审查立场方：
 1. 示例采购有限公司（甲方）
@@ -406,11 +421,12 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 | CLI 发现 | `everyline-cli version --output json` 成功，版本符合预期 |
 | 调用上下文 | 所有授权和业务命令显式使用同一 `--profile/--as` |
 | 授权 | `auth status` 返回 `authenticated=true` |
-| 输入交互 | 用户只需提供合同附件、路径或 URL 形式的合同来源，以及立场方、清单和强度；单附件不再追问路径 |
+| 输入交互 | 用户只需提供合同附件、路径或 URL 形式的合同来源，以及立场方、清单和强度；单附件不再追问路径；Codex 与 WorkBuddy 在原生能力可用时使用选项卡 |
 | 内部参数 | Skill 不向用户索要 `businessId/fileId/fileHash/selectedAuditRole/wait` |
 | 候选数据 | 主体、清单、规则均来自实时 CLI 查询 |
-| 清单分页 | 先读取全部候选，每页展示 4 个真实清单；稳定全局编号、跨页累计、全局名称搜索均可用 |
+| 清单分页 | 先读取全部候选，每页展示 4 个真实清单；稳定全局编号可引用此前浏览页，多选在一次回复中给出，全局名称搜索可用 |
 | 阶段隔离 | 先用独立交互完成清单选择，再用下一次独立交互选择立场方；同一选择卡片不混合两类问题 |
+| Codex 选项卡 | 当前回合提供原生结构化选项工具时，立场方和强度使用互斥单选选项卡；清单多选、分页与搜索保留稳定编号文字协议 |
 | 主体映射 | 主体按 `name（role）` 展示；用户回复完整展示项或唯一名称时，所选候选的 `name` 写入 `selectedPosition`，同一候选的 `role` 写入 `selectedAuditRole` |
 | 规则编号 | `0` 固定表示内置规则包，自定义清单从 `1` 开始，展示与解析使用同一映射 |
 | 正式请求门 | 同一输入的 dry-run 成功后才发起真实任务 |

@@ -23,8 +23,8 @@ flowchart TD
     E --> F
     F -->|合同审查| G[读取单附件、路径或 URL]
     G --> H[上传合同]
-    H --> I[读取全部清单并按 4 项分页选择]
-    I --> J[完成并冻结清单选择]
+    H --> I[读取全部清单并按 4 项分页展示]
+    I --> J[有效选择后立即冻结清单]
     J --> K[提取主体并独立选择立场方]
     K --> L[选择审查强度]
     L --> M[使用同一输入执行 dry-run]
@@ -45,6 +45,8 @@ flowchart TD
 - 会话开始时固定一个 Profile 和身份，所有授权与业务命令显式传递同一 `--profile/--as`。
 - 身份、主体、清单、规则或分组匹配唯一时直接采用；无匹配或多项匹配时展示真实候选项。
 - 用户看到名称、类型、风险等级和编号；内部 ID 只来自本次 CLI 查询。
+- Codex 当前回合提供原生结构化选项工具时，与 WorkBuddy 一样优先用选项卡收集符合组件容量的互斥单选；当前模式没有该工具时使用编号文字回退，不为展示选项卡切换协作模式。
+- 立场方和强度可使用 Codex/WorkBuddy 单选选项卡；审查清单需要多选、稳定编号、分页和搜索时，只在宿主组件能完整表达这些语义的前提下使用，否则保留编号文字协议。
 - 合同审查先用独立交互完成清单选择，再用下一次独立交互选择立场方；同一宿主选择卡片不得混合两类问题。
 - 默认解析 `--output json` 的 stdout；stderr 只作为进度和诊断信息。
 - 合同正文、access token、app secret、授权码、回调参数和完整内部请求不输出到对话；CLI 返回的签名 `reviewDetailUrl` 必须完整原样展示，不提取或单独输出其中的 token。
@@ -60,7 +62,7 @@ flowchart TD
 | ENTRY-01 | 已支持 | `$everyline-cli 帮我审查合同` | 显式加载 Skill，识别为合同审查 | 进入首次使用检查 |
 | ENTRY-02 | 已支持 | `用 EveryLine CLI 看一下这份合同` | description 唯一匹配时隐式加载 | 进入首次使用检查 |
 | ENTRY-03 | 已支持 | `帮我操作普通智书 contract-cli` | 根据 Skill 边界不接管 | 交由其他能力处理 |
-| READY-01 | 已支持 | 新会话首次调用 | 执行 `command -v`、`version --output json` 和根帮助 | 命令和版本可读取 |
+| READY-01 | 已支持 | 新会话首次调用 | 执行 `command -v`、`version --output json` 和根帮助；解析首次安装授权字段 | 命令和版本可读取 |
 | READY-02 | 已支持 | CLI 已安装 | 使用现有版本，不主动升级 | 继续读取目标命令帮助 |
 | READY-03 | 已支持 | 安装或导入 Skill 时 CLI 未安装 | 优先安装用户指定版本或 `.tgz`，否则执行 `npm install -g everyline-cli` | 安装成功后重新检查 |
 | READY-04 | 受限 | 宿主只完成静态 Skill 导入 | 第一次本地运行 Skill 时补做 CLI 安装；安装失败则返回 npm 原因 | CLI 可用后继续检查 |
@@ -68,27 +70,36 @@ flowchart TD
 | READY-06 | 受限 | 旧版 `reviewStrength` 只接受 `0/1/2` | 不维护数字映射，不上传合同 | 停止合同审查；只读能力仍可继续 |
 | READY-07 | 受限 | CLI 未说明清单与内置规则包可组合 | 不假设组合语义，不上传合同 | 停止合同审查 |
 | READY-08 | 受限 | `review task result --help` 未提供等待最终结果能力 | 不自行模拟任务状态机 | 停止合同审查 |
+| READY-09 | 已支持 | `firstInstall=true` 且 `authorizationRequired=true` | 进入强制新授权流程，不接受旧 dev token，不调用业务 API | 新授权成功并返回 `authorizationRequired=false` |
 
 ## 5. 身份与授权交互
 
 | ID | 状态 | 用户示例或条件 | Skill 处理 | 结束条件 |
 | --- | --- | --- | --- | --- |
 | PROFILE-01 | 已支持 | 用户明确提供 Profile | 使用 `config show <profile> --output json` 校验、读取并固定该 Profile | 后续命令显式传递 Profile |
-| PROFILE-02 | 已支持 | 用户未提供 Profile | 使用 `config show --output json` 读取当前 Profile | 固定当前 Profile |
-| PROFILE-03 | 受限 | Profile 缺失或与用户指定环境不一致 | 不创建、修改或切换 Profile | 用户修正后重新调用 |
+| PROFILE-02 | 已支持 | 用户未提供 Profile 和环境 | Codex、WorkBuddy、豆包统一选择 test 环境；复用身份兼容的 test Profile，没有时创建 `test-user` 或取得 app ID 后创建 `test-app` | 固定 test Profile，不继承 dev/blue/prod 当前 Profile |
+| PROFILE-02A | 已支持 | 用户本轮明确指定 Profile 或环境 | 校验并采用用户选择 | 显式选择覆盖默认 test |
+| PROFILE-02B | 已支持 | 默认名称已被其他环境占用 | 不覆盖同名 Profile，展示冲突并请求显式 Profile | 防止静默改写环境配置 |
+| PROFILE-03 | 受限 | 用户显式指定的 Profile 缺失或与显式环境不一致 | 不猜测或覆盖该 Profile | 用户修正后重新调用 |
 | AUTH-01 | 已支持 | `使用 user 身份审查` | 直接选择 user，不再询问身份 | 查询 user 授权状态 |
 | AUTH-02 | 已支持 | `使用 app 身份查询清单` | 直接选择 app，不再询问身份 | 查询 app 授权状态 |
 | AUTH-03 | 已支持 | 用户未说明身份，身份会影响资源范围 | 只询问一次使用 user 还是 app | 用户明确身份后继续 |
-| AUTH-04 | 已支持 | `auth status` 返回 `authenticated=true` | 视为已授权 | 进入业务流程 |
+| AUTH-04 | 已支持 | 非首次安装门禁且 `auth status` 返回 `authenticated=true` | 视为已授权 | 进入业务流程 |
 | AUTH-05 | 已支持 | user 未授权 | 发起一次 OAuth 登录；CLI 打开浏览器后等待用户完成 | 重新查询状态为已授权 |
 | AUTH-06 | 已支持 | user 使用 `--no-open-browser` | 把 CLI 返回的授权链接原样交给用户 | 等待当前 OAuth 会话完成 |
 | AUTH-07 | 受限 | user 取消、失败或授权失效 | 返回 CLI 真实原因 | 停止业务调用 |
 | AUTH-08 | 已支持 | app 需要 secret | 只通过 stdin 或等价安全凭证源提供 | 登录后重新查询状态 |
 | AUTH-09 | 受限 | app 或 user 授权失败 | 不自动切换到另一身份 | 返回真实失败并停止 |
-| AUTH-10 | 受限 | 尚未选择 Profile 或 Profile 配置缺失 | 返回 CLI 配置错误，不猜测环境或 AppID | 用户修正 Profile 后重新调用 |
+| AUTH-10 | 受限 | 默认 test Profile 创建失败，或 app 身份缺少 app ID | 返回真实配置错误；app ID 只作为非敏感输入单独取得 | 配置条件补齐后重新调用 |
 | AUTH-11 | 已支持 | Profile 与身份已确定 | 每条授权、查询和写入命令都携带相同 `--profile/--as` | 不回退默认上下文 |
+| AUTH-12 | 受限 | app 授权需要重新输入 secret | 只让用户在自己的终端或平台密钥入口通过安全 stdin 输入，不在对话中索取内容 | 用户完成终端操作后回读状态 |
+| AUTH-13 | 受限 | 服务端返回 `http=200 code=10003 msg=invalid param` | 原样报告通用参数错误；CLI 未指出具体字段时不推断 app ID/secret 失效、变更或轮换 | 保持原 Profile 和 app 身份，等待用户重试或主动指定变更 |
+| AUTH-14 | 已支持 | user 已授权，用户发起 app 授权 | 保留 user 凭据，直接以 `--as app` 检查或登录；不先执行 user logout | 两种身份凭据独立保存 |
+| AUTH-15 | 已支持 | 首次安装目录残留旧 user/app token | `auth status` 按 `authenticated=false/source=first_install` 处理；本地 user/app 重新 login，Device user 执行 `auth init --restart` + `auth complete` | 新凭证保存后解除门禁 |
+| AUTH-16 | 已支持 | Codex 当前回合提供原生选项工具且用户尚未指定 user/app | 像 WorkBuddy 一样用互斥单选选项卡收集身份；用户已明确身份时直接采用 | 固定身份后继续授权检查 |
+| AUTH-17 | 已支持 | WorkBuddy app 登录需要输入 secret | 展示带真实 Node `bin`、Profile 和 app ID 的单行 `auth login --app-secret-stdin` 命令，由用户在自己的终端隐藏输入；不使用对话输入组件 | 用户确认后只用 `auth status` 验证 |
 
-当前 Skill 不负责自动创建、切换或修改 Profile；外部验证前应按安装手册准备 Profile。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
+当前 Skill 只自动创建缺失的默认 test Profile；其他环境的 Profile 仍由用户显式管理。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
 
 ## 6. 合同来源交互
 
@@ -127,14 +138,15 @@ flowchart TD
 | SELECT-11 | 已支持 | 展示规则来源候选 | 固定 `0=按合同类型自动匹配内置规则包`，真实自定义清单从 1 开始连续编号 | 展示与解析共用同一编号映射 |
 | SELECT-12 | 已支持 | `选择 0 和 14` | 设置内置规则包并采用编号 14 对应的真实清单 ID | 组合规则来源完成 |
 | SELECT-13 | 已支持 | 完整候选超过 4 个真实清单 | 冻结完整候选顺序，每页只展示 4 个真实清单；内置规则包不计入 4 项 | 显示第 1 页 |
-| SELECT-14 | 已支持 | 用户选择下一页或上一页 | 只更新当前页，沿用稳定全局编号并保留已选真实 ID | 显示目标页 |
-| SELECT-15 | 已支持 | 任一分页交互 | 显示 `第 X/Y 页，已选择 N 项` | 用户可核对页码和累计选择 |
-| SELECT-16 | 已支持 | 用户选择“按名称搜索” | 下一次只收集搜索文字，在完整候选集合中匹配 | 唯一匹配时加入选择 |
-| SELECT-17 | 已支持 | 用户直接输入当前页未展示清单的完整名称 | 在全部页面候选中匹配，不受当前页限制 | 唯一匹配时加入选择 |
-| SELECT-18 | 已支持 | 全局名称匹配为多项或无匹配 | 多项时展示区分信息，无匹配时保留当前页和已选状态 | 用户重新输入或继续翻页 |
-| SELECT-19 | 受限 | 未选任何规则来源就选择“完成选择” | 保留分页状态并继续清单阶段 | 至少选择一项后才能完成 |
-| SELECT-20 | 已支持 | 用户选择“完成选择”且已有规则来源 | 冻结内置选项与全部真实清单 ID | 下一次独立交互进入立场方选择 |
+| SELECT-14 | 已支持 | 用户选择下一页或上一页 | 只更新当前页，沿用稳定全局编号，不产生清单选择 | 显示目标页 |
+| SELECT-15 | 已支持 | 任一分页交互 | 显示 `第 X/Y 页` | 用户可核对当前页和总页数 |
+| SELECT-16 | 已支持 | 用户选择“按名称搜索” | 下一次只收集搜索文字，在完整候选集合中匹配 | 唯一匹配时冻结选择并进入下一阶段 |
+| SELECT-17 | 已支持 | 用户直接输入当前页未展示清单的完整名称 | 在全部页面候选中匹配，不受当前页限制 | 唯一匹配时冻结选择并进入下一阶段 |
+| SELECT-18 | 已支持 | 全局名称匹配为多项或无匹配 | 多项时展示区分信息，无匹配时保留当前页 | 用户重新输入或继续翻页 |
+| SELECT-19 | 受限 | 用户未提供任何有效规则来源 | 保留分页状态并继续清单阶段 | 等待至少一个有效选择 |
+| SELECT-20 | 已支持 | 用户一次回复一个或多个有效编号 | 立即冻结内置选项与全部真实清单 ID，不追加完成或确认 | 下一次独立交互进入立场方选择 |
 | SELECT-21 | 受限 | 宿主准备把清单与立场方放入同一选择卡片 | 只提交清单问题，立场方延后 | 两类问题保持独立阶段 |
+| SELECT-22 | 已支持 | Codex 当前选项工具只支持互斥单选 | 清单多选、分页和搜索继续使用稳定编号文字协议，不拆成多轮是/否选项卡 | 一次有效回复后冻结全部清单选择 |
 
 ## 8. 主体提取与立场方选择
 
@@ -149,6 +161,7 @@ flowchart TD
 | SUBJECT-07 | 受限 | 准备把公司名称同时写入两个字段 | 拒绝错误映射并回到本次主体响应读取同一候选的 `role/name` | 映射正确后才能 dry-run |
 | SUBJECT-08 | 已支持 | 用户回复完整展示项 `猎聘123（乙方）` | 用本次展示映射选中同一结构化候选，设置 `selectedPosition=猎聘123`、`selectedAuditRole=乙方` | 不把公司名称写入角色字段 |
 | SUBJECT-09 | 受限 | 清单选择尚未完成 | 不展示或合并立场方问题 | 返回清单分页阶段 |
+| SUBJECT-10 | 已支持 | Codex 或 WorkBuddy 原生单选选项卡可用且主体候选符合容量 | 在独立交互中展示真实 `name（role）` 选项卡，并映射回同一冻结候选 | 用户选择一项 |
 
 ## 9. 审查强度与任务发起
 
@@ -157,6 +170,7 @@ flowchart TD
 | STRENGTH-01 | 已支持 | 用户未说明强度 | 询问弱势、中立或强势 | 用户选择一项 |
 | STRENGTH-02 | 已支持 | `强度中立` | 直接采用中文值 | 不重复询问 |
 | STRENGTH-03 | 受限 | 用户提供其他值或数字 | 展示三个中文选项，不猜测数字映射 | 用户重新选择 |
+| STRENGTH-04 | 已支持 | Codex 或 WorkBuddy 原生单选选项卡可用 | 用独立选项卡展示弱势、中立、强势 | 用户选择一项 |
 | START-01 | 已支持 | 四项业务输入全部完成 | 构造权限受限的临时 JSON，使用固定 Profile/身份执行一次 `review task start --dry-run` | 得到规范化输入或本地错误 |
 | START-02 | 受限 | dry-run 失败 | 返回本地校验错误 | 不发送正式请求 |
 | START-03 | 已支持 | dry-run 成功 | 使用同一输入、Profile 和身份执行一次正式 `review task start` | 获取 task ID 或真实错误 |
@@ -242,7 +256,7 @@ flowchart TD
 
 | ID | 状态 | 当前范围 |
 | --- | --- | --- |
-| GAP-01 | 未定义 | 自动创建、更新或切换 CLI Profile |
+| GAP-01 | 未定义 | 默认 test 以外的自动 Profile 创建、更新或切换 |
 | GAP-02 | 未定义 | 自动升级现有 CLI |
 | GAP-03 | 未定义 | 创建或更新规则分组 |
 | GAP-04 | 未定义 | 清单、规则或分组的批量删除交互 |

@@ -98,8 +98,11 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 	runtime, stdout, _ := testRuntime(t)
 	runtime.HTTP = server.Client()
 	runtime.Now = func() time.Time { return now }
-	deviceStore := &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{}}
+	deviceStore := &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{
+		"test-user": {Token: &auth.Token{AccessToken: "old-dev-token", ExpiresAt: now.Add(time.Hour)}},
+	}}
 	runtime.DeviceCredentials = deviceStore
+	requireFirstInstallAuthorization(t, runtime)
 	profile := config.Profile{
 		Name: "test-user", BaseURL: "https://test-open.qtech.cn", UserBaseURL: "https://test-open.qtech.cn",
 		TokenURL: "https://test-open.qtech.cn/token", OAuthMetadataURL: server.URL + "/metadata",
@@ -122,6 +125,10 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 	if strings.Contains(stdout.String(), "private-device-code") {
 		t.Fatalf("stdout 泄露 device code: %s", stdout.String())
 	}
+	pending, err := deviceStore.Load("test-user")
+	if err != nil || pending.Pending == nil || pending.Token == nil || pending.Token.AccessToken != "old-dev-token" {
+		t.Fatalf("首次安装应启动新事务并暂存旧 token: pending=%#v err=%v", pending, err)
+	}
 
 	stdout.Reset()
 	if err := Execute(context.Background(), runtime, []string{"auth", "complete", "--profile", "test-user", "--as", "user"}); err != nil {
@@ -140,6 +147,10 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 	stored, err := deviceStore.Load("test-user")
 	if err != nil || stored.Pending != nil || stored.Token == nil || stored.Token.RefreshToken != "private-refresh-token" {
 		t.Fatalf("stored=%#v err=%v", stored, err)
+	}
+	installState, err := runtime.InstallState.Load()
+	if err != nil || installState.FirstInstall || installState.AuthorizationRequired {
+		t.Fatalf("installState=%#v err=%v，成功授权后应解除门禁", installState, err)
 	}
 }
 

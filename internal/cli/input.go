@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // normalizeRequiredID 去除路径 ID 两端空白，并拒绝 Cobra 仅检查“已传入”但实际为空白的值。
@@ -59,14 +61,48 @@ func readJSONInput(inputPath string, inline string, target any) error {
 	return nil
 }
 
-// readSecret 从 stdin 读取一段 app secret，并剥离首尾空白。
-// 入参：reader io.Reader 为 stdin。
+// readSecret 从 stdin 读取一段 app secret；真实终端关闭回显并以回车结束，管道仍读取到 EOF。
+// 入参：reader io.Reader 为 stdin；prompt io.Writer 为不含密钥的交互提示输出。
 // 返回值：string 为内存中的密钥；error 为读取失败或空密钥。
-func readSecret(reader io.Reader) (string, error) {
+func readSecret(reader io.Reader, prompt io.Writer) (string, error) {
+	return readSecretWithTerminal(reader, prompt, term.IsTerminal, term.ReadPassword)
+}
+
+// readSecretWithTerminal 注入终端探测和密码读取能力，保证隐藏输入分支可独立验证。
+// 入参：reader io.Reader 为 stdin；prompt io.Writer 为 stderr；isTerminal func(int) bool 判断文件描述符；readPassword func(int) ([]byte,error) 负责关闭回显读取。
+// 返回值：string 为去除首尾空白的密钥；error 为提示、读取或空值错误。
+func readSecretWithTerminal(
+	reader io.Reader,
+	prompt io.Writer,
+	isTerminal func(int) bool,
+	readPassword func(int) ([]byte, error),
+) (string, error) {
+	if inputFile, ok := reader.(*os.File); ok && isTerminal(int(inputFile.Fd())) {
+		// 提示只写 stderr，密码由终端驱动关闭回显，避免污染结构化 stdout 或进入 shell 历史。
+		if _, err := fmt.Fprint(prompt, "App secret: "); err != nil {
+			return "", fmt.Errorf("输出 app secret 提示: %w", err)
+		}
+		content, err := readPassword(int(inputFile.Fd()))
+		_, newlineErr := fmt.Fprintln(prompt)
+		if err != nil {
+			return "", fmt.Errorf("隐藏读取 app secret: %w", err)
+		}
+		if newlineErr != nil {
+			return "", fmt.Errorf("结束 app secret 提示: %w", newlineErr)
+		}
+		return normalizeSecret(content)
+	}
 	content, err := io.ReadAll(io.LimitReader(reader, 64<<10))
 	if err != nil {
 		return "", fmt.Errorf("读取 app secret: %w", err)
 	}
+	return normalizeSecret(content)
+}
+
+// normalizeSecret 统一清理终端或管道输入的换行和两端空白，并拒绝空密钥。
+// 入参：content []byte 为内存中的原始输入。
+// 返回值：string 为规范化密钥；error 为空输入错误。
+func normalizeSecret(content []byte) (string, error) {
 	secret := strings.TrimSpace(string(content))
 	if secret == "" {
 		return "", fmt.Errorf("app secret 不能为空")

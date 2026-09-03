@@ -13,6 +13,11 @@ done
 # 三端共用的授权、沙箱附件和签名链接约束必须进入豆包最终制品。
 unzip -p "$output_dir/everyline-shared-skill.zip" SKILL.md | grep -F 'auth init --profile <profile> --as user --output json' >/dev/null
 unzip -p "$output_dir/everyline-shared-skill.zip" SKILL.md | grep -F '不得执行 `auth login --profile <profile> --as user`' >/dev/null
+unzip -p "$output_dir/everyline-shared-skill.zip" SKILL.md | grep -F '`firstInstall=true` 且 `authorizationRequired=true`' >/dev/null
+unzip -p "$output_dir/everyline-shared-skill.zip" SKILL.md | grep -F 'auth init --restart --profile <profile> --as user --output json' >/dev/null
+unzip -p "$output_dir/everyline-shared-skill.zip" SKILL.md | grep -F '统一默认 `test` 环境' >/dev/null
+unzip -p "$output_dir/everyline-shared-skill.zip" SKILL.md | grep -F '当前 Profile 是 dev、blue 或 prod 时不得继承它' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '统一默认 `test` 环境' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '不得执行 `auth login --profile <profile> --as user`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F -- '--stdin --name <filename>' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '只包含以下三项' >/dev/null

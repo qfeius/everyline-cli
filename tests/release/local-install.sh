@@ -27,7 +27,7 @@ fi
 (cd "$package_root" && npm pack --json --pack-destination "$temporary_dir") > "$temporary_dir/pack.json"
 package_file=$(node -e 'const value=require(process.argv[1]); process.stdout.write(value[0].filename)' "$temporary_dir/pack.json")
 npm install --silent --prefix "$temporary_dir/install" "$temporary_dir/$package_file"
-output=$("$temporary_dir/install/node_modules/.bin/everyline-cli" version --output json)
+output=$(EVERYLINE_CONFIG_DIR="$temporary_dir/local-config" "$temporary_dir/install/node_modules/.bin/everyline-cli" version --output json)
 package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$temporary_dir/install/node_modules/everyline-cli/package.json")
 
 # 外部消费者应能从 npm 包中取得职责分离的三项 Skill，并保留旧版兼容 Skill。
@@ -47,7 +47,8 @@ grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_
 global_prefix="$temporary_dir/global"
 codex_skills_dir="$temporary_dir/codex-skills"
 workbuddy_skills_dir="$temporary_dir/workbuddy-skills"
-EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
+global_config_dir="$temporary_dir/global-config"
+EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
 global_package_root=$(npm root --global --prefix "$global_prefix")
 for skill_name in everyline-shared everyline-review everyline-review-config; do
   codex_skill_target="$codex_skills_dir/$skill_name"
@@ -66,7 +67,11 @@ for (const target of [process.argv[2], process.argv[3]]) {
 }
 NODE
 done
-global_output=$("$global_prefix/bin/everyline-cli" version --output json)
+test -f "$global_config_dir/install-state.json"
+grep -F '"authorizationRequired": true' "$global_config_dir/install-state.json" >/dev/null
+global_output=$(EVERYLINE_CONFIG_DIR="$global_config_dir" "$global_prefix/bin/everyline-cli" version --output json)
+printf '%s' "$global_output" | grep -F '"firstInstall": true' >/dev/null
+printf '%s' "$global_output" | grep -F '"authorizationRequired": true' >/dev/null
 
 # 可选的期望版本同时约束 manifest 和 ldflags，防止两个发布版本源漂移。
 if [ -n "${EXPECTED_VERSION:-}" ]; then

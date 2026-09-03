@@ -34,6 +34,7 @@ everyline-cli auth --help
 ```
 
 - 解析 `version` 的结构化结果。`updateRequired=true`（等价于 `isLatest=false`）时记住唯一的 `updateCommand`，继续完成用户当前整条业务流程；不得在上传、任务创建、轮询、获取结果或同一次配置写入之间更新 CLI。
+- `firstInstall=true` 且 `authorizationRequired=true` 是首次安装强制新授权信号。立即进入本节的 Profile、身份和授权流程；授权成功前不调用 `review`、`checklist` 或 `rule`。`nextAction=authorize` 是机器可读动作，不得因本机或沙箱中存在旧 dev token 而跳过。
 - 当前业务取得终态或明确失败、已向用户保留业务结果且不再有本次请求的后续 API 调用后，原样执行一次记住的 `updateCommand`。更新成功后再次执行 `version --output json` 验证，随后结束当前轮，让下一轮重新加载新版 Skill。更新失败时保留已完成的业务结果、报告更新错误，并在开始下一条新业务前优先重试更新。
 - `isLatest=null` 表示本次检查状态未知，不声称已是最新版；CLI 只在确认存在新版时输出 `UPDATE_PENDING`，当前业务仍继续。
 - 二进制缺失时报告 `everyline-cli` 依赖缺口；只有用户明确要求安装时才按正式 npm 制品安装。
@@ -50,13 +51,33 @@ everyline-cli auth --help
 
 未登录、无历史任务或未找到默认身份不单独作为首次安装信号。
 
+### 首次安装强制新授权
+
+当 `version` 返回 `firstInstall=true`、`authorizationRequired=true`，或 stderr 返回 `event=first_install` 时：
+
+1. 先确定 Profile 和 `user/app` 身份；可复用已有非敏感 Profile 配置，但不得把旧 token 的本地有效期当作本次授权完成。
+2. 调用 `auth status` 时应看到 `authenticated=false`、`source=first_install` 和机器可读的 `nextAction`；按当前宿主执行下方授权流程。
+3. Codex 本地 user 必须执行一次新的 `auth login`；豆包/WorkBuddy user 必须执行 `auth init --restart` 并在用户确认后执行一次 `auth complete`；app 必须执行一次新的 `auth login --as app`。WorkBuddy app 登录由用户在自己的终端按下方命令完成。
+4. 不先执行 `auth logout`，也不手工删除 `tokens.json` 或 Device 凭证；新授权成功后由 CLI 覆盖对应凭证并原子解除门禁。
+5. 授权成功后重新执行 `auth status` 和 `version --output json`。只有 `authenticated=true` 且 `authorizationRequired=false` 才恢复原业务步骤。
+
+首次安装事件可在多次 CLI 调用中以同一 `eventId` 重放，直到授权成功；Agent 每个会话只展示一次首次能力介绍，但每次都必须遵守授权门禁。
+
 ## Profile 与身份
 
-1. 用户指定 Profile 时先执行 `everyline-cli config show <profile> --output json`；否则读取当前 Profile。
-2. 缺少 Profile 时读取 `config add --help` 和 `config list --help`。已有匹配项时复用；新建前展示 Profile 名、环境和默认身份并取得确认。
-3. 用户明确 user/app 时直接使用；身份影响资源范围而用户未指定时只询问一次。
-4. 本次会话后续每条命令都显式携带 `--profile <profile> --as <identity>`，不依赖默认值。
-5. 不因权限、资源可见性或一种身份授权失败而自动切换另一种身份。
+1. 用户在本次请求中明确指定 Profile 或环境时，以该选择为准；指定 Profile 先执行 `everyline-cli config show <profile> --output json` 校验。
+2. 用户未指定 Profile 和环境时，Codex、WorkBuddy、豆包 AgentKit/Skills Sandbox 与豆包普通工作任务统一默认 `test` 环境。执行 `config list --output json`，只复用连接地址属于 `test` 预设且身份兼容的 Profile；当前 Profile 是 dev、blue 或 prod 时不得继承它。
+3. test 环境没有可复用 Profile 时，先读取 `config add --help`：user 身份创建 `test-user`（`config add test-user --env test --default-identity user --default-output json`）；app 身份取得非敏感 app ID 后创建 `test-app`（`config add test-app --env test --default-identity app --app-id <app-id> --default-output json`）。本规则已获得默认 test 的配置授权，不追加环境确认；同名 Profile 已存在但并非 test 时不覆盖，向用户报告名称冲突并请其显式选择 Profile。
+4. 用户明确 user/app 时直接使用；身份影响资源范围而用户未指定时只询问一次。多个 test Profile 同时匹配时，user 按 `test-user`、app 按 `test-app` 优先；仍不唯一时展示真实候选项让用户选择。
+5. 本次会话后续每条命令都显式携带 `--profile <profile> --as <identity>`，不依赖当前 Profile 或 Profile 默认身份。
+6. 宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant；三者默认环境始终是 test。
+7. 不因权限、资源可见性或一种身份授权失败而自动切换另一种身份，也不自动改到 dev、blue 或 prod。
+
+### 宿主结构化选项卡
+
+- 用户尚未指定 `user/app`，且 Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）时，与 WorkBuddy 原生选择组件一样优先展示互斥单选选项卡；用户已经明确身份时直接采用，不重复展示。
+- 只有真实候选数量和单选语义符合当前组件限制时使用选项卡。当前模式没有该工具、候选超过容量或缺少可靠推荐依据时使用简短编号文字，不为展示选项卡切换协作模式，也不虚构推荐项。
+- 选项卡只承载非敏感选择；app secret 仍只在用户直接操作的终端隐藏输入，不进入选项标题、说明、自由输入或对话。
 
 ## user 授权
 
@@ -93,7 +114,13 @@ CLI 打开浏览器时让用户在该页面完成授权；使用 `--no-open-brow
 
 dev/test 固定使用 `business_type=contract-review`、独立 EveryLine Device client `zscli_c77221e810ce3977`、`scope=contract-review:full` 和对应开放平台 resource。优先使用环境预设；已有旧 Profile 会由 CLI 按标准 `contract-review` metadata URL 自动选择该 Device client，Agent 不改写 client ID 或 scope。
 
-读取 `auth init --help` 和 `auth complete --help`，执行一次：
+读取 `auth init --help` 和 `auth complete --help`。首次安装门禁期间执行：
+
+```bash
+everyline-cli auth init --restart --profile <profile> --as user --output json
+```
+
+非首次安装的普通未授权流程执行一次：
 
 ```bash
 everyline-cli auth init --profile <profile> --as user --output json
@@ -113,10 +140,24 @@ Device code、access token、refresh token 和加密密钥不进入对话、日�
 
 先执行 `auth status --profile <profile> --as app --output json`。未授权时读取 `auth login --help`，只采用帮助中真实存在的安全入口：
 
-- 优先使用由用户直接操作的隐藏输入或 `--app-secret-stdin`；Agent 捕获 stdin 时让用户在自己的终端完成输入。
+- WorkBuddy 不使用对话文字输入、`AskUserQuestion`、选项卡或 Agent 捕获的 stdin 收集 app secret。取得非敏感的 Profile、app ID 和当前 WorkBuddy Node `bin` 目录后，把下面的一行命令替换成真实值并完整展示，让用户在自己的 WorkBuddy 终端亲自执行，然后结束当前轮等待用户确认：
+
+```bash
+export PATH=<WORKBUDDY_NODE_BIN>:$PATH && everyline-cli auth login --profile <profile> --as app --app-id <app-id> --app-secret-stdin
+```
+
+- 命令启动后 CLI 显示 `App secret:`，用户直接输入并按回车；终端不回显字符。Agent 不代为执行这条登录命令，不读取、转发或复述输入内容。
+- 用户回复已完成后，只执行 `auth status --profile <profile> --as app --output json` 验证；以 `authenticated=true` 为成功依据，不要求用户提供登录输出。
+- `<WORKBUDDY_NODE_BIN>` 使用当前 WorkBuddy 实际 Node 可执行文件所在目录，例如 `/Users/<user>/.workbuddy/binaries/node/versions/<version>/bin`，不固定用户名或 Node 版本。
+- Codex 本地或 CI 仍可使用由用户直接操作的隐藏输入或管道形式的 `--app-secret-stdin`；Agent 捕获 stdin 时让用户在自己的终端完成输入。
+- 需要重新输入 secret 时，只让用户在自己的终端或平台密钥入口操作；不得要求用户在对话中提供、粘贴或转述 app secret，也不得以“告诉我如何获取”为由索取其内容。
 - 平台托管网页或剪贴板入口仅在实时帮助明确注册且用户选择后使用。
 - app secret 不放入命令参数、普通环境变量、输入 JSON、日志或对话。
 - 持久化只交给 CLI 支持的安全存储；登录后再次以 `authenticated=true` 判定成功。
+- user 与 app 凭据按身份独立保存；发起或重试 app 授权只显式使用 `--as app`，不得先调用 user 的 `auth logout`，也不得把退出登录当作身份切换步骤。
+- app token 过期只表示当前 token 不可继续使用，不证明已保存的 app ID 或 app secret 无效、已变更或已轮换。
+- 服务端返回 `http=200 code=10003 msg=invalid param` 时原样报告通用参数错误及已有 request ID；除非 CLI 结构化结果明确指出具体凭据字段，不得将其归因为 app ID 或 app secret 错误。
+- app 授权失败后保持原 Profile 和 app 身份，不自动建议改用其他 Profile 或 user 身份；下一步仅提示用户在自己的终端通过实时帮助确认的安全入口重试，或等待用户主动指定新的 Profile/身份。
 
 ## 状态、退出与恢复
 

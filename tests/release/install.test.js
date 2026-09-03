@@ -1,7 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } = require("node:fs");
+const { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const test = require("node:test");
@@ -39,6 +39,7 @@ function createPackageFixture() {
   const binary = join(packageRoot, "bin", "linux-amd64", "everyline-cli");
   mkdirSync(join(packageRoot, "bin", "linux-amd64"), { recursive: true });
   writeFileSync(binary, "fixture");
+  writeFileSync(join(packageRoot, "package.json"), '{"name":"everyline-cli","version":"9.8.7"}\n');
   for (const name of skillNames) {
     const source = join(packageRoot, "skills", name);
     mkdirSync(source, { recursive: true });
@@ -100,6 +101,59 @@ test("全局安装同步登记 Codex 与 WorkBuddy 的三项 Skill", (t) => {
       assert.equal(realpathSync(skill.target), realpathSync(join(fixture.packageRoot, "skills", skill.name)));
     }
   }
+  assert.equal(result.firstInstall, true);
+  assert.equal(result.authorizationRequired, true);
+  assert.equal(result.nextAction, "authorize");
+  const state = JSON.parse(readFileSync(result.installStatePath, "utf8"));
+  assert.equal(state.schema, "everyline.install-state.v1");
+  assert.equal(state.installedVersion, "9.8.7");
+  assert.equal(state.authorizationRequired, true);
+  assert.match(state.eventId, /^[0-9a-f-]+$/);
+});
+
+test("首次安装保留旧 token 但仍要求完成一次新授权", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const configDirectory = join(fixture.userHome, ".everyline-cli");
+  const tokenPath = join(configDirectory, "tokens.json");
+  mkdirSync(configDirectory, { recursive: true });
+  writeFileSync(tokenPath, '{"tokens":{"dev::user":{"access_token":"old-dev-token"}}}\n');
+
+  const result = installPackage({
+    packageRoot: fixture.packageRoot,
+    platform: "linux",
+    architecture: "x64",
+    environment: { npm_config_global: "true" },
+    userHome: fixture.userHome,
+  });
+
+  assert.equal(result.authorizationRequired, true);
+  assert.match(readFileSync(tokenPath, "utf8"), /old-dev-token/);
+});
+
+test("重复安装不会重新打开已经完成的首次授权门禁", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const options = {
+    packageRoot: fixture.packageRoot,
+    platform: "linux",
+    architecture: "x64",
+    environment: { npm_config_global: "true" },
+    userHome: fixture.userHome,
+  };
+  const first = installPackage(options);
+  const completed = JSON.parse(readFileSync(first.installStatePath, "utf8"));
+  completed.firstInstall = false;
+  completed.authorizationRequired = false;
+  completed.nextAction = "";
+  writeFileSync(first.installStatePath, `${JSON.stringify(completed, null, 2)}\n`);
+
+  const second = installPackage(options);
+
+  assert.equal(second.firstInstall, false);
+  assert.equal(second.authorizationRequired, false);
+  assert.equal(second.nextAction, "");
+  assert.equal(JSON.parse(readFileSync(second.installStatePath, "utf8")).eventId, completed.eventId);
 });
 
 test("全局安装后置目标冲突时不留下部分 Skill 链接", (t) => {

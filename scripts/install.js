@@ -1,12 +1,25 @@
 #!/usr/bin/env node
 
-const { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, symlinkSync } = require("node:fs");
+const { randomUUID } = require("node:crypto");
+const {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} = require("node:fs");
 const { homedir } = require("node:os");
 const { dirname, join, resolve } = require("node:path");
 const { resolvePlatformTarget } = require("./platform");
 
 // skillNames 是同一份 npm 包向 Codex、WorkBuddy 和豆包发布的三项职责分离 Skill。
 const skillNames = ["everyline-shared", "everyline-review", "everyline-review-config"];
+const installStateSchema = "everyline.install-state.v1";
 
 /**
  * shouldInstallCodexSkill 判断本次 npm 生命周期是否应登记 Codex Skill。
@@ -145,9 +158,85 @@ function registerSkillSet(packageRoot, skillRoot, platform, hostName) {
 }
 
 /**
+ * resolveInstallStatePath 解析安装器与原生 CLI 共享的首次安装状态路径。
+ * 入参：environment（NodeJS.ProcessEnv）为环境变量；userHome（string）为用户目录。
+ * 返回值：string，为 install-state.json 的绝对路径。
+ */
+function resolveInstallStatePath(environment, userHome) {
+  const configured = String(environment.EVERYLINE_CONFIG_DIR || "").trim();
+  return join(configured ? resolve(configured) : join(userHome, ".everyline-cli"), "install-state.json");
+}
+
+/**
+ * loadInstallState 读取并校验已有首次安装状态，文件缺失时返回 null。
+ * 入参：statePath（string）为状态文件路径。
+ * 返回值：object|null，为已校验状态或文件缺失。
+ */
+function loadInstallState(statePath) {
+  if (!existsSync(statePath)) {
+    return null;
+  }
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  if (state.schema !== installStateSchema || typeof state.eventId !== "string" || state.eventId.length === 0) {
+    throw new Error(`EveryLine 首次安装状态格式错误: ${statePath}`);
+  }
+  return state;
+}
+
+/**
+ * saveInstallState 原子写入不含凭证的首次安装状态，并收紧目录与文件权限。
+ * 入参：statePath（string）为目标路径；state（object）为完整状态；platform（string）为 Node 平台名。
+ * 返回值：无；文件操作失败时抛出 Error。
+ */
+function saveInstallState(statePath, state, platform) {
+  const stateDirectory = dirname(statePath);
+  mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
+  if (platform !== "win32") {
+    chmodSync(stateDirectory, 0o700);
+  }
+  const temporaryPath = `${statePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+    if (platform !== "win32") {
+      chmodSync(temporaryPath, 0o600);
+    }
+    renameSync(temporaryPath, statePath);
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
+/**
+ * ensureFirstInstallState 仅在首次创建 Agent Skill 时建立强制新授权门禁，升级和重复安装保留已有完成状态。
+ * 入参：packageRoot（string）为包根；environment（NodeJS.ProcessEnv）为环境；userHome（string）为用户目录；platform（string）为平台；registrations（Array<object>）为 Skill 登记结果。
+ * 返回值：object，包含状态路径及当前 firstInstall/authorizationRequired/nextAction。
+ */
+function ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations) {
+  const statePath = resolveInstallStatePath(environment, userHome);
+  const existing = loadInstallState(statePath);
+  if (existing) {
+    return { path: statePath, ...existing };
+  }
+  if (!registrations.some((registration) => registration.status === "created")) {
+    return { path: statePath, firstInstall: false, authorizationRequired: false, nextAction: "" };
+  }
+  const packageData = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+  const state = {
+    schema: installStateSchema,
+    eventId: randomUUID(),
+    installedVersion: String(packageData.version || ""),
+    firstInstall: true,
+    authorizationRequired: true,
+    nextAction: "authorize",
+  };
+  saveInstallState(statePath, state, platform);
+  return { path: statePath, ...state };
+}
+
+/**
  * installPackage 完成原生 CLI 校验，并在全局安装时同步登记 Codex 与 WorkBuddy Skills。
  * 入参：options（object，可选），可注入 packageRoot、platform、architecture、environment 和 userHome 供安装与测试使用。
- * 返回值：object，包含 binary、兼容的首个 Codex skillTarget/skillStatus，以及按宿主分组的 skills。
+ * 返回值：object，包含 binary、Skill 登记结果和机器可读的首次安装授权状态。
  */
 function installPackage(options = {}) {
   const packageRoot = options.packageRoot || join(__dirname, "..");
@@ -167,7 +256,15 @@ function installPackage(options = {}) {
   }
 
   if (!shouldInstallCodexSkill(environment)) {
-    return { binary, skillTarget: "", skillStatus: "", skills: { codex: [], workBuddy: [] } };
+    return {
+      binary,
+      skillTarget: "",
+      skillStatus: "",
+      skills: { codex: [], workBuddy: [] },
+      firstInstall: false,
+      authorizationRequired: false,
+      nextAction: "",
+    };
   }
 
   const codexSkillRoot = environment.EVERYLINE_CODEX_SKILLS_DIR || join(userHome, ".agents", "skills");
@@ -186,11 +283,16 @@ function installPackage(options = {}) {
     .map(({ name, target, status }) => ({ name, target, status }));
   const codexSkills = hostSkills("codex");
   const workBuddySkills = hostSkills("workBuddy");
+  const installState = ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations);
   return {
     binary,
     skillTarget: codexSkills[0].target,
     skillStatus: codexSkills[0].status,
     skills: { codex: codexSkills, workBuddy: workBuddySkills },
+    installStatePath: installState.path,
+    firstInstall: installState.firstInstall === true,
+    authorizationRequired: installState.authorizationRequired === true,
+    nextAction: installState.nextAction || "",
   };
 }
 
@@ -203,11 +305,23 @@ if (require.main === module) {
         process.stdout.write(`${hostName}: ${skill.target} (${skill.status})\n`);
       }
     }
+    if (result.authorizationRequired) {
+      process.stdout.write("首次安装需要先完成 EveryLine 授权，再发起业务请求\n");
+      process.stdout.write(`${JSON.stringify({
+        schema: "everyline.skill-event.v1",
+        event: "first_install",
+        authorizationRequired: true,
+        nextAction: "authorize",
+        recommendedSkill: "everyline-shared",
+      })}\n`);
+    }
   }
 }
 
 module.exports = {
   installPackage,
+  ensureFirstInstallState,
+  loadInstallState,
   registerAgentSkill,
   registerCodexSkill,
   registerSkillSet,

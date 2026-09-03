@@ -38,6 +38,19 @@ func testRuntime(t *testing.T) (*Runtime, *bytes.Buffer, *bytes.Buffer) {
 	return runtime, stdout, stderr
 }
 
+// requireFirstInstallAuthorization 为命令测试建立待完成的新安装授权门禁。
+// 入参：t *testing.T 为测试上下文；runtime *Runtime 为待修改运行时。
+// 返回值：无；保存失败时通过 t.Fatal 报告。
+func requireFirstInstallAuthorization(t *testing.T, runtime *Runtime) {
+	t.Helper()
+	if err := runtime.InstallState.Save(config.InstallState{
+		Schema: config.InstallStateSchema, EventID: "first-install-test", InstalledVersion: "0.0.2",
+		FirstInstall: true, AuthorizationRequired: true, NextAction: "authorize",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestConfigCommands 验证 config add/use/show 共享同一持久化 Store。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
@@ -155,6 +168,73 @@ func TestVersionReportsLatestStateAndUpdateCommand(t *testing.T) {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
 		}
+	}
+}
+
+// TestFirstInstallStatusRejectsExistingToken 验证首次安装期间旧 dev token 不再被报告为已授权。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；状态仍信任旧 token 或缺少机器可读下一步时通过 t.Fatal 报告。
+func TestFirstInstallStatusRejectsExistingToken(t *testing.T) {
+	runtime, stdout, stderr := testRuntime(t)
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultIdentity: config.IdentityUser, DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	identityStore := runtime.Tokens.(interface {
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	if err := identityStore.SaveForIdentity(profile.Name, config.IdentityUser, auth.Token{AccessToken: "old-dev-token", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	requireFirstInstallAuthorization(t, runtime)
+
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--profile", profile.Name, "--as", "user", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"authenticated": false`, `"source": "first_install"`, `"authorizationRequired": true`, `"nextAction": "everyline-cli auth login --profile dev --as user --output json"`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
+		}
+	}
+	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) {
+		t.Fatalf("stderr=%s，缺少首次安装 NDJSON 事件", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := Execute(context.Background(), runtime, []string{"version", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"firstInstall": true`, `"authorizationRequired": true`, `"nextAction": "authorize"`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("version stdout=%s，缺少 %s", stdout.String(), expected)
+		}
+	}
+}
+
+// TestFirstInstallBlocksBusinessCommands 验证完成新授权前不会调用任何业务 API。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；业务请求穿透门禁或退出类型错误时通过 t.Fatal 报告。
+func TestFirstInstallBlocksBusinessCommands(t *testing.T) {
+	businessCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		businessCalls++
+		_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[]}`))
+	}))
+	defer server.Close()
+	t.Setenv("EVERYLINE_ACCESS_TOKEN", "old-app-token")
+	runtime, stdout, stderr := testRuntime(t)
+	runtime.HTTP = server.Client()
+	if err := runtime.Profiles.Add(config.Profile{Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app", DefaultOutput: "json"}); err != nil {
+		t.Fatal(err)
+	}
+	requireFirstInstallAuthorization(t, runtime)
+
+	err := Execute(context.Background(), runtime, []string{"checklist", "list", "--profile", "dev", "--as", "app", "--output", "json"})
+	if !errors.Is(err, auth.ErrUserAuthentication) || ExitCode(err) != ExitAuth {
+		t.Fatalf("err=%v exit=%d，期望首次安装鉴权门禁", err, ExitCode(err))
+	}
+	if businessCalls != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"authorizationRequired":true`) {
+		t.Fatalf("businessCalls=%d stdout=%q stderr=%q", businessCalls, stdout.String(), stderr.String())
 	}
 }
 
@@ -488,6 +568,7 @@ func TestAuthAppLoginAcceptsCredentialFlagsAndPersistsAppID(t *testing.T) {
 	if err := runtime.Profiles.Add(profile); err != nil {
 		t.Fatal(err)
 	}
+	requireFirstInstallAuthorization(t, runtime)
 
 	if err := Execute(context.Background(), runtime, []string{
 		"auth", "login", "--as", "app", "--app-id", "flag-app", "--app-secret", "flag-secret", "--output", "json",
@@ -503,6 +584,10 @@ func TestAuthAppLoginAcceptsCredentialFlagsAndPersistsAppID(t *testing.T) {
 	}
 	if updated.AppID != "flag-app" {
 		t.Fatalf("app id=%q, want flag-app", updated.AppID)
+	}
+	installState, err := runtime.InstallState.Load()
+	if err != nil || installState.FirstInstall || installState.AuthorizationRequired {
+		t.Fatalf("installState=%#v err=%v，app 新授权成功后应解除门禁", installState, err)
 	}
 	token, err := runtime.Tokens.Load("dev")
 	if err != nil || token.AccessToken != "flag-token" {
@@ -551,6 +636,41 @@ func TestAuthAppLoginRejectsConflictingSecretInputs(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "只能选择一个") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+// TestAuthAppLoginReadsSecretFromStdin 验证 WorkBuddy 用户终端命令的 stdin secret 可完成登录且不进入输出。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；secret 未传给认证服务或出现在 stdout/stderr 时通过 t.Fatal 报告。
+func TestAuthAppLoginReadsSecretFromStdin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["appId"] != "workbuddy-app" || body["appSecret"] != "stdin-secret" {
+			t.Fatalf("token body=%#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"app-token","expire":7200}`))
+	}))
+	defer server.Close()
+
+	runtime, stdout, stderr := testRuntime(t)
+	runtime.Input = strings.NewReader("stdin-secret\n")
+	runtime.HTTP = server.Client()
+	if err := runtime.Profiles.Add(config.Profile{Name: "test", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "old-app", DefaultOutput: "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), runtime, []string{
+		"auth", "login", "--profile", "test", "--as", "app", "--app-id", "workbuddy-app", "--app-secret-stdin", "--output", "json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "stdin-secret") || strings.Contains(stderr.String(), "stdin-secret") {
+		t.Fatalf("secret leaked: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"authenticated": true`) {
+		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
 
