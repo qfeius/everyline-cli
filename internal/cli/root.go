@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -31,8 +32,8 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	options := &rootOptions{}
 	command := &cobra.Command{
 		Use:   "everyline-cli",
-		Short: "智审开放平台命令行客户端",
-		Long: `智审开放平台命令行客户端。
+		Short: "EveryLine 命令行工具",
+		Long: `EveryLine 命令行工具。
 
 用于合同文件准备、智能审查任务执行、审查清单管理和审查规则管理。
 
@@ -54,7 +55,7 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	command.PersistentFlags().BoolVar(&options.Verbose, "verbose", false, "将工作流进度写入 stderr，不污染 stdout")
 	command.PersistentFlags().BoolVar(&options.NoColor, "no-color", false, "禁用彩色输出")
 	command.PersistentPreRun = func(command *cobra.Command, args []string) {
-		maybeWarnNewVersion(command.Context(), runtime, options, command)
+		maybeDeferRequiredUpdate(command.Context(), runtime, options, command)
 	}
 	command.AddGroup(
 		&cobra.Group{ID: "business", Title: "Review"},
@@ -127,12 +128,51 @@ func selectedProfile(runtime *Runtime, options *rootOptions) (config.Profile, er
 	} else {
 		profile, err = runtime.Profiles.Current()
 	}
+	if err != nil && options.Profile != "" && runtime.DeviceCredentials != nil &&
+		(errors.Is(err, config.ErrProfileNotFound) || errors.Is(err, config.ErrNoActiveProfile)) {
+		profile, err = restoreDeviceProfile(runtime, options.Profile)
+	}
+	if err != nil && options.Profile != "" && runtime.DeviceCredentialError != nil {
+		return config.Profile{}, fmt.Errorf("恢复 Device Profile %q: %w", options.Profile, runtime.DeviceCredentialError)
+	}
 	if err != nil {
 		return config.Profile{}, err
 	}
 	// 重新校验磁盘内容，防止手工修改配置绕过 HTTPS 等写入期约束。
 	if err := profile.Validate(); err != nil {
 		return config.Profile{}, err
+	}
+	return profile, nil
+}
+
+// validateDeviceCredentialRuntime 阻止 user 请求在已识别沙箱但安全凭证存储初始化失败时回退到普通缓存。
+// 入参：runtime *Runtime 为 Device 初始化状态；identity config.IdentityKind 为业务身份。
+// 返回值：error，仅 user 沙箱安全存储配置失败时非 nil。
+func validateDeviceCredentialRuntime(runtime *Runtime, identity config.IdentityKind) error {
+	if identity == config.IdentityUser && runtime.DeviceCredentialError != nil {
+		return runtime.DeviceCredentialError
+	}
+	return nil
+}
+
+// restoreDeviceProfile 从加密 Device 凭证恢复沙箱重建后丢失的非敏感 user Profile。
+// 入参：runtime *Runtime 为 Profile 和 Device store；profileName string 为显式 --profile 名称。
+// 返回值：config.Profile 为恢复配置；error 为凭证缺失、快照不匹配或保存失败。
+func restoreDeviceProfile(runtime *Runtime, profileName string) (config.Profile, error) {
+	credential, err := runtime.DeviceCredentials.Load(profileName)
+	if err != nil {
+		return config.Profile{}, fmt.Errorf("恢复 Device Profile %q: %w；请重新执行 config add 和 auth init", profileName, err)
+	}
+	if credential.Profile == nil || credential.Profile.Name != profileName {
+		return config.Profile{}, fmt.Errorf("恢复 Device Profile %q: 加密快照缺失或名称不匹配", profileName)
+	}
+	profile := *credential.Profile
+	profile.DefaultIdentity = config.IdentityUser
+	if err := profile.ValidateForIdentity(config.IdentityUser); err != nil {
+		return config.Profile{}, fmt.Errorf("恢复 Device Profile %q: %w", profileName, err)
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		return config.Profile{}, fmt.Errorf("保存恢复的 Device Profile %q: %w", profileName, err)
 	}
 	return profile, nil
 }

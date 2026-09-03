@@ -128,6 +128,37 @@ func TestServiceUploadURLUsesV3Contract(t *testing.T) {
 	}
 }
 
+// TestServiceUploadContentBuildsCompatibleMultipart 验证 stdin 字节流复用原上传契约和 multipart 字段。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；文件名、内容或逻辑契约漂移时通过 t.Fatal 报告。
+func TestServiceUploadContentBuildsCompatibleMultipart(t *testing.T) {
+	client := &recordingClient{data: `{"fileId":"12","businessId":"biz-stdin","fileHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`}
+	service := NewService(client, time.Second)
+	content := []byte("sandbox document bytes")
+	if _, err := service.UploadContent(context.Background(), content, "合同.docx", "合同.docx", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if client.request.ContractInput.(map[string]any)["file"] != "stdin" {
+		t.Fatalf("contract input=%#v", client.request.ContractInput)
+	}
+	mediaType, parameters, err := mime.ParseMediaType(client.request.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/form-data" {
+		t.Fatalf("content-type=%q err=%v", client.request.Header.Get("Content-Type"), err)
+	}
+	reader := multipart.NewReader(bytes.NewReader(client.request.Body), parameters["boundary"])
+	part, err := reader.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if part.FormName() != "file" || part.FileName() != "合同.docx" {
+		t.Fatalf("formName=%q fileName=%q", part.FormName(), part.FileName())
+	}
+	got, err := io.ReadAll(part)
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("content=%q err=%v", got, err)
+	}
+}
+
 // TestServiceOperationMappings 验证其余 MVP operation ID、method 和 path 不发生契约漂移。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

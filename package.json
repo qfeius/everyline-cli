@@ -1,7 +1,7 @@
 {
   "name": "everyline-cli",
-  "version": "0.0.0-development",
-  "description": "智审开放平台 V3 命令行客户端的 npm/npx 薄包装",
+  "version": "0.0.2",
+  "description": "EveryLine CLI 工具的 npm/npx 薄包装",
   "license": "UNLICENSED",
   "bin": {
     "everyline-cli": "scripts/run.js"
@@ -21,12 +21,12 @@
     "scripts/platform.js",
     "scripts/run.js",
     "scripts/verify-package-version.js",
-    "skills/everyline-cli/"
+    "skills/"
   ],
   "scripts": {
     "postinstall": "node scripts/install.js",
     "prepack": "node scripts/verify-package-version.js",
-    "test": "node --test tests/release/platform.test.js"
+    "test": "node --test tests/release/*.test.js"
   },
   "engines": {
     "node": ">=18"

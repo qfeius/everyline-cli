@@ -62,3 +62,20 @@ func TestProfileRejectsUnusableURLs(t *testing.T) {
 		})
 	}
 }
+
+// TestProfileUsesIndependentPresetDeviceClient 验证旧环境 Profile 优先采用独立 Device client，显式配置仍具有最高优先级。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；预设迁移或显式覆盖失效时通过 t.Fatal 报告。
+func TestProfileUsesIndependentPresetDeviceClient(t *testing.T) {
+	profile := Profile{
+		OAuthMetadataURL: "https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
+		OAuthClientID:    "browser-client",
+	}
+	if got := profile.EffectiveOAuthDeviceClientID(); got != "zscli_c77221e810ce3977" {
+		t.Fatalf("deviceClientID=%q", got)
+	}
+	profile.OAuthDeviceClientID = "explicit-device-client"
+	if got := profile.EffectiveOAuthDeviceClientID(); got != "explicit-device-client" {
+		t.Fatalf("显式 deviceClientID=%q", got)
+	}
+}

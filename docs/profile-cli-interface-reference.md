@@ -37,8 +37,12 @@ Profile 保存在 `~/.everyline-cli/config.json`。可以通过 `EVERYLINE_CONFI
 | `oauth_metadata_url` | `--oauth-metadata-url` | user OAuth 登录时必填 | OAuth authorization server metadata URL |
 | `oauth_business_type` | `--oauth-business-type` | user OAuth 登录时必填 | OAuth 业务类型 |
 | `oauth_client_id` | `--oauth-client-id` | user OAuth 登录时必填 | public client ID |
+| `oauth_device_client_id` | `--oauth-device-client-id` | Device client 与 public client 不同时必填 | Device Grant client ID |
 | `oauth_redirect_url` | `--oauth-redirect-url` | user OAuth 登录时必填 | 本机 loopback callback；当前应使用 HTTP |
 | `oauth_scopes` | `--oauth-scope` | 可选 | OAuth scope；参数可重复或使用逗号分隔 |
+| `oauth_device_authorization_url` | `--oauth-device-authorization-url` | metadata 未发布对应端点时可选 | 平台确认的 Device Authorization endpoint |
+| `oauth_revocation_url` | `--oauth-revocation-url` | 可选 | refresh token revocation endpoint |
+| `oauth_resource` | `--oauth-resource` | 可选 | Device Grant resource；默认使用 user 业务 API 基址 |
 | `default_identity` | `--default-identity` | 可选，默认 `app` | `app` 或 `user` |
 | `default_output` | `--default-output` | 可选，默认 `json` | `json`、`yaml`、`table` 或 `raw`；显式值保持不变 |
 
@@ -110,6 +114,7 @@ everyline-cli config add custom-user \
 | `oauth_metadata_url` | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | 当前未配置 | 当前未配置 |
 | `oauth_business_type` | `contract-review` | `contract-review` | 当前未配置 | 当前未配置 |
 | `oauth_client_id` | `zscli_a9f2a3ce87fa5bb6` | `zscli_a94c9aa398389bd7` | 当前未配置 | 当前未配置 |
+| `oauth_device_client_id` | `zscli_c77221e810ce3977` | `zscli_c77221e810ce3977` | 当前未配置 | 当前未配置 |
 | `oauth_redirect_url` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | 当前未配置 | 当前未配置 |
 | `oauth_scopes` | `contract-review:full` | `contract-review:full` | 当前未配置 | 当前未配置 |
 
@@ -123,6 +128,7 @@ everyline-cli config add dev-user \
   --oauth-metadata-url 'https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review' \
   --oauth-business-type 'contract-review' \
   --oauth-client-id 'zscli_a9f2a3ce87fa5bb6' \
+  --oauth-device-client-id 'zscli_c77221e810ce3977' \
   --oauth-redirect-url 'http://127.0.0.1:8000/login' \
   --oauth-scope 'contract-review:full' \
   --default-identity user \
@@ -139,6 +145,7 @@ everyline-cli config add test-user \
   --oauth-metadata-url 'https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review' \
   --oauth-business-type 'contract-review' \
   --oauth-client-id 'zscli_a94c9aa398389bd7' \
+  --oauth-device-client-id 'zscli_c77221e810ce3977' \
   --oauth-redirect-url 'http://127.0.0.1:8000/login' \
   --oauth-scope 'contract-review:full' \
   --default-identity user \
@@ -386,7 +393,9 @@ user OAuth 使用 Profile 中的动态端点，不计入固定的 25 个 operati
    }
    ```
 
-CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自动使用 `refresh_token`；业务请求收到服务端 `code=110004` 时会删除当前 Profile 中被服务端拒绝的 user token，并提示重新登录。后续 `auth status` 返回 `authenticated=false`；如果缓存已由并发重新登录更新，CLI 会保留新 token。
+CLI 缓存 token，但 stdout 仍只输出登录状态对象。metadata 声明 `refresh_token` grant 时，CLI 在 token 到期前五分钟刷新；临时失败时保留尚未真正过期的旧 token。业务请求收到服务端可信 `code=110004` 时强制刷新并只重放一次；服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token。如果缓存已由并发重新登录更新，CLI 会保留新 token。
+
+豆包/WorkBuddy 沙箱使用 `auth init` 和 `auth complete`。`auth init` 输出 `status=pending`、完整 `verification_uri_complete` 与 `expires_at`，不输出 device code；`auth complete` 一次检查返回 `succeeded/pending/denied/expired/uncertain/invalid_grant`，成功后把 access/refresh token 写入会话隔离的安全存储。豆包 AgentKit 使用 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` 加密工作区凭证，豆包工作任务按 `SESSION_ID` 派生隔离密钥，WorkBuddy 按 `CODEBUDDY_SESSION_ID` 使用系统凭证库。加密 Profile 快照支持沙箱重建后通过显式 `--profile` 恢复。
 
 `auth status` 字段：
 
@@ -395,7 +404,7 @@ CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自�
 | `profile` | 始终 | Profile 名称 |
 | `identity` | 始终 | `app` 或 `user` |
 | `authenticated` | 始终 | 当前凭证是否可用 |
-| `source` | 始终 | `environment` 或 `cache` |
+| `source` | 始终 | `environment`、`cache` 或 `device` |
 | `expiresKnown` | access token 存在时 | 是否知道过期时间 |
 | `expiresAt` | 已知过期时间 | RFC 3339 时间 |
 | `expiresInSeconds` | 已知过期时间 | 非负剩余秒数 |
@@ -407,13 +416,13 @@ CLI 缓存 token，但 stdout 仍只输出登录状态对象。当前不会自�
 - app ID：`--app-id` → Profile 专用环境变量 → `EVERYLINE_APP_ID` → Profile。
 - app secret：`--app-secret` → stdin → Profile 专用环境变量 → `EVERYLINE_APP_SECRET` → 本地安全存储。
 - app access token：`EVERYLINE_ACCESS_TOKEN` → token 缓存 → app secret 换取。
-- user access token：user 专用 token 缓存；过期或缺失时重新执行浏览器 OAuth。
+- user access token：沙箱 Device 安全存储 → user 专用 token 缓存；按 metadata 能力刷新，过期或失效时重新完成对应 OAuth。
 
 ### 5.3 版本、更新与 completion
 
 | CLI 命令 | 入参 | 响应 |
 |---|---|---|
-| `version` | 可选 `--manifest-url HTTPS_URL` | `version/commit/date/latestVersion/isLatest/updateCommand/checkError?` |
+| `version` | 可选 `--manifest-url HTTPS_URL` | `version/commit/date/latestVersion/isLatest/updateRequired/updateCommand/checkError?` |
 | `update` | 可选 `--manifest-url HTTPS_URL`、`--dry-run`；也可使用环境变量或发布构建内置地址 | `currentVersion/latestVersion/platform/updated/scheduled/dryRun` |
 | `completion bash\|fish\|powershell\|zsh` | shell 名称 | 对应 shell completion 脚本文本 |
 
@@ -622,7 +631,7 @@ CLI 输入中 `fileId` 是正整数；HTTP 边界转换为十进制字符串，�
 
 `info` 响应为完整任务详情对象，CLI 不裁剪字段。
 
-`result` 额外支持 `--interval`（默认 `2s`）和 `--deadline`（默认 `10m`）。stdout 输出最终 `info.data`，后端提供顶层 `url` 时规范化为 `reviewDetailUrl`；每次状态写入 stderr。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。
+`result` 额外支持 `--interval`（默认 `2s`）和 `--deadline`（默认 `10m`）。stdout 输出最终 `info.data`，后端提供顶层 `url` 时规范化为 `reviewDetailUrl`；JSON/raw 关闭 HTML 转义，完整 URL 中的 `&` 与 `token` query 逐字保留。每次状态写入 stderr。飞书用户 OAuth 响应没有预览链接时仍返回完整成功详情。
 
 ### 7.6 一键 review run
 

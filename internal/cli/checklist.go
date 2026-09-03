@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 
-	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/checklist"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
@@ -336,7 +335,10 @@ func buildChecklistService(runtime *Runtime, root *rootOptions) (*checklist.Serv
 	if err != nil {
 		return nil, config.Profile{}, err
 	}
-	provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now, runtime.Secrets)
+	if err := validateDeviceCredentialRuntime(runtime, identity); err != nil {
+		return nil, config.Profile{}, err
+	}
+	provider := newTokenProvider(runtime)
 	client := openplatform.NewClientForIdentity(profile, provider, runtime.HTTP, identity)
 	return checklist.NewService(client, root.Timeout), profile, nil
 }

@@ -122,6 +122,9 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if test.name == "test" && !profile.HasOAuthConfiguration() {
 			t.Fatalf("environment=%s 缺少 OAuth 预设: %#v", test.name, profile)
 		}
+		if test.name == "test" && profile.OAuthDeviceClientID != "zscli_c77221e810ce3977" {
+			t.Fatalf("environment=%s Device client=%q", test.name, profile.OAuthDeviceClientID)
+		}
 	}
 }
 
@@ -148,7 +151,7 @@ func TestVersionReportsLatestStateAndUpdateCommand(t *testing.T) {
 	if err := Execute(context.Background(), runtime, []string{"version", "--manifest-url", server.URL}); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`"version": "1.0.0"`, `"latestVersion": "1.1.0"`, `"isLatest": false`, `"updateCommand": "everyline-cli update --manifest-url ` + server.URL + `"`} {
+	for _, expected := range []string{`"version": "1.0.0"`, `"latestVersion": "1.1.0"`, `"isLatest": false`, `"updateRequired": true`, `"updateCommand": "everyline-cli update --manifest-url ` + server.URL + `"`} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
 		}
@@ -195,34 +198,58 @@ func TestVersionCheckFailureIsNonBlockingAndUnknown(t *testing.T) {
 	if err := Execute(context.Background(), runtime, []string{"version", "--manifest-url", server.URL}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"isLatest": null`) || strings.Contains(stdout.String(), `"isLatest": true`) || !strings.Contains(stdout.String(), `"checkError"`) {
+	if !strings.Contains(stdout.String(), `"isLatest": null`) || strings.Contains(stdout.String(), `"isLatest": true`) || !strings.Contains(stdout.String(), `"updateRequired": false`) || !strings.Contains(stdout.String(), `"checkError"`) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
 
-// TestBusinessCommandWarnsWhenNewVersionExists 验证普通业务命令发现新版本时只在 stderr 提示。
+// TestVersionUpdateCommandForNPMIncludesSkillInstaller 验证 npm 更新命令会运行负责同步登记 Skills 的安装脚本。
 // 入参：t *testing.T 为测试上下文。
-// 返回值：无；提示缺失或污染 stdout 时通过 t.Fatal 报告。
-func TestBusinessCommandWarnsWhenNewVersionExists(t *testing.T) {
+// 返回值：无；更新命令遗漏包级脚本许可时通过 t.Fatal 报告。
+func TestVersionUpdateCommandForNPMIncludesSkillInstaller(t *testing.T) {
+	t.Setenv("EVERYLINE_CLI_WRAPPER", "1")
+	const expected = "npm install -g --allow-scripts=everyline-cli everyline-cli@latest"
+	if actual := versionUpdateCommand("https://updates.example.test/manifest.json", false); actual != expected {
+		t.Fatalf("updateCommand=%q，期望 %q", actual, expected)
+	}
+}
+
+// TestBusinessCommandDefersUpdateUntilWorkflowCompletes 验证发现新版时仍完成当前业务 API，并输出机器可读的延迟更新状态。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；业务被阻断、更新状态缺失或业务结果丢失时通过 t.Fatal 报告。
+func TestBusinessCommandDefersUpdateUntilWorkflowCompletes(t *testing.T) {
 	originalVersion := build.Version
 	build.Version = "1.0.0"
 	t.Cleanup(func() { build.Version = originalVersion })
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	manifestServer := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"version":"1.1.0","platforms":{"test":{"url":"https://updates.example.com/cli","sha256":"unused"}}}`))
 	}))
-	defer server.Close()
-	t.Setenv("EVERYLINE_CLI_UPDATE_MANIFEST_URL", server.URL)
+	defer manifestServer.Close()
+	businessCalls := 0
+	businessServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		businessCalls++
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[]}`))
+	}))
+	defer businessServer.Close()
+	t.Setenv("EVERYLINE_CLI_UPDATE_MANIFEST_URL", manifestServer.URL)
+	t.Setenv("EVERYLINE_ACCESS_TOKEN", "test-token")
 	runtime, stdout, stderr := testRuntime(t)
-	runtime.HTTP = server.Client()
-	rootCommand := NewRootCommand(runtime)
-	businessCommand, _, err := rootCommand.Find([]string{"review", "task", "status"})
-	if err != nil {
+	runtime.HTTP = manifestServer.Client()
+	if err := runtime.Profiles.Add(config.Profile{Name: "local", BaseURL: businessServer.URL, TokenURL: businessServer.URL + "/token", AppID: "app", DefaultOutput: "json"}); err != nil {
 		t.Fatal(err)
 	}
-	maybeWarnNewVersion(context.Background(), runtime, &rootOptions{}, businessCommand)
-	if strings.Contains(stdout.String(), "发现新版本") || !strings.Contains(stderr.String(), "发现新版本 1.1.0") || !strings.Contains(stderr.String(), "everyline-cli update") {
-		t.Fatalf("stdout=%s stderr=%s", stdout.String(), stderr.String())
+	if err := Execute(context.Background(), runtime, []string{"checklist", "list", "--profile", "local", "--as", "app", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"code":"UPDATE_PENDING"`, `"currentVersion":"1.0.0"`, `"latestVersion":"1.1.0"`, `"updateCommand":"everyline-cli update"`, `"updateAfter":"current_business_workflow"`} {
+		if !strings.Contains(stderr.String(), expected) {
+			t.Fatalf("stderr=%s，缺少 %s", stderr.String(), expected)
+		}
+	}
+	if businessCalls != 1 || !strings.Contains(stdout.String(), `[]`) {
+		t.Fatalf("businessCalls=%d stdout=%s，当前业务必须正常完成", businessCalls, stdout.String())
 	}
 }
 
@@ -377,7 +404,7 @@ func TestBusinessCallRevocationUpdatesAuthStatus(t *testing.T) {
 	if !errors.Is(err, auth.ErrUserSessionExpired) || ExitCode(err) != ExitAuth {
 		t.Fatalf("err=%v exit=%d，期望 user 鉴权失效", err, ExitCode(err))
 	}
-	if !strings.Contains(err.Error(), "登录已失效，请执行 auth login --as user 重新授权") || !strings.Contains(err.Error(), "req-revoked") {
+	if !strings.Contains(err.Error(), "登录已失效；请重新执行 auth login --profile test-user --as user") || !strings.Contains(err.Error(), "req-revoked") {
 		t.Fatalf("错误缺少重新授权提示或 request ID: %v", err)
 	}
 
@@ -1102,6 +1129,29 @@ func TestReviewFileUploadDryRunOmitsOptionalAppType(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), `"appType"`) || strings.Contains(stdout.String(), `"businessId"`) {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+// TestReviewFileUploadDryRunAcceptsStdinSource 验证沙箱可选择 stdin 且不再被 --file 必填规则阻断。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；参数互斥或规范化输出错误时通过 t.Fatal 报告。
+func TestReviewFileUploadDryRunAcceptsStdinSource(t *testing.T) {
+	runtime, stdout, _ := testRuntime(t)
+	runtime.Input = strings.NewReader("sandbox document")
+	if err := Execute(context.Background(), runtime, []string{
+		"review", "file", "upload", "--stdin", "--name", "合同.docx", "--dry-run",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"file": "stdin"`) || !strings.Contains(stdout.String(), `"name": "合同.docx"`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+	stdout.Reset()
+	err := Execute(context.Background(), runtime, []string{
+		"review", "file", "upload", "--stdin", "--file", "contract.docx", "--name", "合同.docx", "--dry-run",
+	})
+	if err == nil || !strings.Contains(err.Error(), "只能选择一个") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

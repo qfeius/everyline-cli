@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 
-	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
@@ -497,7 +496,10 @@ func buildRuleService(runtime *Runtime, root *rootOptions) (*rule.Service, confi
 	if err != nil {
 		return nil, config.Profile{}, err
 	}
-	provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now, runtime.Secrets)
+	if err := validateDeviceCredentialRuntime(runtime, identity); err != nil {
+		return nil, config.Profile{}, err
+	}
+	provider := newTokenProvider(runtime)
 	client := openplatform.NewClientForIdentity(profile, provider, runtime.HTTP, identity)
 	return rule.NewService(client, root.Timeout), profile, nil
 }

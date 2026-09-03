@@ -3,8 +3,8 @@
 ## 变更内容
 
 - 新增 `everyline-cli update --manifest-url <HTTPS_URL>`，支持独立二进制按平台检查和更新。
-- `everyline-cli version` 增加 `latestVersion/isLatest/updateCommand`；检查失败时 `isLatest=null`，普通业务命令的版本检查失败不阻断请求。
-- 更新 manifest 可由命令参数、`EVERYLINE_CLI_UPDATE_MANIFEST_URL` 或发布构建注入；发现新版本时业务命令只在 stderr 提示。
+- `everyline-cli version` 增加 `latestVersion/isLatest/updateRequired/updateCommand`；检查失败时 `isLatest=null`，普通业务命令的版本检查失败不阻断请求。
+- 更新 manifest 可由命令参数、`EVERYLINE_CLI_UPDATE_MANIFEST_URL` 或发布构建注入；确认存在新版本时业务命令输出机器可读的 `UPDATE_PENDING`，当前完整业务流程结束后再强制更新。
 - manifest 使用 `version`、`platforms`、制品 `url` 和 `sha256` 字段；CLI 校验 HTTPS、SemVer、平台匹配和 SHA-256。
 - 制品先下载到目标文件同目录临时文件，校验成功后原子替换并保留原文件权限；校验、下载或替换失败不修改原二进制。
 - `--dry-run` 只校验 manifest、平台和版本，不下载或替换；npm/npx 薄包装启动时提示通过 npm 更新，不修改包内二进制。

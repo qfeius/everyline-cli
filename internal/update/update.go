@@ -25,7 +25,7 @@ const (
 )
 
 // ErrNPMWrapper 表示当前进程由 npm/npx 薄包装启动，不能直接替换包内二进制。
-var ErrNPMWrapper = errors.New("当前命令由 npm/npx 薄包装启动，请使用 npm install -g everyline-cli@latest 或 npx 更新包")
+var ErrNPMWrapper = errors.New("当前命令由 npm/npx 薄包装启动，请使用 npm install -g --allow-scripts=everyline-cli everyline-cli@latest 更新 CLI 与 Skills")
 
 // Manifest 描述一个版本及各平台的独立二进制制品。
 type Manifest struct {

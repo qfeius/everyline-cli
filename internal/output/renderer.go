@@ -49,19 +49,9 @@ func ParseFormat(value string) (Format, error) {
 func (DefaultRenderer) Render(writer io.Writer, format Format, value any) error {
 	switch format {
 	case FormatJSON:
-		content, err := json.MarshalIndent(value, "", "  ")
-		if err != nil {
-			return fmt.Errorf("编码 JSON 输出: %w", err)
-		}
-		_, err = fmt.Fprintln(writer, string(content))
-		return err
+		return encodeJSONOutput(writer, value, "  ", "JSON")
 	case FormatRaw:
-		content, err := json.Marshal(value)
-		if err != nil {
-			return fmt.Errorf("编码 Raw 输出: %w", err)
-		}
-		_, err = fmt.Fprintln(writer, string(content))
-		return err
+		return encodeJSONOutput(writer, value, "", "Raw")
 	case FormatYAML:
 		content, err := yaml.Marshal(normalizeForYAML(value))
 		if err != nil {
@@ -74,6 +64,21 @@ func (DefaultRenderer) Render(writer io.Writer, format Format, value any) error 
 	default:
 		return fmt.Errorf("不支持的输出格式: %s", format)
 	}
+}
+
+// encodeJSONOutput 写出不进行 HTML 转义的 JSON，保证签名 URL 中的 & 等字符逐字保留。
+// 入参：writer io.Writer 为 stdout；value any 为业务结果；indent/formatName string 为缩进和错误标签。
+// 返回值：error，编码或写入失败时非 nil。
+func encodeJSONOutput(writer io.Writer, value any, indent string, formatName string) error {
+	encoder := json.NewEncoder(writer)
+	encoder.SetEscapeHTML(false)
+	if indent != "" {
+		encoder.SetIndent("", indent)
+	}
+	if err := encoder.Encode(value); err != nil {
+		return fmt.Errorf("编码 %s 输出: %w", formatName, err)
+	}
+	return nil
 }
 
 // renderTable 将对象渲染为 KEY/VALUE，将对象数组渲染为稳定列集合。

@@ -202,10 +202,46 @@ func TestWorkflowRun(t *testing.T) {
 	}
 }
 
+// TestWorkflowRunSkipsSubjectsWhenDisabled 验证显式关闭主体提取时只执行上传和发起任务。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；调用序列包含 subjects 或缺少 start 时通过 t.Fatal 报告。
+func TestWorkflowRunSkipsSubjectsWhenDisabled(t *testing.T) {
+	api := &fakeAPI{}
+	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Deadline: time.Second})
+	_, err := workflow.Run(context.Background(), RunSpec{
+		Source:          RunSource{Type: "file", Path: "contract.pdf", Name: "合同.pdf"},
+		BusinessID:      "biz-1",
+		Config:          validReviewConfig(),
+		ExtractSubjects: false,
+		Wait:            false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{"upload", "start"}
+	if len(api.calls) != len(expected) {
+		t.Fatalf("calls=%#v，期望关闭主体提取后调用序列=%#v", api.calls, expected)
+	}
+	for index := range expected {
+		if api.calls[index] != expected[index] {
+			t.Fatalf("calls=%#v，期望关闭主体提取后调用序列=%#v", api.calls, expected)
+		}
+	}
+}
+
 // TestWorkflowWaitForResultPollsThenLoadsInfo 验证已有任务的结果流程只轮询状态，并在成功后加载一次详情。
 // 该测试覆盖从 Run 中抽取的共享结果编排，属于行为回归验证，不单独计为 RED。
 func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
-	api := &fakeAPI{statuses: []Document{{"status": "running"}, {"status": "success"}}}
+	// signedPreviewURL 表示后端已签发的完整免登录链接，CLI 必须连同查询参数原样保留。
+	const signedPreviewURL = "https://test-everyline.qtech.cn/intelligent-review?id=998960487&version=v3&source=history&businessId=auto%3Athird_party%3A1167918398407966837%3Af4da8538d0d8455da14165491c311922&taskId=2092175373579059803&entry=taskHistory&appType=THIRD_PARTY&token=preview-token"
+	api := &fakeAPI{
+		statuses: []Document{{"status": "running"}, {"status": "success"}},
+		info: Document{
+			"taskId": int64(88),
+			"status": "success",
+			"url":    signedPreviewURL,
+		},
+	}
 	workflow := NewWorkflow(api, instantClock{}, WorkflowOptions{Interval: time.Millisecond, Deadline: time.Second})
 	result, err := workflow.WaitForResult(context.Background(), TaskQuery{
 		TaskID:          88,
@@ -218,6 +254,12 @@ func TestWorkflowWaitForResultPollsThenLoadsInfo(t *testing.T) {
 	}
 	if status, _ := StringValue(result, "status"); status != "success" {
 		t.Fatalf("result=%#v，期望返回最终详情", result)
+	}
+	if originalURL, _ := StringValue(result, "url"); originalURL != signedPreviewURL {
+		t.Fatalf("result=%#v，后端原始签名链接必须完整保留", result)
+	}
+	if detailURL, _ := StringValue(result, "reviewDetailUrl"); detailURL != signedPreviewURL {
+		t.Fatalf("result=%#v，reviewDetailUrl 必须与后端 url 完全一致", result)
 	}
 	expected := []string{"status", "status", "info"}
 	if len(api.calls) != len(expected) {

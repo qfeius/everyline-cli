@@ -75,20 +75,37 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 	if err := ValidateUploadFile(filePath); err != nil {
 		return nil, err
 	}
-	if err := ValidateFileName(name); err != nil {
-		return nil, err
-	}
-	businessID = strings.TrimSpace(businessID)
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("读取上传文件: %w", err)
 	}
+	return service.uploadContent(ctx, content, filepath.Base(filePath), filePath, name, appType, businessID)
+}
+
+// UploadContent 上传已在当前沙箱内可读的合同字节，供 stdin/附件流桥接复用。
+// 入参：ctx context.Context 控制请求；content []byte 为文件内容；sourceName string 为 multipart 文件名；name/appType/businessID string 为业务字段。
+// 返回值：Document 为上传结果；error 为文件名、大小、multipart 或 API 失败。
+func (service *Service) UploadContent(ctx context.Context, content []byte, sourceName string, name string, appType string, businessID string) (Document, error) {
+	if strings.TrimSpace(sourceName) == "" {
+		sourceName = name
+	}
+	return service.uploadContent(ctx, content, filepath.Base(sourceName), "stdin", name, appType, businessID)
+}
+
+// uploadContent 构造与本地文件上传完全相同的 multipart 和逻辑契约。
+// 入参：ctx context.Context 控制请求；content []byte 为内容；sourceName/contractSource/name/appType/businessID string 为文件和业务字段。
+// 返回值：Document 为上传结果；error 为校验、编码或 API 失败。
+func (service *Service) uploadContent(ctx context.Context, content []byte, sourceName string, contractSource string, name string, appType string, businessID string) (Document, error) {
+	if err := ValidateFileName(name); err != nil {
+		return nil, err
+	}
+	businessID = strings.TrimSpace(businessID)
 	if len(content) > MaxUploadBytes {
 		return nil, fmt.Errorf("文件大小不能超过 %d 字节（2 MiB）", MaxUploadBytes)
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	filePart, err := writer.CreateFormFile("file", filepath.Base(filePath))
+	filePart, err := writer.CreateFormFile("file", sourceName)
 	if err != nil {
 		return nil, fmt.Errorf("创建 multipart 文件字段: %w", err)
 	}
@@ -115,7 +132,7 @@ func (service *Service) UploadFile(ctx context.Context, filePath string, name st
 		OperationID:   OperationUploadFile,
 		Method:        http.MethodPost,
 		Path:          pathUploadFile,
-		ContractInput: uploadFileContractInput(filePath, name, appType, businessID),
+		ContractInput: uploadFileContractInput(contractSource, name, appType, businessID),
 		Header:        http.Header{"Content-Type": []string{writer.FormDataContentType()}},
 		Body:          body.Bytes(),
 		Timeout:       service.timeout,
@@ -173,7 +190,7 @@ func (service *Service) ExtractSubjects(ctx context.Context, request StartReques
 	return service.doJSON(ctx, OperationExtractSubjects, http.MethodPost, pathExtractSubjects, nil, body, input)
 }
 
-// Start 发起普通 V3 智审任务，完整透传冻结的 typed request。
+// Start 发起普通 V3 EveryLine 审查任务，完整透传冻结的 typed request。
 // 入参：ctx context.Context；request StartRequest 为已定义字段的发起请求。
 // 返回值：Document 为任务快照；error 为校验或 API 失败。
 func (service *Service) Start(ctx context.Context, request StartRequest) (Document, error) {

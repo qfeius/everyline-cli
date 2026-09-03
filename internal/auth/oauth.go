@@ -39,10 +39,13 @@ type OAuthLoginOptions struct {
 	StartCallback func(string) (OAuthCallback, error)
 }
 
-type oauthMetadata struct {
-	AuthorizationEndpoint string   `json:"authorization_endpoint"`
-	TokenEndpoint         string   `json:"token_endpoint"`
-	CodeChallengeMethods  []string `json:"code_challenge_methods_supported"`
+type OAuthMetadata struct {
+	AuthorizationEndpoint       string   `json:"authorization_endpoint"`
+	TokenEndpoint               string   `json:"token_endpoint"`
+	DeviceAuthorizationEndpoint string   `json:"device_authorization_endpoint"`
+	RevocationEndpoint          string   `json:"revocation_endpoint"`
+	CodeChallengeMethods        []string `json:"code_challenge_methods_supported"`
+	GrantTypes                  []string `json:"grant_types_supported"`
 }
 
 type oauthTokenResponse struct {
@@ -128,24 +131,37 @@ func LoginUserOAuth(ctx context.Context, profile config.Profile, options OAuthLo
 	return token, nil
 }
 
-func fetchOAuthMetadata(ctx context.Context, client *http.Client, endpoint string) (oauthMetadata, error) {
+func fetchOAuthMetadata(ctx context.Context, client *http.Client, endpoint string) (OAuthMetadata, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return oauthMetadata{}, fmt.Errorf("创建 OAuth metadata 请求: %w", err)
+		return OAuthMetadata{}, fmt.Errorf("创建 OAuth metadata 请求: %w", err)
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return oauthMetadata{}, fmt.Errorf("获取 OAuth metadata: %w", err)
+		return OAuthMetadata{}, fmt.Errorf("获取 OAuth metadata: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return oauthMetadata{}, fmt.Errorf("获取 OAuth metadata 失败: http=%d", response.StatusCode)
+		return OAuthMetadata{}, fmt.Errorf("获取 OAuth metadata 失败: http=%d", response.StatusCode)
 	}
-	var metadata oauthMetadata
+	var metadata OAuthMetadata
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&metadata); err != nil {
-		return oauthMetadata{}, fmt.Errorf("解析 OAuth metadata: %w", err)
+		return OAuthMetadata{}, fmt.Errorf("解析 OAuth metadata: %w", err)
 	}
 	return metadata, nil
+}
+
+// DiscoverOAuthMetadata 获取并解析 Profile 指向的 OAuth authorization server metadata。
+// 入参：ctx context.Context 控制请求；client *http.Client 为可注入 HTTP 客户端；endpoint string 为 metadata URL。
+// 返回值：OAuthMetadata 为端点和能力声明；error 为 URL、网络、状态码或 JSON 错误。
+func DiscoverOAuthMetadata(ctx context.Context, client *http.Client, endpoint string) (OAuthMetadata, error) {
+	if err := validateOAuthEndpoint("metadata_url", endpoint); err != nil {
+		return OAuthMetadata{}, err
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	return fetchOAuthMetadata(ctx, client, endpoint)
 }
 
 func validateOAuthEndpoint(name, rawURL string) error {

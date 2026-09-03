@@ -2,11 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"time"
 
-	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 	"git.qtech.cn/ai/everyline-cli/internal/review"
@@ -53,7 +53,7 @@ func newReviewFileCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		Long: `准备审查输入文件。
 
 本组命令只负责上传文件，不会自动发起审查任务。
-支持本地文件上传和通过 URL 上传。`,
+支持本地路径、stdin 原始附件字节流和 HTTP/HTTPS URL。`,
 	}
 	withNotes(command, "upload 和 upload-url 只准备审查文件，不会自动发起审查任务。")
 	command.AddCommand(
@@ -68,22 +68,32 @@ func newReviewFileCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 // 返回值：*cobra.Command，支持文件校验、dry-run 和实际上传。
 func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var filePath string
+	var fromStdin bool
 	var name string
 	var dryRun bool
 	var printInput bool
 	command := &cobra.Command{
 		Use:   "upload",
-		Short: "上传本地合同文件",
-		Long:  "上传本地合同文件，返回平台文件信息；不会自动发起审查任务。",
+		Short: "上传本地或 stdin 合同文件",
+		Long:  "从本地路径或 stdin 原始字节流上传合同文件，返回平台文件信息；不会自动发起审查任务。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
-			if err := review.ValidateUploadFile(filePath); err != nil {
-				return err
+			if fromStdin && filePath != "" {
+				return fmt.Errorf("--file 与 --stdin 只能选择一个")
+			}
+			if !fromStdin {
+				if err := review.ValidateUploadFile(filePath); err != nil {
+					return err
+				}
 			}
 			if err := review.ValidateFileName(name); err != nil {
 				return err
 			}
-			input := map[string]any{"file": filePath, "name": name}
+			source := filePath
+			if fromStdin {
+				source = "stdin"
+			}
+			input := map[string]any{"file": source, "name": name}
 			if dryRun || printInput {
 				return render(runtime, root, "json", input)
 			}
@@ -92,7 +102,16 @@ func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 				return err
 			}
 			progress(runtime, root, "正在上传合同文件...")
-			result, err := service.UploadFile(command.Context(), filePath, name, "", "")
+			var result review.Document
+			if fromStdin {
+				content, readErr := io.ReadAll(io.LimitReader(runtime.Input, review.MaxUploadBytes+1))
+				if readErr != nil {
+					return fmt.Errorf("读取 stdin 合同文件: %w", readErr)
+				}
+				result, err = service.UploadContent(command.Context(), content, name, name, "", "")
+			} else {
+				result, err = service.UploadFile(command.Context(), filePath, name, "", "")
+			}
 			if err != nil {
 				return err
 			}
@@ -100,10 +119,10 @@ func newReviewFileUploadCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 		},
 	}
 	command.Flags().StringVar(&filePath, "file", "", "本地合同路径")
+	command.Flags().BoolVar(&fromStdin, "stdin", false, "从 stdin 读取合同内容，适合沙箱附件流")
 	command.Flags().StringVar(&name, "name", "", "业务文件名（含扩展名）")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "只校验并输出请求，不调用远端")
 	command.Flags().BoolVar(&printInput, "print-input", false, "输出规范化请求，不调用远端")
-	_ = command.MarkFlagRequired("file")
 	_ = command.MarkFlagRequired("name")
 	return command
 }
@@ -251,8 +270,8 @@ func newReviewTaskStartCommand(runtime *Runtime, root *rootOptions) *cobra.Comma
 	var printInput bool
 	command := &cobra.Command{
 		Use:   "start",
-		Short: "发起智审任务",
-		Long: `使用 JSON 请求发起智审任务；本命令不会上传文件。
+		Short: "发起 EveryLine 审查任务",
+		Long: `使用 JSON 请求发起 EveryLine 审查任务；本命令不会上传文件。
 
 请求字段（仅支持以下字段）：
 - businessId string（必填）：上传接口返回的业务对象 ID。
@@ -417,6 +436,7 @@ func newReviewTaskResultCommand(runtime *Runtime, root *rootOptions) *cobra.Comm
 	withNotes(command,
 		"内部轮询 status，任务成功后调用一次 info。",
 		"超时、取消或详情获取失败时返回最后可用的任务快照和错误；预览链接缺失不影响详情成功。",
+		"reviewDetailUrl 是完整签名链接；调用方必须逐字保留全部 query（包括 token），不得删减或重新拼接。",
 	)
 	addTaskQueryFlags(command, &query)
 	command.Flags().DurationVar(&interval, "interval", 2*time.Second, "轮询间隔")
@@ -528,7 +548,10 @@ func buildReviewService(runtime *Runtime, root *rootOptions) (*review.Service, c
 	if err != nil {
 		return nil, config.Profile{}, err
 	}
-	provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now, runtime.Secrets)
+	if err := validateDeviceCredentialRuntime(runtime, identity); err != nil {
+		return nil, config.Profile{}, err
+	}
+	provider := newTokenProvider(runtime)
 	client := openplatform.NewClientForIdentity(profile, provider, runtime.HTTP, identity)
 	return review.NewService(client, root.Timeout), profile, nil
 }

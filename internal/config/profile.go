@@ -14,7 +14,7 @@ var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 type IdentityKind string
 
 const (
-	// IdentityApp 使用 tenant_access_token 访问开放平台。
+	// IdentityApp 使用 tenant_access_token 访问 EveryLine。
 	IdentityApp IdentityKind = "app"
 	// IdentityUser 使用用户认证页面产生的用户访问 token。
 	IdentityUser IdentityKind = "user"
@@ -34,21 +34,25 @@ func ParseIdentityKind(value string) (IdentityKind, error) {
 	}
 }
 
-// Profile 保存一个智审开放平台环境的非敏感连接信息。
+// Profile 保存一个 EveryLine 环境的非敏感连接信息。
 type Profile struct {
-	Name              string       `json:"name" yaml:"name"`
-	BaseURL           string       `json:"base_url" yaml:"base_url"`
-	UserBaseURL       string       `json:"user_base_url,omitempty" yaml:"user_base_url,omitempty"`
-	AuthURL           string       `json:"auth_url,omitempty" yaml:"auth_url,omitempty"`
-	TokenURL          string       `json:"token_url" yaml:"token_url"`
-	AppID             string       `json:"app_id" yaml:"app_id"`
-	OAuthMetadataURL  string       `json:"oauth_metadata_url,omitempty" yaml:"oauth_metadata_url,omitempty"`
-	OAuthBusinessType string       `json:"oauth_business_type,omitempty" yaml:"oauth_business_type,omitempty"`
-	OAuthClientID     string       `json:"oauth_client_id,omitempty" yaml:"oauth_client_id,omitempty"`
-	OAuthRedirectURL  string       `json:"oauth_redirect_url,omitempty" yaml:"oauth_redirect_url,omitempty"`
-	OAuthScopes       []string     `json:"oauth_scopes,omitempty" yaml:"oauth_scopes,omitempty"`
-	DefaultIdentity   IdentityKind `json:"default_identity,omitempty" yaml:"default_identity,omitempty"`
-	DefaultOutput     string       `json:"default_output" yaml:"default_output"`
+	Name                        string       `json:"name" yaml:"name"`
+	BaseURL                     string       `json:"base_url" yaml:"base_url"`
+	UserBaseURL                 string       `json:"user_base_url,omitempty" yaml:"user_base_url,omitempty"`
+	AuthURL                     string       `json:"auth_url,omitempty" yaml:"auth_url,omitempty"`
+	TokenURL                    string       `json:"token_url" yaml:"token_url"`
+	AppID                       string       `json:"app_id" yaml:"app_id"`
+	OAuthMetadataURL            string       `json:"oauth_metadata_url,omitempty" yaml:"oauth_metadata_url,omitempty"`
+	OAuthBusinessType           string       `json:"oauth_business_type,omitempty" yaml:"oauth_business_type,omitempty"`
+	OAuthClientID               string       `json:"oauth_client_id,omitempty" yaml:"oauth_client_id,omitempty"`
+	OAuthDeviceClientID         string       `json:"oauth_device_client_id,omitempty" yaml:"oauth_device_client_id,omitempty"`
+	OAuthRedirectURL            string       `json:"oauth_redirect_url,omitempty" yaml:"oauth_redirect_url,omitempty"`
+	OAuthScopes                 []string     `json:"oauth_scopes,omitempty" yaml:"oauth_scopes,omitempty"`
+	OAuthDeviceAuthorizationURL string       `json:"oauth_device_authorization_url,omitempty" yaml:"oauth_device_authorization_url,omitempty"`
+	OAuthRevocationURL          string       `json:"oauth_revocation_url,omitempty" yaml:"oauth_revocation_url,omitempty"`
+	OAuthResource               string       `json:"oauth_resource,omitempty" yaml:"oauth_resource,omitempty"`
+	DefaultIdentity             IdentityKind `json:"default_identity,omitempty" yaml:"default_identity,omitempty"`
+	DefaultOutput               string       `json:"default_output" yaml:"default_output"`
 }
 
 // Validate 校验 Profile 的公共字段、URL、默认身份和默认输出格式。
@@ -77,6 +81,21 @@ func (profile Profile) Validate() error {
 	if profile.OAuthMetadataURL != "" {
 		if err := validateHTTPURL("oauth-metadata-url", profile.OAuthMetadataURL); err != nil {
 			return err
+		}
+	}
+	if profile.OAuthDeviceAuthorizationURL != "" {
+		if err := validateHTTPURL("oauth-device-authorization-url", profile.OAuthDeviceAuthorizationURL); err != nil {
+			return err
+		}
+	}
+	if profile.OAuthRevocationURL != "" {
+		if err := validateHTTPURL("oauth-revocation-url", profile.OAuthRevocationURL); err != nil {
+			return err
+		}
+	}
+	if profile.OAuthResource != "" {
+		if err := validateBaseURL(profile.OAuthResource); err != nil {
+			return fmt.Errorf("oauth-resource: %w", err)
 		}
 	}
 	if profile.OAuthRedirectURL != "" {
@@ -129,6 +148,38 @@ func (profile Profile) HasOAuthConfiguration() bool {
 		strings.TrimSpace(profile.OAuthBusinessType) != "" &&
 		strings.TrimSpace(profile.OAuthClientID) != "" &&
 		strings.TrimSpace(profile.OAuthRedirectURL) != ""
+}
+
+// HasDeviceOAuthConfiguration 判断 Profile 是否具备发现或显式调用 Device Grant 的基础配置。
+// 入参：无，接收者 Profile 为当前环境配置。
+// 返回值：bool，metadata、Device client ID 和 scope 均可用时为 true。
+func (profile Profile) HasDeviceOAuthConfiguration() bool {
+	return strings.TrimSpace(profile.OAuthMetadataURL) != "" &&
+		strings.TrimSpace(profile.EffectiveOAuthDeviceClientID()) != "" && len(profile.OAuthScopes) > 0
+}
+
+// EffectiveOAuthDeviceClientID 返回 Device Grant 专用 client ID，依次兼容显式值、内置环境预设和 OAuth public client。
+// 入参：无，接收者 Profile 为当前环境配置。
+// 返回值：string，为 Device Grant 的 client_id。
+func (profile Profile) EffectiveOAuthDeviceClientID() string {
+	if clientID := strings.TrimSpace(profile.OAuthDeviceClientID); clientID != "" {
+		return clientID
+	}
+	// 已保存的 dev/test Profile 可能早于独立 Device client；按官方 metadata 预设补齐，不要求用户重建配置。
+	if clientID := ResolveEnvironmentDeviceClientID(profile.OAuthMetadataURL); clientID != "" {
+		return clientID
+	}
+	return strings.TrimSpace(profile.OAuthClientID)
+}
+
+// EffectiveOAuthResource 返回 Device Grant 的 resource，未配置时使用 user 业务 API 基址。
+// 入参：无，接收者 Profile 为当前环境配置。
+// 返回值：string，为授权服务绑定 token 的资源地址。
+func (profile Profile) EffectiveOAuthResource() string {
+	if resource := strings.TrimSpace(profile.OAuthResource); resource != "" {
+		return resource
+	}
+	return strings.TrimRight(profile.BaseURLFor(IdentityUser), "/")
 }
 
 // BaseURLFor 返回指定身份的业务 API 基址；user 未单独配置时复用 app 基址。

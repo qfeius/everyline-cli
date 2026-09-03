@@ -14,6 +14,7 @@ import (
 // recordingClient 记录清单服务生成的最后一个 HTTP Adapter 请求。
 type recordingClient struct {
 	request openplatform.Request
+	data    json.RawMessage
 }
 
 // Do 保存请求并返回固定的 JSON data。
@@ -24,7 +25,33 @@ func (client *recordingClient) Do(_ context.Context, request openplatform.Reques
 	if err := contracts.ValidateRequest(request.OperationID, request.Method, request.Path, request.ContractInput); err != nil {
 		return openplatform.Response{}, err
 	}
-	return openplatform.Response{Data: json.RawMessage(`{"ok":true}`)}, nil
+	// data 用于精确模拟各接口的服务端响应；未指定时维持原有固定成功对象。
+	responseData := client.data
+	if responseData == nil {
+		responseData = json.RawMessage(`{"ok":true}`)
+	}
+	return openplatform.Response{Data: responseData}, nil
+}
+
+// TestChecklistCreateCompletesNullReviewRuleIDs 验证创建成功响应缺少规则关联时，CLI 使用已确认写入的请求补齐展示结果。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；响应中的 reviewRuleIds 仍为 nil 或发生类型漂移时通过 t.Fatal 报告。
+func TestChecklistCreateCompletesNullReviewRuleIDs(t *testing.T) {
+	payload := Checklist{Name: "采购清单", ReviewRuleIDs: []string{"rule-1", "rule-2"}}
+	client := &recordingClient{data: json.RawMessage(`{"id":"check-1","name":"采购清单","reviewRuleIds":null}`)}
+
+	result, err := NewService(client, time.Second).Create(context.Background(), payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("result=%#v，期望创建响应对象", result)
+	}
+	ruleIDs, ok := created["reviewRuleIds"].([]string)
+	if !ok || len(ruleIDs) != 2 || ruleIDs[0] != "rule-1" || ruleIDs[1] != "rule-2" {
+		t.Fatalf("reviewRuleIds=%#v，期望使用创建请求补齐规则 ID", created["reviewRuleIds"])
+	}
 }
 
 // TestServiceOperationMappings 验证七个清单接口的 operation、method 和 path，包含批量创建与批量更新。

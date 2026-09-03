@@ -1,6 +1,6 @@
-# 智书智审 CLI：让 Agent 真的会审合同
+# EveryLine CLI：让 Agent 真的会审合同
 
-你的 AI Agent 能读合同、找风险、整理审查意见，但如果它进不了智审系统，就只能停在“帮你分析一下”。`everyline-cli` 把合同上传、主体提取、发起审查、结果查询、清单管理和规则管理变成稳定的命令，让 Agent、测试脚本和 CI 都能直接完成一条真实的智审流程。
+你的 AI Agent 能读合同、找风险、整理审查意见，但如果它用不了 EveryLine，就只能停在“帮你分析一下”。`everyline-cli` 把合同上传、主体提取、发起审查、结果查询、清单管理和规则管理变成稳定的命令，让 Agent、测试脚本和 CI 都能直接完成一条真实的 EveryLine 审查流程。
 
 > 当前基线：`test` 分支，核对日期 `2026-08-26`。
 >
@@ -8,11 +8,11 @@
 
 ## 它是什么
 
-`everyline-cli` 是面向终端、自动化任务和 AI Agent 的智审开放平台命令行客户端。
+`everyline-cli` 是面向终端、自动化任务和 AI Agent 的 EveryLine 命令行工具。
 
 | 组成部分 | 作用 | 适用场景 |
 |---|---|---|
-| `everyline-cli` | 把智审开放平台能力封装为结构化命令 | 人工终端、Agent 调用、自动化测试、CI |
+| `everyline-cli` | 把 EveryLine 合同审查能力封装为结构化命令 | 人工终端、Agent 调用、自动化测试、CI |
 | Profile | 保存环境地址、app ID、默认身份和输出格式 | 在 `dev`、`test`、`blue`、`prod` 或自定义环境之间切换 |
 | app / user 身份 | 分别完成应用身份和个人身份认证 | 系统集成、个人操作、联调验收 |
 | JSON / YAML / table / raw 输出 | 将业务结果稳定写入 stdout | Agent 解析、脚本编排、人工查看 |
@@ -22,7 +22,7 @@
 
 - 需要让 Agent 发起并跟踪合同审查的业务和研发人员。
 - 需要覆盖 CLI 接口的测试和验收人员。
-- 需要在 CI、脚本或服务集成中调用智审能力的开发者。
+- 需要在 CI、脚本或服务集成中调用 EveryLine 审查能力的开发者。
 - 需要维护审查清单、规则分组和审查规则的管理员。
 
 ## 代码仓库
@@ -276,7 +276,7 @@ flowchart TD
     G -->|是| H[提取合同主体]
     G -->|否| I[构造 startReview 请求]
     H --> I
-    I --> J[发起智审任务]
+    I --> J[发起 EveryLine 审查任务]
     J --> K{是否等待结果}
     K -->|否| L[输出 upload、subjects、start]
     K -->|是| M[轮询任务状态]
@@ -773,7 +773,7 @@ everyline-cli review run \
 | `review file ...` | app / user | 需要对应环境 token |
 | `review subject ...` | app / user | 需要对应环境 token |
 | `review task ...` | app / user | 需要对应环境 token |
-| `review run` | app / user | 编排多个智审接口 |
+| `review run` | app / user | 编排多个 EveryLine 审查接口 |
 | `checklist ...` | app / user | 权限仍由后端校验 |
 | `rule ...` | app / user | 权限仍由后端校验 |
 | `version/help` | 不需要身份 | 本地命令 |

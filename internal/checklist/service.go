@@ -56,7 +56,27 @@ func (service *Service) Create(ctx context.Context, payload Checklist) (any, err
 	if err := payload.Validate(false); err != nil {
 		return nil, err
 	}
-	return service.doPayload(ctx, OperationCreate, http.MethodPost, pathCollection, nil, payload, payload)
+	result, err := service.doPayload(ctx, OperationCreate, http.MethodPost, pathCollection, nil, payload, payload)
+	if err != nil {
+		return nil, err
+	}
+	return completeCreatedChecklistResponse(result, payload), nil
+}
+
+// completeCreatedChecklistResponse 补齐创建接口成功响应中缺失的规则关联，避免展示结果与已落库请求不一致。
+// 入参：result any 为服务端 data；payload Checklist 为已经校验并成功写入的创建请求。
+// 返回值：any 为保持原响应形状的结果；仅当对象中的 reviewRuleIds 缺失或为 null 时使用请求值补齐。
+func completeCreatedChecklistResponse(result any, payload Checklist) any {
+	created, ok := result.(map[string]any)
+	if !ok {
+		return result
+	}
+	if ruleIDs, exists := created["reviewRuleIds"]; exists && ruleIDs != nil {
+		return result
+	}
+	// 创建已经成功后，请求中的规则 ID 就是本次写入事实；复制切片避免响应与调用方输入共享底层数组。
+	created["reviewRuleIds"] = append([]string(nil), payload.ReviewRuleIDs...)
+	return created
 }
 
 // BatchCreate 以全有或全无语义批量创建审查清单。

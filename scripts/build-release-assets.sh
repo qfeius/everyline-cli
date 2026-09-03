@@ -2,7 +2,8 @@
 set -eu
 
 # 为 npm/npx 薄包装生成 macOS、Linux、Windows 的 amd64/arm64 原生二进制。
-version=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || true)}
+# 未显式注入版本时复用 npm 包版本，避免同一份源码产出两个对外版本号。
+version=${VERSION:-$(node -p 'require("./package.json").version' 2>/dev/null || true)}
 commit=${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || true)}
 build_date=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 update_manifest_url=${UPDATE_MANIFEST_URL:-}

@@ -51,6 +51,11 @@ function requiredPackageFiles() {
     "skills/everyline-cli/SKILL.md",
     "skills/everyline-cli/references/management.md",
     "skills/everyline-cli/references/review-flow.md",
+    "skills/everyline-shared/SKILL.md",
+    "skills/everyline-review/SKILL.md",
+    "skills/everyline-review/references/review-flow.md",
+    "skills/everyline-review-config/SKILL.md",
+    "skills/everyline-review-config/references/management.md",
     ...binaries,
   ];
 }
