@@ -61,7 +61,7 @@ everyline-cli auth init --profile prod-user --as user --output json
 everyline-cli auth complete --profile prod-user --as user --output json
 ~~~
 
-`auth init` 不监听 `127.0.0.1`。认证服务需要在 metadata 中发布 `device_authorization_endpoint` 和 Device client；也可把平台确认的 endpoint/client ID 写入 Profile。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
+`auth init` 不监听 `127.0.0.1`。dev/test 的 `contract-review` metadata 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，scope 固定为 `contract-review:full`；已有旧 Profile 会按标准 metadata URL 自动选择该 client。其他环境也可把平台确认的 endpoint/client ID 写入 Profile。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
 
 检查授权状态：
 
@@ -250,7 +250,7 @@ CLI 已移除 --app-type 参数；文件上传也不再接受 --business-id。�
 
 ## 自更新
 
-`everyline-cli version` 输出 `latestVersion/isLatest/updateCommand`；检查失败时 `isLatest=null`，且不会阻断业务命令。普通 review/checklist/rule 命令发现新版本时只在 stderr 提示。
+`everyline-cli version` 输出 `latestVersion/isLatest/updateRequired/updateCommand`；检查失败时 `isLatest=null`，且不会把未知状态当成需要更新。普通 review/checklist/rule 命令确认存在新版本时，在 stderr 输出 `UPDATE_PENDING` 单行 JSON，但继续完成当前业务 API。Agent 在当前完整业务流程结束后执行其中的 `updateCommand`，下一条新业务再使用新版 CLI 与 Skill。
 
 独立二进制可以通过 HTTPS manifest 检查和更新当前平台制品。地址按 `--manifest-url`、`EVERYLINE_CLI_UPDATE_MANIFEST_URL`、发布构建内置值的顺序选择：
 
@@ -264,6 +264,8 @@ everyline-cli update \
 ~~~
 
 manifest 需要声明版本、当前平台的制品 URL 和 SHA-256。CLI 只有在新版本、平台匹配且摘要校验通过时才替换二进制；下载失败或校验失败会保留原文件。Windows 需要延后替换时返回 `updated=false, scheduled=true`，独立 helper 的最终结果写入 stderr。通过 npm/npx 薄包装启动时不会修改包内二进制，请使用 npm 更新包。
+
+Codex 与 WorkBuddy 的 CLI 和三项 Skill 来自同一个 npm 包，npm 更新成功后现有目录链接会直接使用新版 Skill。版本门禁以统一包版本为检测信号，因此每次 Skill 发布（包括纯文案调整）都必须提升 `package.json` 版本、发布同版本 npm 包并更新远端 manifest；只替换 ZIP 而不提升统一版本不会触发本地强制更新。豆包导入版仍按平台发布流程上传新 ZIP。
 
 manifest 示例：
 

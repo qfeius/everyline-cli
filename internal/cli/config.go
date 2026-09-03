@@ -85,6 +85,9 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				if !command.Flags().Changed("oauth-client-id") {
 					oauthClientID = preset.OAuthClientID
 				}
+				if !command.Flags().Changed("oauth-device-client-id") {
+					oauthDeviceClientID = preset.OAuthDeviceClientID
+				}
 				if !command.Flags().Changed("oauth-redirect-url") {
 					oauthRedirectURL = preset.OAuthRedirectURL
 				}

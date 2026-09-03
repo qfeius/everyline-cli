@@ -19,8 +19,8 @@ import (
 var (
 	ErrCredentialsMissing          = errors.New("缺少应用密钥或有效 token")
 	ErrAuthentication              = errors.New("鉴权失败")
-	ErrUserAuthentication          = errors.New("用户 OAuth 认证未完成，请执行 auth login --as user")
-	ErrUserSessionExpired          = errors.New("登录已失效，请执行 auth login --as user 重新授权")
+	ErrUserAuthentication          = errors.New("用户 OAuth 认证未完成")
+	ErrUserSessionExpired          = errors.New("登录已失效")
 	ErrUserTokenRefreshUnavailable = errors.New("user token 不支持刷新")
 	ErrUserTokenChanged            = errors.New("user token 已被并发更新")
 )
@@ -101,6 +101,26 @@ func (provider *Provider) WithDeviceCredentials(store DeviceCredentialStore) *Pr
 	return provider
 }
 
+// userAuthenticationError 根据凭证运行时返回准确的首次 user 授权命令。
+// 入参：profileName string 为当前 Profile 名称。
+// 返回值：error，保留 ErrUserAuthentication 分类，并分别指向 Device Grant 或本机 OAuth。
+func (provider *Provider) userAuthenticationError(profileName string) error {
+	if provider.deviceStore != nil {
+		return fmt.Errorf("%w；请执行 auth init --profile %s --as user --output json", ErrUserAuthentication, profileName)
+	}
+	return fmt.Errorf("%w；请执行 auth login --profile %s --as user", ErrUserAuthentication, profileName)
+}
+
+// UserSessionExpiredError 根据凭证运行时返回准确的 user 重新授权命令，供业务 Client 保留同一身份恢复流程。
+// 入参：profileName string 为当前 Profile 名称。
+// 返回值：error，保留 ErrUserSessionExpired 分类，并分别指向 Device Grant 或本机 OAuth。
+func (provider *Provider) UserSessionExpiredError(profileName string) error {
+	if provider.deviceStore != nil {
+		return fmt.Errorf("%w；请重新执行 auth init --profile %s --as user --output json", ErrUserSessionExpired, profileName)
+	}
+	return fmt.Errorf("%w；请重新执行 auth login --profile %s --as user", ErrUserSessionExpired, profileName)
+}
+
 // Token 优先读取显式环境变量，其次读取有效缓存，最后用环境变量中的 app secret 重新获取 app token。
 // 入参：ctx context.Context 控制请求取消；profile config.Profile 指定凭证和 token 地址。
 // 返回值：Token 为可用凭证；error 在缺少凭证或远端失败时非 nil。
@@ -163,7 +183,7 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 				}
 			}
 		}
-		return Token{}, ErrUserAuthentication
+		return Token{}, provider.userAuthenticationError(profile.Name)
 	}
 
 	if accessToken := strings.TrimSpace(os.Getenv("EVERYLINE_ACCESS_TOKEN")); accessToken != "" {
@@ -220,10 +240,12 @@ func (provider *Provider) refreshDeviceUserToken(ctx context.Context, profile co
 			return err
 		}
 		if credential.Token == nil || credential.Token.AccessToken == "" {
-			return ErrUserAuthentication
+			return provider.userAuthenticationError(profile.Name)
 		}
 		if credential.Token.AccessToken != expectedAccessToken {
-			return ErrUserTokenChanged
+			// 另一进程已在本锁之前完成刷新；直接复用其结果，避免合法并发请求无故失败。
+			result = *credential.Token
+			return nil
 		}
 		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, *credential.Token, profile.EffectiveOAuthDeviceClientID())
 		if err != nil {
@@ -232,7 +254,7 @@ func (provider *Provider) refreshDeviceUserToken(ctx context.Context, profile co
 				if saveErr := provider.deviceStore.Save(profile.Name, credential); saveErr != nil {
 					return fmt.Errorf("清理已拒绝的 Device 凭证: %w", saveErr)
 				}
-				return fmt.Errorf("%w；请重新执行 auth init --profile %s --as user", ErrUserSessionExpired, profile.Name)
+				return provider.UserSessionExpiredError(profile.Name)
 			}
 			return err
 		}
@@ -263,10 +285,12 @@ func (provider *Provider) refreshFileUserToken(ctx context.Context, profile conf
 	err := identityStore.WithRefreshLock(profile.Name, config.IdentityUser, func() error {
 		current, err := identityStore.LoadForIdentity(profile.Name, config.IdentityUser)
 		if err != nil {
-			return ErrUserAuthentication
+			return provider.userAuthenticationError(profile.Name)
 		}
 		if current.AccessToken != expectedAccessToken {
-			return ErrUserTokenChanged
+			// 另一进程已更新兼容缓存；把当前 token 作为本次刷新结果交给调用层重放请求。
+			result = current
+			return nil
 		}
 		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, current, profile.OAuthClientID)
 		if err != nil {
@@ -274,7 +298,7 @@ func (provider *Provider) refreshFileUserToken(ctx context.Context, profile conf
 				if deleteErr := identityStore.DeleteForIdentityIfAccessTokenMatches(profile.Name, config.IdentityUser, expectedAccessToken); deleteErr != nil {
 					return deleteErr
 				}
-				return fmt.Errorf("%w；请重新执行 auth login --profile %s --as user", ErrUserSessionExpired, profile.Name)
+				return provider.UserSessionExpiredError(profile.Name)
 			}
 			return err
 		}

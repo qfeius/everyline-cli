@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -184,5 +186,113 @@ func TestProfileSecretEnvironmentKeysDoNotCollide(t *testing.T) {
 		if actual := SecretFromEnvironment(profileName); actual != expected {
 			t.Errorf("profile=%s secret=%q，期望 %q", profileName, actual, expected)
 		}
+	}
+}
+
+// TestProviderConcurrentFileRefreshReusesNewToken 验证后进入刷新锁的请求复用并发刷新结果，而不是把已更新 token 当作错误。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；重复刷新、并发请求失败或缓存未更新时通过 t.Fatal 报告。
+func TestProviderConcurrentFileRefreshReusesNewToken(t *testing.T) {
+	refreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseRefresh) }) }
+	t.Cleanup(release)
+	var refreshCalls atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/metadata":
+			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","grant_types_supported":["refresh_token"]}`))
+		case "/token":
+			if refreshCalls.Add(1) == 1 {
+				close(refreshStarted)
+				<-releaseRefresh
+			}
+			_, _ = writer.Write([]byte(`{"access_token":"new-user-token","token_type":"Bearer","refresh_token":"new-refresh","expires_in":3600}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	tokenPath := filepath.Join(t.TempDir(), "tokens.json")
+	firstStore := NewFileTokenStore(tokenPath)
+	secondStore := NewFileTokenStore(tokenPath)
+	oldToken := Token{AccessToken: "old-user-token", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := firstStore.SaveForIdentity("test-user", config.IdentityUser, oldToken); err != nil {
+		t.Fatal(err)
+	}
+	profile := config.Profile{Name: "test-user", OAuthMetadataURL: server.URL + "/metadata", OAuthClientID: "oauth-client"}
+	providers := []*Provider{
+		NewProvider(firstStore, server.Client(), time.Now),
+		NewProvider(secondStore, server.Client(), time.Now),
+	}
+	type refreshResult struct {
+		token Token
+		err   error
+	}
+	results := make(chan refreshResult, len(providers))
+	go func() {
+		token, err := providers[0].RefreshForIdentity(context.Background(), profile, config.IdentityUser, oldToken.AccessToken)
+		results <- refreshResult{token: token, err: err}
+	}()
+	select {
+	case <-refreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("首个 refresh 请求未按时发出")
+	}
+	go func() {
+		token, err := providers[1].RefreshForIdentity(context.Background(), profile, config.IdentityUser, oldToken.AccessToken)
+		results <- refreshResult{token: token, err: err}
+	}()
+	release()
+
+	for range providers {
+		select {
+		case result := <-results:
+			if result.err != nil || result.token.AccessToken != "new-user-token" {
+				t.Fatalf("并发 refresh 结果=%#v err=%v", result.token, result.err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("并发 refresh 未按时完成")
+		}
+	}
+	if refreshCalls.Load() != 1 {
+		t.Fatalf("refreshCalls=%d，期望只刷新一次", refreshCalls.Load())
+	}
+}
+
+// TestProviderDeviceRefreshReusesConcurrentResult 验证进入 Device 刷新锁后发现 token 已更新时直接复用新凭证。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；重新发起网络刷新或未返回新 token 时通过 t.Fatal 报告。
+func TestProviderDeviceRefreshReusesConcurrentResult(t *testing.T) {
+	store := &encryptedDeviceStore{dir: t.TempDir(), key: make([]byte, 32)}
+	if err := store.Save("test-user", DeviceCredential{Token: &Token{AccessToken: "new-device-token"}}); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewProvider(NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json")), http.DefaultClient, time.Now).
+		WithDeviceCredentials(store)
+
+	got, err := provider.refreshDeviceUserToken(context.Background(), config.Profile{Name: "test-user"}, "old-device-token")
+	if err != nil || got.AccessToken != "new-device-token" {
+		t.Fatalf("token=%#v err=%v", got, err)
+	}
+}
+
+// TestProviderDeviceMissingCredentialsUsesDeviceGrantHint 验证沙箱缺少 user 凭证时只提示 Device Grant 入口。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；错误类型或下一步命令仍指向 loopback 登录时通过 t.Fatal 报告。
+func TestProviderDeviceMissingCredentialsUsesDeviceGrantHint(t *testing.T) {
+	store := &encryptedDeviceStore{dir: t.TempDir(), key: make([]byte, 32)}
+	provider := NewProvider(NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json")), http.DefaultClient, time.Now).
+		WithDeviceCredentials(store)
+
+	_, err := provider.TokenForIdentity(context.Background(), config.Profile{Name: "test-user"}, config.IdentityUser)
+	if !errors.Is(err, ErrUserAuthentication) {
+		t.Fatalf("err=%v，期望 user 鉴权错误", err)
+	}
+	if !strings.Contains(err.Error(), "auth init --profile test-user --as user --output json") || strings.Contains(err.Error(), "auth login") {
+		t.Fatalf("沙箱鉴权提示未固定使用 Device Grant: %v", err)
 	}
 }

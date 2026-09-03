@@ -2,6 +2,7 @@ package openplatform
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -193,23 +194,78 @@ func TestClientInvalidatesRevokedUserSession(t *testing.T) {
 	}
 }
 
-// TestClientPreservesReauthenticatedUserSession 验证旧请求返回 110004 时不会删除请求期间重新登录写入的新 user token。
+// TestClientDeviceSessionExpiryUsesDeviceGrantHint 验证沙箱 Device token 失效后只提示重新执行 auth init。
 // 入参：t *testing.T 为测试上下文。
-// 返回值：无；请求时序、错误类型或新 token 保留状态不符合预期时通过 t.Fatal 报告。
+// 返回值：无；错误不保留会话失效类型、request ID 或错误指向 loopback 登录时通过 t.Fatal 报告。
+func TestClientDeviceSessionExpiryUsesDeviceGrantHint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("X-Request-Id", "req-device-expired")
+		writer.WriteHeader(http.StatusBadRequest)
+		_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
+	}))
+	defer server.Close()
+
+	workspace := t.TempDir()
+	encodedKey := base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901"))
+	deviceStore, err := auth.NewDeviceCredentialStore(auth.DeviceCredentialOptions{LookupEnv: func(name string) (string, bool) {
+		switch name {
+		case "SKILL_SESSION_WORKSPACE":
+			return workspace, true
+		case "EVERYLINE_CLI_CREDENTIAL_KEY_V1":
+			return encodedKey, true
+		default:
+			return "", false
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := config.Profile{Name: "test-user", BaseURL: server.URL, UserBaseURL: server.URL}
+	if err := deviceStore.Save(profile.Name, auth.DeviceCredential{Token: &auth.Token{AccessToken: "revoked-device-token"}}); err != nil {
+		t.Fatal(err)
+	}
+	provider := auth.NewProvider(auth.NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json")), server.Client(), time.Now).
+		WithDeviceCredentials(deviceStore)
+	client := NewClientForIdentity(profile, provider, server.Client(), config.IdentityUser)
+	_, err = client.Do(context.Background(), Request{
+		OperationID: "listReviewChecklists", Method: http.MethodGet, Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{},
+	})
+	if !errors.Is(err, auth.ErrUserSessionExpired) || !strings.Contains(err.Error(), "req-device-expired") {
+		t.Fatalf("err=%v，期望 Device 会话失效和 request ID", err)
+	}
+	if !strings.Contains(err.Error(), "auth init --profile test-user --as user --output json") || strings.Contains(err.Error(), "auth login") {
+		t.Fatalf("Device 会话恢复提示未固定使用 auth init: %v", err)
+	}
+}
+
+// TestClientPreservesReauthenticatedUserSession 验证旧请求返回 110004 时复用请求期间重新登录写入的新 user token。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；请求时序、重放结果或新 token 保留状态不符合预期时通过 t.Fatal 报告。
 func TestClientPreservesReauthenticatedUserSession(t *testing.T) {
 	requestStarted := make(chan struct{})
 	releaseResponse := make(chan struct{})
+	var requestStartedOnce sync.Once
+	var businessAttempts atomic.Int32
 	var releaseOnce sync.Once
 	release := func() {
 		releaseOnce.Do(func() { close(releaseResponse) })
 	}
 	defer release()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		close(requestStarted)
-		<-releaseResponse
-		writer.Header().Set("X-Request-Id", "req-stale-session")
-		writer.WriteHeader(http.StatusBadRequest)
-		_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
+		businessAttempts.Add(1)
+		switch request.Header.Get("Authorization") {
+		case "Bearer old-token":
+			requestStartedOnce.Do(func() { close(requestStarted) })
+			<-releaseResponse
+			writer.Header().Set("X-Request-Id", "req-stale-session")
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
+		case "Bearer new-token":
+			_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[]}`))
+		default:
+			t.Errorf("authorization=%q", request.Header.Get("Authorization"))
+			writer.WriteHeader(http.StatusUnauthorized)
+		}
 	}))
 	defer server.Close()
 
@@ -242,11 +298,14 @@ func TestClientPreservesReauthenticatedUserSession(t *testing.T) {
 	release()
 	select {
 	case err := <-requestResult:
-		if !errors.Is(err, auth.ErrUserSessionExpired) {
-			t.Fatalf("err=%v，期望旧请求报告登录失效", err)
+		if err != nil {
+			t.Fatalf("旧请求未复用新 user token: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("旧请求未按时返回")
+	}
+	if businessAttempts.Load() != 2 {
+		t.Fatalf("businessAttempts=%d，期望旧 token 失败后用新 token 重放一次", businessAttempts.Load())
 	}
 	if token, err := loginStore.LoadForIdentity("test-user", config.IdentityUser); err != nil || token.AccessToken != "new-token" {
 		t.Fatalf("新 user token 被旧请求误删: token=%#v err=%v", token, err)

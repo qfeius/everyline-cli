@@ -101,3 +101,33 @@ test("全局安装同步登记 Codex 与 WorkBuddy 的三项 Skill", (t) => {
     }
   }
 });
+
+test("全局安装后置目标冲突时不留下部分 Skill 链接", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const codexSkillRoot = join(fixture.root, "codex-skills");
+  const workBuddySkillRoot = join(fixture.root, "workbuddy-skills");
+  const conflictTarget = join(workBuddySkillRoot, "everyline-review");
+  const marker = join(conflictTarget, "user-file.txt");
+  mkdirSync(conflictTarget, { recursive: true });
+  writeFileSync(marker, "preserve");
+
+  assert.throws(() => installPackage({
+    packageRoot: fixture.packageRoot,
+    platform: "linux",
+    architecture: "x64",
+    environment: {
+      npm_config_global: "true",
+      EVERYLINE_CODEX_SKILLS_DIR: codexSkillRoot,
+      EVERYLINE_WORKBUDDY_SKILLS_DIR: workBuddySkillRoot,
+    },
+    userHome: fixture.userHome,
+  }), /目标已存在/);
+
+  for (const name of skillNames) {
+    assert.equal(existsSync(join(codexSkillRoot, name)), false);
+  }
+  assert.equal(existsSync(join(workBuddySkillRoot, "everyline-shared")), false);
+  assert.equal(existsSync(marker), true);
+  assert.equal(existsSync(join(workBuddySkillRoot, "everyline-review-config")), false);
+});

@@ -34,7 +34,7 @@ auth logout [--as app|user]
 
 `config use <name>` 会切换当前默认 Profile；`auth use [profile] --as app|user` 会修改指定 Profile 的默认身份。只对当前命令临时指定 Profile 或身份时，使用 `--profile` 或 `--as`。
 
-`auth init`/`auth complete` 为豆包与 WorkBuddy 沙箱提供不依赖 `127.0.0.1` callback 的 Device Grant。豆包 AgentKit 使用工作区加密文件并要求 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`（base64 编码 32 字节）；豆包工作任务按 `SESSION_ID` 派生会话隔离密钥；WorkBuddy 按 `CODEBUDDY_SESSION_ID` 使用系统 Credential Manager/Keychain/Secret Service。加密凭证中携带非敏感 Device Profile 快照，沙箱重建后可通过显式 `--profile` 恢复。OAuth metadata 尚未发布 `device_authorization_endpoint` 时，CLI 会明确报告服务端能力缺口；不会在远端沙箱自动回退到 loopback 登录。
+`auth init`/`auth complete` 为豆包与 WorkBuddy 沙箱提供不依赖 `127.0.0.1` callback 的 Device Grant。dev/test 的 `contract-review` 业务固定使用独立 EveryLine Device client `zscli_c77221e810ce3977` 和 `contract-review:full` scope；旧 Profile 会按标准 metadata URL 自动采用该 client。豆包 AgentKit 使用工作区加密文件并要求 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`（base64 编码 32 字节）；豆包工作任务按 `SESSION_ID` 派生会话隔离密钥；WorkBuddy 按 `CODEBUDDY_SESSION_ID` 使用系统 Credential Manager/Keychain/Secret Service。加密凭证中携带非敏感 Device Profile 快照，沙箱重建后可通过显式 `--profile` 恢复。OAuth metadata 尚未发布 `device_authorization_endpoint` 时，CLI 会明确报告服务端能力缺口；不会在远端沙箱自动回退到 loopback 登录。
 
 `auth status` 对服务端提供过期时间的 token 输出 `expiresAt` 和 `expiresInSeconds`；对 app 环境变量交接的未知过期 token 输出 `expiresKnown=false`，不输出虚假时间。OAuth metadata 声明 `refresh_token` grant 时，user token 进入五分钟刷新窗口会在跨进程锁内尝试 refresh；临时刷新失败会保留尚未真正过期的旧 token。业务请求收到可信 `code=110004` 时只强制刷新并原样重放一次；服务端未声明刷新能力时保持原有失效清理和重新登录提示，`invalid_grant` 也会清理失效凭证并要求重新授权。如果缓存已由并发重新登录更新，CLI 会保留新 token。
 
@@ -104,7 +104,7 @@ everyline-cli review run --data '{"source":{"type":"file","path":"./contract.pdf
 
 `checklist batch-create`、`checklist batch-update`、`rule batch-create` 和 `rule batch-update` 均支持一次提交数组并执行真实 HTTP 调用。批量更新数组中的每项必须包含 `id`；`--dry-run`/`--print-input` 仍只做本地校验和请求预览。
 
-`version` 返回当前构建信息及 `latestVersion/isLatest/updateCommand`；检查失败时 `isLatest=null` 并携带 `checkError`，退出码仍为 0。普通业务命令发现新版本时只在 stderr 提示，检查失败不阻断请求。更新地址按命令参数、`EVERYLINE_CLI_UPDATE_MANIFEST_URL`、发布构建内置值选择。
+`version` 返回当前构建信息及 `latestVersion/isLatest/updateRequired/updateCommand`；检查失败时 `isLatest=null`、`updateRequired=false` 并携带 `checkError`，退出码仍为 0。普通业务命令确认存在新版本时在 stderr 输出 `UPDATE_PENDING` 单行 JSON，包含当前版本、最新版本、更新命令和 `updateAfter=current_business_workflow`；当前命令和整条 Agent 业务流程继续，全部业务 API 结束后再执行更新。检查失败不阻断请求。更新地址按命令参数、`EVERYLINE_CLI_UPDATE_MANIFEST_URL`、发布构建内置值选择。
 
 `update` 只支持独立二进制。命令从解析出的 HTTPS manifest 选择当前平台制品，比较 SemVer，下载后校验 SHA-256，再替换当前二进制。同步替换完成时输出 `updated=true, scheduled=false`；Windows 需要等待当前进程退出时输出 `updated=false, scheduled=true`，独立 helper 的最终成功或失败写入 stderr。`--dry-run` 只做 manifest、平台和版本校验。通过 npm/npx 薄包装启动时不会修改包内二进制，应使用 npm 更新包。
 

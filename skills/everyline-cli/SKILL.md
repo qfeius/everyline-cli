@@ -12,7 +12,8 @@ description: Use the installed EveryLine/智审 CLI as an interactive Agent work
 - Agent 负责识别意图、只追问缺失信息、展示真实候选项、维护本次对话状态，以及在危险写操作前取得确认。
 - CLI 负责授权、上传、主体提取、查询、字段校验、任务发起、结果轮询和资源写入。
 - 不修改、替换或模拟 CLI 现有接口；只调用实时帮助中存在的命令和参数。
-- 不把合同正文、access token、app secret、device code、授权码或回调参数输出到对话。CLI 返回的 `reviewDetailUrl` 是面向用户的签名预览链接：把该字段值视为一个不可拆分的字符串，在回复中逐字展示从 `https://` 到最后一个查询参数的完整 URL，包括 `token`；不得删减、脱敏、解析、重新编码、重新拼接或只展示无 query 的短链接。
+- 不把合同正文、access token、app secret、device code、授权码或回调参数输出到对话。审查成功后的最终回复只包含审查结果概要、可点击的“审查结果详情”和默认两小时的有效期提示，不展示原始终态、task ID 或其他服务端参数。
+- 把 `reviewDetailUrl` 视为不可拆分的字符串，逐字用作 `[审查结果详情](<REVIEW_DETAIL_URL>)` 的 Markdown 链接目标，包括链接内的 `token`、`taskId` 等实际 query；不得删减、脱敏、解析、重新编码、重新拼接、拆出参数或使用无 query 的短链接。
 
 合同审查或授权任务必须读取 [references/review-flow.md](references/review-flow.md)。只有用户明确要求管理清单或规则时，才读取 [references/management.md](references/management.md)。
 
@@ -26,7 +27,9 @@ everyline-cli version --output json
 everyline-cli --help
 ```
 
-- 已安装时直接使用，不自动升级。
+- 解析 `version` 的结构化结果。`updateRequired=true`（等价于 `isLatest=false`）时记住唯一的 `updateCommand`，继续完成用户当前整条业务流程；不得在上传、任务创建、轮询、获取结果或同一次配置写入之间更新 CLI。
+- 当前业务取得终态或明确失败、已保留业务结果且不再有本次请求的后续 API 调用后，原样执行一次记住的 `updateCommand`。更新成功后再次执行 `version --output json` 验证，随后结束当前轮，让下一轮重新加载新版 Skill。更新失败时保留业务结果、报告更新错误，并在开始下一条新业务前优先重试更新。
+- `isLatest=null` 表示检查状态未知，不声称已是最新版；CLI 只在确认存在新版时输出 `UPDATE_PENDING`，当前业务仍继续。
 - 未安装且用户只想临时运行时，建议 `npx everyline-cli`。
 - 只有用户明确要求长期安装时，才执行全局安装。
 - 执行业务操作前读取对应命令的实时 `--help`；帮助中缺少必要命令或参数时停止该操作，并列出缺口。
@@ -59,11 +62,15 @@ everyline-cli review task result --help
 - 非空 `selectedCheckListIds` 与 `matchContractTypeRulePackage=true` 可以组合执行；
 - `review task result` 会等待终态并获取详情。
 
-任一能力缺失时，说明当前 CLI 版本未满足交互审查流程并停止本次审查，不把中文强度猜成数字、不自动升级，也不先上传合同。授权、帮助查询和不依赖该缺口的只读管理仍可继续。
+任一能力缺失时，说明当前 CLI 版本未满足交互审查流程并停止本次审查，不把中文强度猜成数字，也不先上传合同。延迟更新只使用 `version` 返回的真实 `updateRequired/updateCommand`，不自行猜测版本。授权、帮助查询和不依赖该缺口的只读管理仍可继续。
 
 ## 授权交互
 
 授权和业务调用前，先固定本次会话使用的 Profile 与身份：
+
+豆包沙箱与用户本机浏览器不共享网络命名空间，`127.0.0.1:8000` 指向沙箱自身。豆包和 WorkBuddy Device 运行时不得执行 `auth login --profile <profile> --as user`。固定流程为：CLI 执行 `auth init` → 原样返回完整 HTTPS 授权链接 → 用户在任意浏览器批准 → 用户在新消息中确认“已授权” → CLI 执行一次 `auth complete` 查询账号服务并保存凭证。
+
+dev/test 的 Device Grant 固定使用 `business_type=contract-review`、独立 EveryLine Device client `zscli_c77221e810ce3977` 和 `scope=contract-review:full`。这些值由环境预设和旧 Profile 兼容逻辑提供，Agent 不替换为合同 CLI 的共享 client，也不改写 scope。
 
 1. 用户明确提供 Profile 时执行 `everyline-cli config show <profile> --output json` 校验并读取该 Profile；未提供时执行 `everyline-cli config show --output json` 读取当前 Profile。
 2. 当前 Profile 不存在或与用户明确指定的环境不一致时停止，请用户提供或修正 Profile；不自动创建、修改或切换 Profile。

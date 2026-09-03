@@ -184,65 +184,74 @@ func newAuthDeviceCompleteCommand(runtime *Runtime, root *rootOptions) *cobra.Co
 			if err != nil {
 				return err
 			}
-			credential, err := store.Load(profile.Name)
-			if err != nil {
-				return fmt.Errorf("没有待完成的 Device 授权，请先执行 auth init: %w", err)
+			return completeDeviceAuthorization(command.Context(), runtime, root, profile, store)
+		},
+	}
+}
+
+// completeDeviceAuthorization 在 Profile 级跨进程锁内完成一次 Device 授权检查，确保同一 device code 只被一个进程兑换。
+// 入参：ctx context.Context 控制远端请求；runtime *Runtime 提供 HTTP、时钟和输出；root *rootOptions 提供超时与格式；profile config.Profile 为当前配置；store auth.DeviceCredentialStore 为会话凭证存储。
+// 返回值：error，状态读取、OAuth 兑换、凭证保存或结果渲染失败时非 nil。
+func completeDeviceAuthorization(ctx context.Context, runtime *Runtime, root *rootOptions, profile config.Profile, store auth.DeviceCredentialStore) error {
+	return store.WithRefreshLock(profile.Name, func() error {
+		credential, err := store.Load(profile.Name)
+		if err != nil {
+			return fmt.Errorf("没有待完成的 Device 授权，请先执行 auth init: %w", err)
+		}
+		if credential.Pending == nil {
+			if credential.Token != nil && credential.Token.AccessToken != "" {
+				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(credential.Token.ExpiresAt)})
 			}
-			if credential.Pending == nil {
-				if credential.Token != nil && credential.Token.AccessToken != "" {
-					return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(credential.Token.ExpiresAt)})
-				}
-				return fmt.Errorf("没有待完成的 Device 授权，请先执行 auth init")
-			}
-			pending := credential.Pending
-			if pending.Status == auth.DevicePendingChecking || pending.Status == auth.DevicePendingUncertain {
-				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(auth.DevicePendingUncertain)})
-			}
-			if pending.Status != auth.DevicePending {
-				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(pending.Status), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
-			}
-			if !runtimeNow(runtime).Before(pending.ExpiresAt) {
-				pending.Status = auth.DevicePendingExpired
-				if err := store.Save(profile.Name, credential); err != nil {
-					return err
-				}
-				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(auth.DevicePendingExpired), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
-			}
-			pending.Status = auth.DevicePendingChecking
+			return fmt.Errorf("没有待完成的 Device 授权，请先执行 auth init")
+		}
+		pending := credential.Pending
+		if pending.Status == auth.DevicePendingChecking || pending.Status == auth.DevicePendingUncertain {
+			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(auth.DevicePendingUncertain)})
+		}
+		if pending.Status != auth.DevicePending {
+			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(pending.Status), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
+		}
+		if !runtimeNow(runtime).Before(pending.ExpiresAt) {
+			pending.Status = auth.DevicePendingExpired
 			if err := store.Save(profile.Name, credential); err != nil {
 				return err
 			}
-			authContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
-			defer cancel()
-			token, exchangeErr := auth.CompleteDeviceAuthorization(
-				authContext, runtime.HTTP, pending.TokenEndpoint, pending.ClientID, pending.DeviceCode, runtime.Now,
-			)
-			if exchangeErr != nil {
-				status := auth.DevicePendingUncertain
-				switch {
-				case auth.IsDeviceGrantError(exchangeErr, "authorization_pending"), auth.IsDeviceGrantError(exchangeErr, "slow_down"):
-					status = auth.DevicePending
-				case auth.IsDeviceGrantError(exchangeErr, "access_denied"):
-					status = auth.DevicePendingDenied
-				case auth.IsDeviceGrantError(exchangeErr, "expired_token"):
-					status = auth.DevicePendingExpired
-				case auth.IsDeviceGrantError(exchangeErr, "invalid_grant"):
-					status = auth.DevicePendingInvalidGrant
-				}
-				pending.Status = status
-				if err := store.Save(profile.Name, credential); err != nil {
-					return err
-				}
-				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(status), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
+			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(auth.DevicePendingExpired), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
+		}
+		pending.Status = auth.DevicePendingChecking
+		if err := store.Save(profile.Name, credential); err != nil {
+			return err
+		}
+		authContext, cancel := context.WithTimeout(ctx, root.Timeout)
+		defer cancel()
+		token, exchangeErr := auth.CompleteDeviceAuthorization(
+			authContext, runtime.HTTP, pending.TokenEndpoint, pending.ClientID, pending.DeviceCode, runtime.Now,
+		)
+		if exchangeErr != nil {
+			status := auth.DevicePendingUncertain
+			switch {
+			case auth.IsDeviceGrantError(exchangeErr, "authorization_pending"), auth.IsDeviceGrantError(exchangeErr, "slow_down"):
+				status = auth.DevicePending
+			case auth.IsDeviceGrantError(exchangeErr, "access_denied"):
+				status = auth.DevicePendingDenied
+			case auth.IsDeviceGrantError(exchangeErr, "expired_token"):
+				status = auth.DevicePendingExpired
+			case auth.IsDeviceGrantError(exchangeErr, "invalid_grant"):
+				status = auth.DevicePendingInvalidGrant
 			}
-			credential.Pending = nil
-			credential.Token = &token
+			pending.Status = status
 			if err := store.Save(profile.Name, credential); err != nil {
-				return fmt.Errorf("保存 Device 授权结果失败，状态可能不确定，请先修复安全存储再重新开始授权: %w", err)
+				return err
 			}
-			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(token.ExpiresAt)})
-		},
-	}
+			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(status), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
+		}
+		credential.Pending = nil
+		credential.Token = &token
+		if err := store.Save(profile.Name, credential); err != nil {
+			return fmt.Errorf("保存 Device 授权结果失败，状态可能不确定，请先修复安全存储再重新开始授权: %w", err)
+		}
+		return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(token.ExpiresAt)})
+	})
 }
 
 // requireDeviceCredentialStore 返回已初始化的沙箱安全凭证存储并保留初始化错误。
@@ -290,7 +299,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "login",
 		Short: "获取并安全缓存 app/user token",
-		Long:  "获取并安全缓存 app 或 user 身份凭证；app 使用 app secret，user 使用 OAuth/PKCE 浏览器授权。",
+		Long:  "获取并安全缓存 app 或 user 身份凭证；app 使用 app secret，user 仅在本机使用 OAuth/PKCE loopback 授权。豆包/WorkBuddy 沙箱使用 auth init/complete Device Grant。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			profile, err := selectedProfile(runtime, root)
@@ -303,6 +312,10 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			}
 			if err := validateDeviceCredentialRuntime(runtime, identity); err != nil {
 				return err
+			}
+			if identity == config.IdentityUser && runtime.DeviceCredentials != nil {
+				// 已识别的豆包/WorkBuddy 运行时与宿主浏览器不共享 loopback，固定转入 Device Grant。
+				return fmt.Errorf("%w；当前豆包/WorkBuddy 沙箱使用 Device Grant，请执行 auth init --profile %s --as user --output json", auth.ErrUserAuthentication, profile.Name)
 			}
 			appIDFlagSet := command.Flags().Changed("app-id")
 			appSecretFlagSet := command.Flags().Changed("app-secret")
@@ -574,7 +587,7 @@ func newAuthUseCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	}
 }
 
-// newAuthLogoutCommand 创建 auth logout，按能力撤销 Device refresh token 后删除本地凭证。
+// newAuthLogoutCommand 创建 auth logout，在刷新锁内删除本地凭证并尽力撤销 Device refresh token。
 // 入参：runtime *Runtime 为 token store；root *rootOptions 为 Profile/输出 flags。
 // 返回值：*cobra.Command，可幂等注销。
 func newAuthLogoutCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
@@ -592,50 +605,82 @@ func newAuthLogoutCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var deviceCleanupErr error
+			var revocationErr error
 			if identity == config.IdentityUser && runtime.DeviceCredentials != nil {
-				credential, deviceErr := runtime.DeviceCredentials.Load(profile.Name)
-				if deviceErr == nil {
+				// 撤销与删除必须和 refresh 共用同一把锁，确保进行中的刷新先结束且后续刷新看见已删除状态。
+				deviceCleanupErr = runtime.DeviceCredentials.WithRefreshLock(profile.Name, func() error {
+					credential, deviceErr := runtime.DeviceCredentials.Load(profile.Name)
+					if deviceErr != nil {
+						if errors.Is(deviceErr, auth.ErrDeviceCredentialNotFound) {
+							return nil
+						}
+						return errors.Join(deviceErr, runtime.DeviceCredentials.Delete(profile.Name))
+					}
 					if credential.Token != nil && credential.Token.RefreshToken != "" {
-						revocationEndpoint := strings.TrimSpace(profile.OAuthRevocationURL)
-						if revocationEndpoint == "" {
-							authContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
-							defer cancel()
-							metadata, discoverErr := auth.DiscoverOAuthMetadata(authContext, runtime.HTTP, profile.OAuthMetadataURL)
-							if discoverErr != nil {
-								return discoverErr
-							}
-							revocationEndpoint = strings.TrimSpace(metadata.RevocationEndpoint)
-						}
-						if revocationEndpoint != "" {
-							authContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
-							defer cancel()
-							if err := auth.RevokeOAuthRefreshToken(authContext, runtime.HTTP, revocationEndpoint, profile.EffectiveOAuthDeviceClientID(), credential.Token.RefreshToken); err != nil {
-								return err
-							}
-						}
+						revocationErr = revokeDeviceRefreshToken(command.Context(), runtime, profile, credential.Token.RefreshToken, root.Timeout)
 					}
-					if err := runtime.DeviceCredentials.Delete(profile.Name); err != nil {
-						return err
-					}
-				} else if !errors.Is(deviceErr, auth.ErrDeviceCredentialNotFound) {
-					return deviceErr
-				}
+					return runtime.DeviceCredentials.Delete(profile.Name)
+				})
 			}
-			if identityStore, ok := runtime.Tokens.(interface {
-				DeleteForIdentity(string, config.IdentityKind) error
-			}); ok {
-				err = identityStore.DeleteForIdentity(profile.Name, identity)
-			} else if identity == config.IdentityApp {
-				err = runtime.Tokens.Delete(profile.Name)
-			} else {
-				err = fmt.Errorf("token store 不支持 user 身份")
+			cacheCleanupErr := deleteCachedIdentityToken(runtime, profile.Name, identity)
+			if cleanupErr := errors.Join(deviceCleanupErr, cacheCleanupErr); cleanupErr != nil {
+				return cleanupErr
 			}
-			if err != nil {
-				return err
+			if revocationErr != nil {
+				return fmt.Errorf("本地凭证已清理，但远端 refresh token 撤销失败: %w", revocationErr)
 			}
 			return render(runtime, root, profile.DefaultOutput, map[string]any{"profile": profile.Name, "identity": identity, "authenticated": false})
 		},
 	}
+}
+
+// revokeDeviceRefreshToken 在一个总超时内发现撤销端点并尽力撤销当前 Device refresh token。
+// 入参：ctx context.Context 控制请求；runtime *Runtime 提供 HTTP 客户端；profile config.Profile 提供 OAuth 配置；refreshToken string 为待撤销凭证；timeout time.Duration 为总时间预算。
+// 返回值：error，metadata 发现或远端撤销失败时非 nil；服务端未提供撤销端点时为 nil。
+func revokeDeviceRefreshToken(ctx context.Context, runtime *Runtime, profile config.Profile, refreshToken string, timeout time.Duration) error {
+	authContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	revocationEndpoint := strings.TrimSpace(profile.OAuthRevocationURL)
+	if revocationEndpoint == "" {
+		metadata, err := auth.DiscoverOAuthMetadata(authContext, runtime.HTTP, profile.OAuthMetadataURL)
+		if err != nil {
+			return err
+		}
+		revocationEndpoint = strings.TrimSpace(metadata.RevocationEndpoint)
+	}
+	if revocationEndpoint == "" {
+		return nil
+	}
+	return auth.RevokeOAuthRefreshToken(authContext, runtime.HTTP, revocationEndpoint, profile.EffectiveOAuthDeviceClientID(), refreshToken)
+}
+
+// deleteCachedIdentityToken 在 user 刷新锁内删除兼容 token 缓存，保持 app 身份的既有删除行为。
+// 入参：runtime *Runtime 提供 token store；profileName string 为 Profile 名称；identity config.IdentityKind 为待清理身份。
+// 返回值：error，存储能力不足、加锁或删除失败时非 nil。
+func deleteCachedIdentityToken(runtime *Runtime, profileName string, identity config.IdentityKind) error {
+	identityStore, ok := runtime.Tokens.(interface {
+		DeleteForIdentity(string, config.IdentityKind) error
+	})
+	if !ok {
+		if identity == config.IdentityApp {
+			return runtime.Tokens.Delete(profileName)
+		}
+		return fmt.Errorf("token store 不支持 user 身份")
+	}
+	if identity != config.IdentityUser {
+		return identityStore.DeleteForIdentity(profileName, identity)
+	}
+	lockingStore, ok := runtime.Tokens.(interface {
+		DeleteForIdentity(string, config.IdentityKind) error
+		WithRefreshLock(string, config.IdentityKind, func() error) error
+	})
+	if !ok {
+		return identityStore.DeleteForIdentity(profileName, identity)
+	}
+	return lockingStore.WithRefreshLock(profileName, identity, func() error {
+		return lockingStore.DeleteForIdentity(profileName, identity)
+	})
 }
 
 // maxInt64 返回两个 int64 中较大值，用于避免输出负数剩余秒数。

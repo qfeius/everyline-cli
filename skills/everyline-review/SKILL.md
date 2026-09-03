@@ -16,14 +16,14 @@ metadata:
 
 在用户要求使用 EveryLine/智审审查合同、继续本会话真实任务，或提供真实 task ID 查询状态与结果时使用。
 
-- 首次配置、user/app 授权和鉴权恢复交给 `everyline-shared`。
-- 清单、规则和规则分组本身的查询或管理交给 `everyline-review-config`。
-- 一次审查中选择已有清单仍属于本 Skill。
+- 用户已经表达审查目标但遇到首次配置、user/app 授权或鉴权问题时，本 Skill 保持业务流程负责人身份；`everyline-shared` 只处理配置或恢复步骤，成功后回到原审查步骤，不重复询问已经确认的合同、主体、清单或强度。
+- “用清单 A 审查这份合同”等在一次审查中选择已有清单的请求仍属于本 Skill；只有用户要查询或改变清单、规则、规则分组本身时才交给 `everyline-review-config`。
+- “新建或修改清单后审查合同”拆分为两个连续阶段：先由 `everyline-review-config` 单独确认、写入并回读配置，再回到本 Skill 发起审查；审查请求本身不代表用户确认配置写入。
 - 一般法律咨询、合同起草、改写、翻译以及其他合同 CLI 不使用本 Skill。
 
 ## 依赖与调用上下文
 
-1. 执行 `command -v everyline-cli` 和 `everyline-cli version --output json`。
+1. 执行 `command -v everyline-cli` 和 `everyline-cli version --output json`；按 `everyline-shared` 记录 `updateRequired`，先让当前审查完成上传、发起、终态轮询和结果获取，再执行延迟更新。
 2. 固定本次 `<profile>` 与 `<identity>`，并按 `everyline-shared` 查询 `auth status`；恢复后只重试中断步骤一次。
 3. 本流程每条命令显式携带 `--profile <profile> --as <identity>`，不因资源不可见自动切换身份。
 
@@ -50,11 +50,25 @@ everyline-cli review task result --help
 
 关键能力缺失时列出缺口，停止上传和任务创建；保留授权、帮助查询和无关只读操作。
 
-## 结果链接
+## 成功结果输出
 
-`reviewDetailUrl` 是后端签发给用户打开审查结果的完整链接，不是 CLI access token。将整个字段值视为不可拆分的字符串，逐字展示从 `https://` 到最后一个查询参数的完整 URL，包括 `token`；不删除、遮盖、缩写、解析、重新编码、重新拼接，也不只展示无 query 的短链接。
+审查成功后，面向用户的最终回复只包含以下三项，不附带原始 JSON、状态机信息或调用参数：
 
-若使用 Markdown，链接目标必须与 CLI 字段值逐字一致；发送前比较目标和值，不一致时直接展示原始 URL。CLI 未返回该字段时只报告链接缺失，不通过 id/taskId 猜测地址。
+- `审查结果概要`：只根据 CLI 真实结果概括风险数量、等级和主要风险点；没有可总结数据时明确说明未返回可展示的风险概要，不猜测内容。
+- `审查结果链接`：固定显示可点击文字“审查结果详情”，并把 `reviewDetailUrl` 从 `https://` 到最后一个查询参数的完整字段值逐字用作 Markdown 链接目标。
+- `有效期提示`：提示该免登录链接默认有效期为两小时，请及时查看。
+
+最终回复严格使用以下格式，不追加“已完成”、参数回顾、更新状态、诊断信息、免责声明或其他段落：
+
+```text
+审查结果概要：<根据真实结果生成的简要概要>
+审查结果链接：[审查结果详情](<REVIEW_DETAIL_URL>)
+有效期提示：该免登录链接默认有效期为两小时，请及时查看。
+```
+
+不得单独展示 `taskId`、`businessId`、`fileId`、`fileHash`、`id`、`status`、终态枚举、轮询参数、request ID、CLI 命令、退出码或其他服务端字段。签名 URL 自身包含的 `id/version/source/businessId/taskId/entry/appType/token` 等 query 必须保留在链接内，但不得拆出、解释或再次罗列。
+
+`reviewDetailUrl` 是后端签发的用户链接，不是 CLI access token。将整个字段值视为不可拆分的字符串，不得删除、遮盖、缩写、解析、重新编码、重新拼接或使用无 query 的短链接。Markdown 链接文字固定为“审查结果详情”，链接目标必须与 CLI 字段值逐字一致；发送前比较目标和值，不一致时重新按原值生成。CLI 未返回该字段时仅在“审查结果链接”一项说明链接缺失，不通过 id/taskId 猜测地址。
 
 ## 真实性边界
 

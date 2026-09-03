@@ -18,8 +18,9 @@ metadata:
 | 首次配置、了解能力、user/app 授权、身份切换、状态、退出或鉴权恢复 | `everyline-shared` |
 | 审查一份合同、继续同一任务或取得审查结果 | `everyline-review` |
 | 查询或管理清单、规则、规则分组及归属 | `everyline-review-config` |
+| 合同起草、改写、翻译或一般法律咨询 | EveryLine Skill 范围之外，按当前宿主的普通对话能力处理 |
 
-用户已经明确业务目标时直接进入对应业务 Skill；只有遇到配置或鉴权问题时回到本 Skill。一次审查中选择已有清单仍属于 `everyline-review`。
+用户已经明确审查或配置管理目标时直接进入对应业务 Skill，并由该业务 Skill 保持流程负责人身份；遇到配置或鉴权问题时，本 Skill 只处理相关接入步骤，成功后立即回到原业务步骤，不重复询问已经确认的输入。一次审查中选择已有清单仍属于 `everyline-review`。
 
 ## 执行前检查
 
@@ -32,6 +33,9 @@ everyline-cli --help
 everyline-cli auth --help
 ```
 
+- 解析 `version` 的结构化结果。`updateRequired=true`（等价于 `isLatest=false`）时记住唯一的 `updateCommand`，继续完成用户当前整条业务流程；不得在上传、任务创建、轮询、获取结果或同一次配置写入之间更新 CLI。
+- 当前业务取得终态或明确失败、已向用户保留业务结果且不再有本次请求的后续 API 调用后，原样执行一次记住的 `updateCommand`。更新成功后再次执行 `version --output json` 验证，随后结束当前轮，让下一轮重新加载新版 Skill。更新失败时保留已完成的业务结果、报告更新错误，并在开始下一条新业务前优先重试更新。
+- `isLatest=null` 表示本次检查状态未知，不声称已是最新版；CLI 只在确认存在新版时输出 `UPDATE_PENDING`，当前业务仍继续。
 - 二进制缺失时报告 `everyline-cli` 依赖缺口；只有用户明确要求安装时才按正式 npm 制品安装。
 - 每次具体操作前读取对应命令的实时 `--help`。帮助、结构化输出与本文不一致时以当前 CLI 为准，并列出缺口。
 - 默认使用 `--output json`，把 stdout 作为结构化结果；stderr 的进度或诊断不代表业务成功。
@@ -82,6 +86,12 @@ everyline-cli auth login --profile <profile> --as user
 CLI 打开浏览器时让用户在该页面完成授权；使用 `--no-open-browser` 时完整原样展示 CLI 返回的链接。保持同一次登录会话，不为切换展示方式重启登录。
 
 ### 豆包与 WorkBuddy Device Grant
+
+豆包沙箱与用户本机浏览器不共享网络命名空间，`127.0.0.1:8000` 指向沙箱自身。豆包和 WorkBuddy Device 运行时不得执行 `auth login --profile <profile> --as user`，也不得等待 loopback callback。
+
+固定流程为：CLI 执行 `auth init` → 原样返回完整 HTTPS 授权链接 → 用户在任意浏览器批准 → 用户在新消息中确认“已授权” → CLI 执行一次 `auth complete` 查询账号服务并保存凭证。
+
+dev/test 固定使用 `business_type=contract-review`、独立 EveryLine Device client `zscli_c77221e810ce3977`、`scope=contract-review:full` 和对应开放平台 resource。优先使用环境预设；已有旧 Profile 会由 CLI 按标准 `contract-review` metadata URL 自动选择该 Device client，Agent 不改写 client ID 或 scope。
 
 读取 `auth init --help` 和 `auth complete --help`，执行一次：
 

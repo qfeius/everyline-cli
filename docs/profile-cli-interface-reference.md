@@ -114,6 +114,7 @@ everyline-cli config add custom-user \
 | `oauth_metadata_url` | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | 当前未配置 | 当前未配置 |
 | `oauth_business_type` | `contract-review` | `contract-review` | 当前未配置 | 当前未配置 |
 | `oauth_client_id` | `zscli_a9f2a3ce87fa5bb6` | `zscli_a94c9aa398389bd7` | 当前未配置 | 当前未配置 |
+| `oauth_device_client_id` | `zscli_c77221e810ce3977` | `zscli_c77221e810ce3977` | 当前未配置 | 当前未配置 |
 | `oauth_redirect_url` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | 当前未配置 | 当前未配置 |
 | `oauth_scopes` | `contract-review:full` | `contract-review:full` | 当前未配置 | 当前未配置 |
 
@@ -127,6 +128,7 @@ everyline-cli config add dev-user \
   --oauth-metadata-url 'https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review' \
   --oauth-business-type 'contract-review' \
   --oauth-client-id 'zscli_a9f2a3ce87fa5bb6' \
+  --oauth-device-client-id 'zscli_c77221e810ce3977' \
   --oauth-redirect-url 'http://127.0.0.1:8000/login' \
   --oauth-scope 'contract-review:full' \
   --default-identity user \
@@ -143,6 +145,7 @@ everyline-cli config add test-user \
   --oauth-metadata-url 'https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review' \
   --oauth-business-type 'contract-review' \
   --oauth-client-id 'zscli_a94c9aa398389bd7' \
+  --oauth-device-client-id 'zscli_c77221e810ce3977' \
   --oauth-redirect-url 'http://127.0.0.1:8000/login' \
   --oauth-scope 'contract-review:full' \
   --default-identity user \
@@ -419,7 +422,7 @@ CLI 缓存 token，但 stdout 仍只输出登录状态对象。metadata 声明 `
 
 | CLI 命令 | 入参 | 响应 |
 |---|---|---|
-| `version` | 可选 `--manifest-url HTTPS_URL` | `version/commit/date/latestVersion/isLatest/updateCommand/checkError?` |
+| `version` | 可选 `--manifest-url HTTPS_URL` | `version/commit/date/latestVersion/isLatest/updateRequired/updateCommand/checkError?` |
 | `update` | 可选 `--manifest-url HTTPS_URL`、`--dry-run`；也可使用环境变量或发布构建内置地址 | `currentVersion/latestVersion/platform/updated/scheduled/dryRun` |
 | `completion bash\|fish\|powershell\|zsh` | shell 名称 | 对应 shell completion 脚本文本 |
 

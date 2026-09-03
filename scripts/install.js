@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } = require("node:fs");
+const { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, symlinkSync } = require("node:fs");
 const { homedir } = require("node:os");
 const { dirname, join, resolve } = require("node:path");
 const { resolvePlatformTarget } = require("./platform");
@@ -27,11 +27,11 @@ function shouldInstallWorkBuddySkills(environment) {
 }
 
 /**
- * registerAgentSkill 将 npm 包内单项 Skill 以目录链接登记到指定 Agent 宿主目录。
- * 入参：source（string）为包内 Skill 绝对路径；target（string）为宿主 Skill 目标路径；platform（string）为 Node 平台名；hostName（string）为错误提示中的宿主名。
- * 返回值："created" | "existing"，分别表示新建链接或已存在同源链接。
+ * inspectAgentSkillRegistration 只读校验 Skill 来源和目标，并生成后续登记计划。
+ * 入参：source（string）为包内 Skill 路径；target（string）为宿主目标路径；hostName（string）为宿主名；metadata（object）为需透传的名称与分组。
+ * 返回值：object，包含规范化来源、目标、预期状态以及调用方元数据。
  */
-function registerAgentSkill(source, target, platform = process.platform, hostName = "Agent") {
+function inspectAgentSkillRegistration(source, target, hostName = "Agent", metadata = {}) {
   const resolvedSource = resolve(source);
   if (!existsSync(join(resolvedSource, "SKILL.md"))) {
     throw new Error(`npm 包缺少 EveryLine Skill: ${resolvedSource}`);
@@ -51,16 +51,78 @@ function registerAgentSkill(source, target, platform = process.platform, hostNam
     if (targetState.isSymbolicLink()) {
       // realpath 同时兼容 POSIX 符号链接和 Windows 目录联接的路径表示差异。
       if (realpathSync(target) === realpathSync(resolvedSource)) {
-        return "existing";
+        return { ...metadata, source: resolvedSource, target, hostName, status: "existing" };
       }
     }
     throw new Error(`${hostName} Skill 目标已存在，请先确认并移走原目录: ${target}`);
   }
 
-  // 使用链接让 npm 原地升级后自动切换到同一包内的新 Skill，避免 CLI 与 Skill 版本漂移。
-  mkdirSync(dirname(target), { recursive: true });
-  symlinkSync(resolvedSource, target, platform === "win32" ? "junction" : "dir");
-  return "created";
+  return { ...metadata, source: resolvedSource, target, hostName, status: "created" };
+}
+
+/**
+ * registerAgentSkillPlans 先预检全部目标，再一次性登记并在异常时回滚本轮新建链接。
+ * 入参：plans（Array<object>）为来源、目标、宿主和元数据列表；platform（string）为 Node 平台名。
+ * 返回值：Array<object>，每项保留计划元数据并带有 created/existing 状态。
+ */
+function registerAgentSkillPlans(plans, platform = process.platform) {
+  // 全量预检发生在任何写入前，常见的同名目录冲突不会留下半套登记结果。
+  const inspected = plans.map((plan) => inspectAgentSkillRegistration(
+    plan.source,
+    plan.target,
+    plan.hostName,
+    plan,
+  ));
+  const created = [];
+  try {
+    for (const registration of inspected) {
+      if (registration.status === "existing") {
+        continue;
+      }
+      mkdirSync(dirname(registration.target), { recursive: true });
+      symlinkSync(registration.source, registration.target, platform === "win32" ? "junction" : "dir");
+      created.push(registration);
+    }
+    return inspected;
+  } catch (error) {
+    // 只删除本轮创建且仍指向同一来源的链接，保留并发出现的用户目录或其他来源。
+    for (const registration of created.reverse()) {
+      try {
+        const targetState = lstatSync(registration.target);
+        if (targetState.isSymbolicLink() && realpathSync(registration.target) === realpathSync(registration.source)) {
+          rmSync(registration.target, { force: true });
+        }
+      } catch {
+        // 回滚采用尽力而为策略，原始安装错误仍作为主错误返回。
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * registerAgentSkill 将 npm 包内单项 Skill 以目录链接登记到指定 Agent 宿主目录。
+ * 入参：source（string）为包内 Skill 绝对路径；target（string）为宿主 Skill 目标路径；platform（string）为 Node 平台名；hostName（string）为错误提示中的宿主名。
+ * 返回值："created" | "existing"，分别表示新建链接或已存在同源链接。
+ */
+function registerAgentSkill(source, target, platform = process.platform, hostName = "Agent") {
+  const [registration] = registerAgentSkillPlans([{ source, target, hostName }], platform);
+  return registration.status;
+}
+
+/**
+ * buildSkillSetPlans 构造一个宿主下三项职责分离 Skill 的无副作用登记计划。
+ * 入参：packageRoot（string）为 npm 包根目录；skillRoot（string）为宿主 Skill 根目录；hostName（string）为宿主名；hostKey（string）为返回结果分组键。
+ * 返回值：Array<object>，每项包含来源、目标、Skill 名称和宿主分组。
+ */
+function buildSkillSetPlans(packageRoot, skillRoot, hostName, hostKey = "") {
+  return skillNames.map((name) => ({
+    name,
+    hostKey,
+    hostName,
+    source: join(packageRoot, "skills", name),
+    target: join(skillRoot, name),
+  }));
 }
 
 /**
@@ -78,14 +140,8 @@ function registerCodexSkill(source, target, platform = process.platform) {
  * 返回值：Array<object>，每项包含 name、target 和 created/existing 状态。
  */
 function registerSkillSet(packageRoot, skillRoot, platform, hostName) {
-  return skillNames.map((name) => {
-    const target = join(skillRoot, name);
-    return {
-      name,
-      target,
-      status: registerAgentSkill(join(packageRoot, "skills", name), target, platform, hostName),
-    };
-  });
+  return registerAgentSkillPlans(buildSkillSetPlans(packageRoot, skillRoot, hostName), platform)
+    .map(({ name, target, status }) => ({ name, target, status }));
 }
 
 /**
@@ -115,15 +171,21 @@ function installPackage(options = {}) {
   }
 
   const codexSkillRoot = environment.EVERYLINE_CODEX_SKILLS_DIR || join(userHome, ".agents", "skills");
-  const codexSkills = registerSkillSet(packageRoot, codexSkillRoot, platform, "Codex");
-  const workBuddySkills = shouldInstallWorkBuddySkills(environment)
-    ? registerSkillSet(
+  const plans = buildSkillSetPlans(packageRoot, codexSkillRoot, "Codex", "codex");
+  if (shouldInstallWorkBuddySkills(environment)) {
+    plans.push(...buildSkillSetPlans(
       packageRoot,
       environment.EVERYLINE_WORKBUDDY_SKILLS_DIR || join(userHome, ".workbuddy", "skills"),
-      platform,
       "WorkBuddy",
-    )
-    : [];
+      "workBuddy",
+    ));
+  }
+  const registrations = registerAgentSkillPlans(plans, platform);
+  const hostSkills = (hostKey) => registrations
+    .filter((registration) => registration.hostKey === hostKey)
+    .map(({ name, target, status }) => ({ name, target, status }));
+  const codexSkills = hostSkills("codex");
+  const workBuddySkills = hostSkills("workBuddy");
   return {
     binary,
     skillTarget: codexSkills[0].target,

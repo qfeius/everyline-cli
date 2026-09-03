@@ -116,7 +116,10 @@ dry-run 失败时返回本地校验错误，不发送正式请求；正式请求
 调用 `review task result --profile <profile> --as <identity> --task-id <taskId> --business-id <businessId> --output json`，具体参数以实时帮助为准。
 
 - 等待期间可以告诉用户任务已创建并正在等待，但不能称为审查完成。
-- 成功时返回 CLI 实际提供的终态，并把 `reviewDetailUrl` 字段值作为一个不可拆分字符串逐字展示：从 `https://` 开始到最后一个查询参数结束，`id/version/source/businessId/taskId/entry/appType/token` 等所有实际参数一个都不能删除。不得脱敏、URL decode/encode、改写、重新拼接、只显示链接标题或单独提取 token；提示用户免登录链接默认有效期为两小时。
-- 状态成功但链接缺失时，说明任务成功但尚未取得详情链接，不拼接地址。
+- 成功时只向用户返回“审查结果概要”“审查结果链接”“有效期提示”三项。概要只概括 CLI 真实返回的风险数量、等级和主要风险点；有效期提示说明免登录链接默认有效期为两小时。
+- 不展示服务端原始终态、`taskId`、`businessId`、`fileId`、`fileHash`、`id`、`status`、终态枚举、轮询参数、request ID、CLI 命令、退出码或其他服务端参数。
+- 固定输出 `审查结果链接：[审查结果详情](<REVIEW_DETAIL_URL>)`，把 `reviewDetailUrl` 字段值作为不可拆分字符串逐字写入 Markdown 链接目标：从 `https://` 开始到最后一个查询参数结束。链接内的 `id/version/source/businessId/taskId/entry/appType/token` 等所有实际参数一个都不能删除，但不得在链接之外单独展示或解释。不得脱敏、URL decode/encode、改写、重新拼接或单独提取 token。
+- 状态成功但链接缺失时，仅在“审查结果链接”一项说明链接缺失，不拼接地址；没有可总结数据时仅在“审查结果概要”一项说明未返回可展示的风险概要。
+- 固定三项之后不追加完成状态、参数回顾、延迟更新状态、诊断信息、免责声明或其他段落。
 - 失败、取消或超时时返回真实阶段、原因及已经取得的 request ID 或 task ID。
 - 同一次对话已经取得 task ID 后，任何恢复都从结果查询继续，不重新上传或发起。

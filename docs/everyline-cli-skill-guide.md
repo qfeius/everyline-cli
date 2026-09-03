@@ -26,7 +26,7 @@ OpenAI 官方文档将 Skill 定义为包含 `SKILL.md` 及可选 references、s
 
 Codex 本地任务直接使用宿主文件路径和 loopback OAuth。WorkBuddy 使用本机 CLI、系统凭证库和 Device Grant。豆包远端沙箱使用 Linux CLI、Device Grant，以及宿主提供的原始附件字节流或完整下载 URL；用户 macOS 路径不作为沙箱文件路径。
 
-CLI 和 Skill 应来自同一个发布版本，避免 Skill 使用了新流程而 CLI 仍是旧命令。
+CLI 和 Skill 应来自同一个发布版本。每次 Skill 发布（包括纯文案调整）都提升 `package.json` 统一版本、发布同版本 npm 包并更新远端 manifest，让 `version.updateRequired` 可以触发强制更新门禁。
 
 ## 2. 全局安装包默认同时安装 CLI、Codex Skills 和 WorkBuddy Skills
 
@@ -287,7 +287,7 @@ everyline-cli auth init --profile prod-user --as user --output json
 everyline-cli auth complete --profile prod-user --as user --output json
 ```
 
-只有 `status=succeeded` 才继续。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐 Device Grant 与 Device client；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
+只有 `status=succeeded` 才继续。dev/test 的 `contract-review` metadata、独立 EveryLine Device client `zscli_c77221e810ce3977` 和 `contract-review:full` scope 由环境预设提供；已有旧 Profile 也会自动选择该 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
 
 ### app 身份：适合无浏览器设备
 
@@ -356,7 +356,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 5. Skill 询问审查强度：弱势、中立或强势。
 6. 四项业务输入完整后，Skill 使用同一输入执行 dry-run；失败时不发送正式请求。
 7. dry-run 通过后，Skill 使用同一 Profile 和身份自动发起一次任务并记录 task ID。
-8. Skill 只查询该 task ID，等待终态后完整原样返回 `reviewDetailUrl`（服务端提供时），并提示免登录链接默认两小时有效。
+8. Skill 只查询该 task ID；等待成功后仅返回审查结果概要、以“审查结果详情”为文字的可点击链接和默认两小时的有效期提示，不展示 task ID、终态字段或其他服务端参数。
 
 示例对话：
 
@@ -382,6 +382,10 @@ Agent：请选择审查强度：弱势、中立、强势。
 用户：中立
 
 Agent：参数 dry-run 已通过，任务已创建，正在等待审查结果……
+
+Agent：审查结果概要：发现 2 项主要风险，其中 1 项重大、1 项警示。
+审查结果链接：[审查结果详情](<REVIEW_DETAIL_URL>)
+有效期提示：该免登录链接默认有效期为两小时，请及时查看。
 ```
 
 候选主体、清单名称和最终链接必须来自当前身份下的真实 CLI 响应。示例名称仅用于说明对话形式。
@@ -411,7 +415,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 | 规则编号 | `0` 固定表示内置规则包，自定义清单从 `1` 开始，展示与解析使用同一映射 |
 | 正式请求门 | 同一输入的 dry-run 成功后才发起真实任务 |
 | 任务幂等 | 取得 task ID 后只查询该任务，不重复创建 |
-| 最终结果 | 返回真实终态；服务端提供链接时完整原样返回签名 `reviewDetailUrl`，不脱敏或重新拼接 |
+| 最终结果 | 只返回审查结果概要、指向完整签名 `reviewDetailUrl` 的“审查结果详情”可点击链接和有效期提示；不展示 task ID、终态字段或其他服务端参数 |
 | CLI 兼容 | 原有命令、参数和 JSON 接口保持不变 |
 
 ## 9. 常见问题
@@ -442,7 +446,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 ### Skill 在上传前提示 CLI 版本不满足要求
 
-安装与 Skill 同版本的最新 CLI 发布包，再重新开始验证。该提示属于版本就绪门，不是合同或授权失败。
+解析 `version --output json`。`updateRequired=true` 时先记住 `updateCommand`，继续完成当前完整业务流程；CLI 同时会在 stderr 输出 `code=UPDATE_PENDING`、当前版本、最新版本、更新命令和 `updateAfter=current_business_workflow`。全部业务 API 结束并保留结果后原样执行一次更新命令，再次检查版本；下一条新业务重新加载新版 Skill。
 
 ### 提示尚未选择 Profile
 
@@ -450,7 +454,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 ### user OAuth 启动失败
 
-Codex 本地登录检查 Profile 是否具有平台确认过的 OAuth metadata、client ID 和 loopback redirect。豆包/WorkBuddy 检查 metadata 的 `device_authorization_endpoint`、Device client ID 以及沙箱安全存储环境变量；记录 CLI 原始提示并联系平台配置负责人。
+Codex 本地登录检查 Profile 是否具有平台确认过的 OAuth metadata、client ID 和 loopback redirect。豆包/WorkBuddy 检查 `contract-review` metadata 的 `device_authorization_endpoint`、独立 EveryLine Device client ID 以及沙箱安全存储环境变量；记录 CLI 原始提示并联系平台配置负责人。
 
 ### 返回 `code=20000019` 或“租户应用不匹配”
 
@@ -463,11 +467,11 @@ Codex 本地登录检查 Profile 是否具有平台确认过的 OAuth metadata�
 
 ### 成功状态没有预览链接
 
-记录任务成功及原始结果。Skill 不会自行拼接 `reviewDetailUrl`。
+Skill 仅在“审查结果链接”一项说明链接缺失，不自行拼接 `reviewDetailUrl`，也不向用户展开原始终态。
 
 ### 预览链接包含 token 参数
 
-`reviewDetailUrl` 是后端签发的用户可访问免登录链接。Skill 把字段值作为不可拆分字符串，从 `https://` 到最后一个查询参数逐字展示，保留完整 `token`；不解析、脱敏、重新编码、改写或只显示链接标题，并提示链接默认两小时有效。
+`reviewDetailUrl` 是后端签发的用户可访问免登录链接。Skill 把字段值作为不可拆分字符串，从 `https://` 到最后一个查询参数逐字写入“审查结果详情”的 Markdown 链接目标，保留完整 `token`；不解析、脱敏、重新编码或改写。URL 中的参数不在链接之外单独展示，最终回复还必须仅包含审查结果概要和默认两小时的有效期提示。
 
 ## 10. 更新与卸载
 

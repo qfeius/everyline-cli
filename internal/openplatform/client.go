@@ -200,16 +200,29 @@ func (client *Client) invalidateExpiredUserSession(identity config.IdentityKind,
 	if !errors.As(requestErr, &apiError) || apiError.Code != invalidUserSessionCode {
 		return nil
 	}
+	sessionExpiredErr := client.userSessionExpiredError()
 	invalidator, ok := client.tokens.(interface {
 		InvalidateForIdentity(string, config.IdentityKind, string) error
 	})
 	if !ok {
-		return fmt.Errorf("%w；清理本地 token 缓存失败: token provider 不支持身份失效；%v", auth.ErrUserSessionExpired, apiError)
+		return fmt.Errorf("%w；清理本地 token 缓存失败: token provider 不支持身份失效；%v", sessionExpiredErr, apiError)
 	}
 	if err := invalidator.InvalidateForIdentity(client.profile.Name, identity, rejectedAccessToken); err != nil {
-		return fmt.Errorf("%w；清理本地 token 缓存失败: %v；%v", auth.ErrUserSessionExpired, err, apiError)
+		return fmt.Errorf("%w；清理本地 token 缓存失败: %v；%v", sessionExpiredErr, err, apiError)
 	}
-	return fmt.Errorf("%w；%v", auth.ErrUserSessionExpired, apiError)
+	return fmt.Errorf("%w；%v", sessionExpiredErr, apiError)
+}
+
+// userSessionExpiredError 从 TokenProvider 获取运行时对应的 user 重新授权提示，旧 Provider 默认使用本机 OAuth。
+// 入参：无，使用 Client 当前 Profile 和 TokenProvider。
+// 返回值：error，保留 ErrUserSessionExpired 分类并包含准确的下一步命令。
+func (client *Client) userSessionExpiredError() error {
+	if provider, ok := client.tokens.(interface {
+		UserSessionExpiredError(string) error
+	}); ok {
+		return provider.UserSessionExpiredError(client.profile.Name)
+	}
+	return fmt.Errorf("%w；请重新执行 auth login --profile %s --as user", auth.ErrUserSessionExpired, client.profile.Name)
 }
 
 // requestContractInput 对 JSON 操作解析最终 HTTP body，其他操作使用显式的 query/path/multipart 逻辑输入。
@@ -315,7 +328,7 @@ func (client *Client) tokenForIdentity(ctx context.Context, identity config.Iden
 	}
 	if identity == config.IdentityUser {
 		// 旧版 TokenProvider 只有 app 接口，user 请求不能静默降级为 tenant token。
-		return auth.Token{}, auth.ErrUserAuthentication
+		return auth.Token{}, fmt.Errorf("%w；请执行 auth login --profile %s --as user", auth.ErrUserAuthentication, client.profile.Name)
 	}
 	return client.tokens.Token(ctx, client.profile)
 }

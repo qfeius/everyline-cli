@@ -2,7 +2,7 @@
 
 ## 目标
 
-提供独立二进制的安全自更新命令和非阻断版本检查。更新源由命令参数、环境变量或发布构建通过 HTTPS manifest 配置，不依赖 Profile 或业务鉴权。
+提供独立二进制的安全自更新命令和业务完成后的延迟强制更新。更新源由命令参数、环境变量或发布构建通过 HTTPS manifest 配置，不依赖 Profile 或业务鉴权。
 
 命令形式：
 
@@ -70,7 +70,7 @@ Windows 无法覆盖正在运行的可执行文件时，CLI 先复制出独立 h
 | Windows 制品已交给独立 helper | 返回 `updated=false, scheduled=true`；最终结果由 helper 写入 stderr |
 | npm/npx 薄包装调用 | 返回安装方式提示，不执行更新 |
 
-`version` 稳定输出当前构建字段以及 `latestVersion/isLatest/updateCommand`。manifest 未配置或检查失败时，命令仍返回成功，`isLatest=null` 并输出 `checkError`，不把未知状态误报为最新版。普通 `review/checklist/rule` 命令只在确认存在新版本时向 stderr 写提示；检查失败不改变业务请求和退出码。
+`version` 稳定输出当前构建字段以及 `latestVersion/isLatest/updateRequired/updateCommand`。manifest 未配置或检查失败时，命令仍返回成功，`isLatest=null`、`updateRequired=false` 并输出 `checkError`，不把未知状态误报为最新版。普通 `review/checklist/rule` 命令确认存在新版本时，在 stderr 输出 `UPDATE_PENDING` 单行 JSON，但不改变当前业务请求和退出码；Agent 负责在跨命令的当前完整业务流程结束后执行更新，下一条新业务加载新版 Skill。检查失败也不改变业务请求和退出码。
 
 ## `review task result` 当前边界
 
