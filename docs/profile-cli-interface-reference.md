@@ -36,8 +36,8 @@ Profile 保存在 `~/.everyline-cli/config.json`。可以通过 `EVERYLINE_CONFI
 | `app_id` | `--app-id` | 默认身份为 app 时必填 | 非敏感 app ID；也可在登录时由 flag/环境变量覆盖 |
 | `oauth_metadata_url` | `--oauth-metadata-url` | user OAuth 登录时必填 | OAuth authorization server metadata URL |
 | `oauth_business_type` | `--oauth-business-type` | user OAuth 登录时必填 | OAuth 业务类型 |
-| `oauth_client_id` | `--oauth-client-id` | 可选；缺少时首次 user 授权动态注册 | public client ID |
-| `oauth_device_client_id` | `--oauth-device-client-id` | 可选；缺少时复用 public client 或动态注册 | Device Grant client ID |
+| `oauth_client_id` | `--oauth-client-id` | 可选；每次显式 Codex user 登录动态注册并替换 | 浏览器 public client ID |
+| `oauth_device_client_id` | `--oauth-device-client-id` | 可选；缺少时由 `auth init` 独立获取 | Device Grant client ID；不复用浏览器 client |
 | `oauth_redirect_url` | `--oauth-redirect-url` | user OAuth 登录时必填 | 本机 loopback callback；当前应使用 HTTP |
 | `oauth_scopes` | `--oauth-scope` | 可选 | OAuth scope；参数可重复或使用逗号分隔 |
 | `oauth_device_authorization_url` | `--oauth-device-authorization-url` | metadata 未发布对应端点时可选 | 平台确认的 Device Authorization endpoint |
@@ -113,8 +113,8 @@ everyline-cli config add custom-user \
 | `token_url` | `https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` |
 | `oauth_metadata_url` | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | 当前未配置 | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
 | `oauth_business_type` | `contract-review` | `contract-review` | 当前未配置 | `contract-review` |
-| `oauth_client_id` | 首次 user 授权时动态注册并写入 | 首次 user 授权时动态注册并写入 | 当前未配置 | 首次 user 授权时动态注册并写入 |
-| `oauth_device_client_id` | 首次 user 授权时动态注册并写入 | 首次 user 授权时动态注册并写入 | 当前未配置 | 首次 user 授权时动态注册并写入 |
+| `oauth_client_id` | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 | 当前未配置 | 每次显式 Codex user 登录动态注册并替换 |
+| `oauth_device_client_id` | `auth init` 独立获取并写入 | `auth init` 独立获取并写入 | 当前未配置 | `auth init` 独立获取并写入 |
 | `oauth_redirect_url` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | 当前未配置 | `http://127.0.0.1:8000/login` |
 | `oauth_scopes` | `contract-review:full` | `contract-review:full` | 当前未配置 | `contract-review:full` |
 
@@ -160,7 +160,7 @@ everyline-cli config add blue-app \
   --default-output json
 ```
 
-blue 当前没有内置 OAuth metadata、business type、redirect URL 或 scope。配置这些字段前需要由对应环境提供确认值；client ID 在首次 user 授权时动态注册。
+blue 当前没有内置 OAuth metadata、business type、redirect URL 或 scope。配置这些字段前需要由对应环境提供确认值；Codex 浏览器 client ID 在每次显式 user 登录时动态注册。
 
 #### prod Profile
 
@@ -174,7 +174,7 @@ everyline-cli config add prod-app \
   --default-output json
 ```
 
-prod user Profile 直接使用同一预设，首次授权时从正式开放平台动态注册 client ID：
+prod user Profile 直接使用同一预设，每次显式 Codex user 登录都从正式开放平台动态注册浏览器 client ID：
 
 ```bash
 everyline-cli config add prod-user \

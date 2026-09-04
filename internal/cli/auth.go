@@ -49,15 +49,15 @@ type deviceAuthOutput struct {
 	ExpiresAt               string `json:"expires_at,omitempty"`
 }
 
-// ensureOAuthClient 注册并持久化当前授权流程缺少的 client_id；已有显式或历史配置保持不变。
-// 入参：ctx 控制请求；runtime 提供 HTTP 和 Profile 存储；profile 为当前配置；device 表示是否为 Device Grant。
+// ensureOAuthClient 注册并持久化当前授权流程使用的 client_id；force 为 true 时替换历史缓存值。
+// 入参：ctx 控制请求；runtime 提供 HTTP 和 Profile 存储；profile 为当前配置；device 表示是否为 Device Grant；force 表示是否强制重新注册。
 // 返回值：config.Profile 为补齐后的配置；error 为注册参数、网络、协议或持久化错误。
-func ensureOAuthClient(ctx context.Context, runtime *Runtime, profile config.Profile, device bool) (config.Profile, error) {
+func ensureOAuthClient(ctx context.Context, runtime *Runtime, profile config.Profile, device bool, force bool) (config.Profile, error) {
 	if device {
-		if profile.EffectiveOAuthDeviceClientID() != "" {
+		if !force && profile.EffectiveOAuthDeviceClientID() != "" {
 			return profile, nil
 		}
-	} else if strings.TrimSpace(profile.OAuthClientID) != "" {
+	} else if !force && strings.TrimSpace(profile.OAuthClientID) != "" {
 		return profile, nil
 	}
 	if !profile.HasOAuthClientRegistrationConfiguration() {
@@ -74,14 +74,8 @@ func ensureOAuthClient(ctx context.Context, runtime *Runtime, profile config.Pro
 	}
 	if device {
 		profile.OAuthDeviceClientID = clientID
-		if strings.TrimSpace(profile.OAuthClientID) == "" {
-			profile.OAuthClientID = clientID
-		}
 	} else {
 		profile.OAuthClientID = clientID
-		if strings.TrimSpace(profile.OAuthDeviceClientID) == "" {
-			profile.OAuthDeviceClientID = clientID
-		}
 	}
 	if err := runtime.Profiles.Add(profile); err != nil {
 		return profile, err
@@ -160,7 +154,7 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 			if strings.TrimSpace(metadata.TokenEndpoint) == "" {
 				return fmt.Errorf("OAuth metadata 缺少 token_endpoint")
 			}
-			profile, err = ensureOAuthClient(authContext, runtime, profile, true)
+			profile, err = ensureOAuthClient(authContext, runtime, profile, true, false)
 			if err != nil {
 				return err
 			}
@@ -394,10 +388,11 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			}
 			appSecret := ""
 			if identity == config.IdentityUser {
-				if strings.TrimSpace(profile.OAuthClientID) == "" && strings.TrimSpace(profile.OAuthMetadataURL) != "" && profile.HasOAuthClientRegistrationConfiguration() {
+				if strings.TrimSpace(profile.OAuthMetadataURL) != "" && profile.HasOAuthClientRegistrationConfiguration() {
 					registrationContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
 					defer cancel()
-					profile, err = ensureOAuthClient(registrationContext, runtime, profile, false)
+					// 显式登录总是创建当前环境的 public client，避免升级后继续使用历史环境留下的无效 client_id。
+					profile, err = ensureOAuthClient(registrationContext, runtime, profile, false, true)
 					if err != nil {
 						return err
 					}
@@ -516,6 +511,10 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().BoolVar(&saveAppSecret, "save-app-secret", false, "授权成功后将 app secret 保存到本地安全存储（macOS Keychain，其他系统 secrets.json）")
 	command.Flags().StringVar(&appIDFlag, "app-id", "", "app 登录使用的 app ID；优先于环境变量和 Profile")
 	command.Flags().StringVar(&appSecretFlag, "app-secret", "", "app 登录使用的 app secret；不会输出到日志，优先于 stdin、环境变量和本地保存值")
+	withNotes(command,
+		"Codex 本地 user 每次显式登录都会通过当前开放平台动态注册 public client，并用返回的 client_id 完成本次 OAuth/PKCE。",
+		"动态注册只更新浏览器 OAuth client，不覆盖显式 Device Grant client。",
+	)
 	return command
 }
 

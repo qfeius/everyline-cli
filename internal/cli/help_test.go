@@ -841,6 +841,7 @@ func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 			expected: []string{
 				"everyline-cli auth login [flags]",
 				"豆包/WorkBuddy 沙箱使用 auth init/complete Device Grant",
+				"每次显式登录都会通过当前开放平台动态注册 public client",
 				"--app-id string",
 				"--app-secret string",
 				"--app-secret-stdin",

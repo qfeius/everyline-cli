@@ -168,14 +168,11 @@ func (profile Profile) HasOAuthClientRegistrationConfiguration() bool {
 		strings.TrimSpace(profile.OAuthBusinessType) != "" && strings.TrimSpace(profile.OAuthRedirectURL) != ""
 }
 
-// EffectiveOAuthDeviceClientID 返回 Device Grant 专用 client ID，依次兼容显式值和 OAuth public client。
+// EffectiveOAuthDeviceClientID 返回 Device Grant 专用 client ID，不复用浏览器 OAuth public client。
 // 入参：无，接收者 Profile 为当前环境配置。
 // 返回值：string，为 Device Grant 的 client_id。
 func (profile Profile) EffectiveOAuthDeviceClientID() string {
-	if clientID := strings.TrimSpace(profile.OAuthDeviceClientID); clientID != "" {
-		return clientID
-	}
-	return strings.TrimSpace(profile.OAuthClientID)
+	return strings.TrimSpace(profile.OAuthDeviceClientID)
 }
 
 // EffectiveOAuthResource 返回 Device Grant 的 resource，未配置时使用 user 业务 API 基址。

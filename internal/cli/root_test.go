@@ -713,7 +713,7 @@ func TestAuthUserLoginRequiresOAuthConfiguration(t *testing.T) {
 	}
 }
 
-// TestAuthUserLoginUsesBrowserOAuth 验证 user 登录会打开 PKCE 授权链接、接收 loopback callback 并缓存 token。
+// TestAuthUserLoginUsesBrowserOAuth 验证 Codex user 登录会先动态注册浏览器 client，再完成 PKCE 授权且不覆盖 Device client。
 func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	callbackListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -768,16 +768,18 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 		return nil
 	}
 	profile := config.Profile{
-		Name:              "dev",
-		BaseURL:           server.URL,
-		AuthURL:           "https://auth.example.com",
-		TokenURL:          server.URL + "/tenant-token",
-		OAuthMetadataURL:  server.URL + "/metadata",
-		OAuthBusinessType: "contract-review",
-		OAuthRedirectURL:  fmt.Sprintf("http://127.0.0.1:%d/login", callbackPort),
-		OAuthScopes:       []string{"contract-review:full"},
-		DefaultIdentity:   config.IdentityUser,
-		DefaultOutput:     "json",
+		Name:                "dev",
+		BaseURL:             server.URL,
+		AuthURL:             "https://auth.example.com",
+		TokenURL:            server.URL + "/tenant-token",
+		OAuthMetadataURL:    server.URL + "/metadata",
+		OAuthBusinessType:   "contract-review",
+		OAuthClientID:       "stale-oauth-client",
+		OAuthDeviceClientID: "existing-device-client",
+		OAuthRedirectURL:    fmt.Sprintf("http://127.0.0.1:%d/login", callbackPort),
+		OAuthScopes:         []string{"contract-review:full"},
+		DefaultIdentity:     config.IdentityUser,
+		DefaultOutput:       "json",
 	}
 	if err := runtime.Profiles.Add(profile); err != nil {
 		t.Fatal(err)
@@ -806,7 +808,7 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 		t.Fatalf("cached=%#v err=%v", cached, err)
 	}
 	storedProfile, err := runtime.Profiles.Get(profile.Name)
-	if err != nil || storedProfile.OAuthClientID != "dynamic-oauth-client" || storedProfile.OAuthDeviceClientID != "dynamic-oauth-client" {
+	if err != nil || storedProfile.OAuthClientID != "dynamic-oauth-client" || storedProfile.OAuthDeviceClientID != "existing-device-client" {
 		t.Fatalf("storedProfile=%#v err=%v", storedProfile, err)
 	}
 }

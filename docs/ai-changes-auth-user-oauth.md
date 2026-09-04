@@ -3,7 +3,7 @@
 ## 2026-08-20
 
 - 为 Profile 增加非敏感 user OAuth 配置：metadata URL、business type、public client ID、loopback redirect URL 和 scopes。
-- dev/test/prod 环境预设包含 `contract-review` OAuth metadata 和 `127.0.0.1:8000/login` 回调，client ID 由首次 user 授权动态注册；blue 不猜测未确认的 endpoint。
+- dev/test/prod 环境预设包含 `contract-review` OAuth metadata 和 `127.0.0.1:8000/login` 回调；Codex 每次显式 user 登录通过当前开放平台动态注册并替换浏览器 client ID，blue 不猜测未确认的 endpoint。
 - `auth login --as user` 在没有直接 token 时走 authorization code + PKCE（S256），输出授权链接并尝试打开浏览器，接收 loopback callback 后换取并缓存 user token。
 - callback 校验 state、code 和 OAuth error；OAuth code、code verifier、token 不写入 Profile，不输出到 stdout/stderr 日志。
 - 保留 `--no-open-browser` 手动复制链接模式；user 不再保留 raw access token 兼容路径。

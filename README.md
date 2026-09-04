@@ -51,7 +51,7 @@ everyline-cli auth login \
   --timeout 3m
 ~~~
 
-CLI 会打开浏览器完成用户登录，通过本机 loopback 回调接收授权结果，并缓存 user token。auth login 不使用 --env；环境在 config add 时指定。
+CLI 会先通过当前开放平台动态注册浏览器 public client，再打开浏览器完成用户登录，通过本机 loopback 回调接收授权结果并缓存 user token。每次显式 `auth login --as user` 都使用本次注册返回的 client ID，历史 Profile 中的旧值不会继续参与登录。auth login 不使用 --env；环境在 config add 时指定。
 
 豆包或 WorkBuddy 沙箱与宿主浏览器不共享 loopback 端口时，使用 Device Grant：
 
@@ -61,7 +61,7 @@ everyline-cli auth init --profile prod-user --as user --output json
 everyline-cli auth complete --profile prod-user --as user --output json
 ~~~
 
-`auth init` 不监听 `127.0.0.1`。dev/test/prod 预设不内置 client ID；首次 user 授权会调用当前环境的 `POST /open-api/v3/oauth/register/contract-review` 动态获取 client ID、写入 Profile，再启动 OAuth 或 Device Grant。显式配置及旧 Profile 已保存的 client ID 保持兼容。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
+`auth init` 不监听 `127.0.0.1`。dev/test/prod 预设不内置浏览器 client ID；Codex 本地每次显式 user 登录会调用当前环境的 `POST /open-api/v3/oauth/register/contract-review`，保存返回值后启动 OAuth/PKCE，且不覆盖 Device Grant client。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
 
 WorkBuddy 必须在第一次 `auth init` 前固定一个 `CODEBUDDY_SESSION_ID`，并在 `auth init`、用户回复“已授权”后的 `auth complete` 以及后续 `auth status` 中复用同一值。`auth complete` 本地提示没有待完成事务时，先用原值重试 `auth complete`；只有服务端状态明确为 `denied`、`expired` 或 `invalid_grant` 后才开始新的授权事务，避免让用户重复打开授权链接。
 
@@ -76,7 +76,7 @@ everyline-cli auth status \
 
 `auth status` 默认读取当前身份对应的安全缓存。OAuth metadata 声明 refresh grant 时，CLI 会在过期前五分钟尝试刷新；业务请求收到可信 `code=110004` 时只刷新并重放一次。服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token；并发写入的新 token 会保留。
 
-prod 预设已包含正式 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env prod` 创建 user Profile 后，client ID 会在首次授权时通过正式开放平台动态注册。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
+prod 预设已包含正式 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env prod` 创建 user Profile 后，每次显式 Codex user 登录都会通过正式开放平台动态注册浏览器 client ID。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
 
 ## app 应用授权
 

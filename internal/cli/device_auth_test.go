@@ -221,7 +221,7 @@ func TestAuthDeviceInitRegistersOAuthClient(t *testing.T) {
 		t.Fatalf("device client_id=%q", deviceClientID)
 	}
 	storedProfile, err := runtime.Profiles.Get(profile.Name)
-	if err != nil || storedProfile.OAuthClientID != "dynamic-client" || storedProfile.OAuthDeviceClientID != "dynamic-client" {
+	if err != nil || storedProfile.OAuthClientID != "" || storedProfile.OAuthDeviceClientID != "dynamic-client" {
 		t.Fatalf("storedProfile=%#v err=%v", storedProfile, err)
 	}
 }
