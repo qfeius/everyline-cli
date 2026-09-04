@@ -80,16 +80,24 @@ EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、
 1. 用户在本次请求中明确指定 Profile 或环境时，以该选择为准；指定 Profile 先执行 `everyline-cli config show <profile> --output json` 校验。
 2. 用户未指定 Profile 和环境时，Codex、WorkBuddy、豆包 AgentKit/Skills Sandbox 与豆包普通工作任务统一默认 `test` 环境。执行 `config list --output json`，只复用连接地址属于 `test` 预设且身份兼容的 Profile；当前 Profile 是 dev、blue 或 prod 时不得继承它。
 3. test 环境没有可复用 Profile 时，先读取 `config add --help`：user 身份创建 `test-user`（`config add test-user --env test --default-identity user --default-output json`）；app 身份取得非敏感 app ID 后创建 `test-app`（`config add test-app --env test --default-identity app --app-id <app-id> --default-output json`）。本规则已获得默认 test 的配置授权，不追加环境确认；同名 Profile 已存在但并非 test 时不覆盖，向用户报告名称冲突并请其显式选择 Profile。
-4. 用户明确 user/app 时直接使用；身份影响资源范围而用户未指定时只询问一次。多个 test Profile 同时匹配时，user 按 `test-user`、app 按 `test-app` 优先；仍不唯一时展示真实候选项让用户选择。
+4. 发起任何授权事务前必须先固定 `user/app` 身份。用户在本次请求中已经明确身份时直接使用；尚未明确时必须先让用户单选 `user（个人账号授权）` 或 `app（应用授权）`，收到选择前不执行身份相关的 `auth status`、`auth login`、`auth init` 或 app secret 输入。多个 test Profile 同时匹配时，user 按 `test-user`、app 按 `test-app` 优先；仍不唯一时展示真实候选项让用户选择。
 5. 本次会话后续每条命令都显式携带 `--profile <profile> --as <identity>`，不依赖当前 Profile 或 Profile 默认身份。
 6. 宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant；三者默认环境始终是 test。
 7. 不因权限、资源可见性或一种身份授权失败而自动切换另一种身份，也不自动改到 dev、blue 或 prod。
 
 ### 宿主结构化选项卡
 
-- 用户尚未指定 `user/app`，且 Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）时，与 WorkBuddy 原生选择组件一样优先展示互斥单选选项卡；用户已经明确身份时直接采用，不重复展示。
+- 所有 Agent 发起授权时，用户尚未指定 `user/app` 就必须先完成身份选择。WorkBuddy 固定调用 `AskUserQuestion` 并设置 `multiSelect=false`；Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）时使用互斥单选选项卡；豆包在宿主提供原生单选组件时使用该组件。用户已经明确身份时直接采用，不重复展示。
+- 宿主没有可用的原生单选组件时，固定展示：`1. user（个人账号授权）`、`2. app（应用授权）`，并要求用户回复 `1/2` 或 `user/app`。收到有效选择前结束当前轮，不得同时查询两种身份或提前发起任一授权事务。
 - 只有真实候选数量和单选语义符合当前组件限制时使用选项卡。当前模式没有该工具、候选超过容量或缺少可靠推荐依据时使用简短编号文字，不为展示选项卡切换协作模式，也不虚构推荐项。
 - 选项卡只承载非敏感选择；app secret 仍只在用户直接操作的终端隐藏输入，不进入选项标题、说明、自由输入或对话。
+
+### 授权登录详情入口
+
+- user 授权只生成一笔授权事务。取得 CLI 返回的完整授权 URL 后，优先使用宿主原生链接按钮或 URL action，按钮文字固定为 `授权登录详情`，目标为 CLI 返回的完整 URL；宿主没有该组件时固定输出 Markdown `[授权登录详情](<FULL_AUTHORIZATION_URL>)`。
+- `<FULL_AUTHORIZATION_URL>` 必须用本次 CLI 返回值逐字替换，保留从 `https://` 到最后一个 query 参数的全部字符，不省略、解码、重拼或删除参数。只隐藏展示文字，不改动链接目标。
+- 链接生成后由用户主动点击跳转。Agent 不代替用户打开页面，不为生成另一种展示形式重启授权，也不在按钮或 Markdown 链接之外重复输出同一个裸 URL。
+- app 授权没有浏览器授权链接；用户选择 app 后按下方 app ID 与隐藏输入 app secret 的流程执行，不生成虚假的“授权登录详情”按钮。
 
 ## user 授权
 
@@ -113,18 +121,18 @@ everyline-cli auth status --profile <profile> --as user --output json
 读取 `auth login --help`，执行：
 
 ```bash
-everyline-cli auth login --profile <profile> --as user
+everyline-cli auth login --profile <profile> --as user --no-open-browser
 ```
 
 该命令会先读取当前 authorization server metadata 的 `registration_endpoint`，通过该端点动态注册浏览器 public client，再使用返回的 `client_id` 发起 OAuth/PKCE；即使 Profile 中留有旧 `oauth_client_id`，本次显式登录也会用新返回值替换它。Agent 不单独调用注册接口，不猜测注册路径，也不复用或改写输出中的 client ID。浏览器 client 与 `oauth_device_client_id` 分开保存，Codex 登录不覆盖 Device client。
 
-CLI 打开浏览器时让用户在该页面完成授权；使用 `--no-open-browser` 时完整原样展示 CLI 返回的链接。保持同一次登录会话，不为切换展示方式重启登录。
+Agent 保持该命令在同一个运行会话中等待 loopback callback，从 CLI 输出取得完整授权 URL，并按“授权登录详情入口”展示 `[授权登录详情](<FULL_AUTHORIZATION_URL>)`。用户主动点击并在浏览器完成授权；Agent 不调用系统浏览器打开命令。保持同一次登录会话，不为切换展示方式重启登录。
 
 ### 豆包与 WorkBuddy Device Grant
 
 豆包沙箱与用户本机浏览器不共享网络命名空间，`127.0.0.1:8000` 指向沙箱自身。豆包和 WorkBuddy Device 运行时不得执行 `auth login --profile <profile> --as user`，也不得等待 loopback callback。
 
-固定流程为：CLI 执行 `auth init` → 原样返回完整 HTTPS 授权链接 → 用户在任意浏览器批准 → 用户在新消息中确认“已授权” → CLI 执行一次 `auth complete` 查询账号服务并保存凭证。
+固定流程为：CLI 执行 `auth init` → 将完整 HTTPS 授权链接生成为“授权登录详情”入口 → 用户主动点击并在任意浏览器批准 → 用户在新消息中确认“已授权” → CLI 执行一次 `auth complete` 查询账号服务并保存凭证。
 
 WorkBuddy 在第一次 `auth init` 前取得并冻结一个非敏感的 `CODEBUDDY_SESSION_ID`：优先记录宿主已有的稳定值；宿主未提供时只生成一次，并把该值保留为当前授权事务状态。`auth init`、`auth complete` 和随后的 `auth status` 都显式复用完全相同的值，不使用每次命令都会变化的通用 `SESSION_ID`。等价调用形式如下，其中两处 `<same-session-id>` 必须逐字相同：
 
@@ -149,7 +157,7 @@ everyline-cli auth init --restart --profile <profile> --as user --output json
 everyline-cli auth init --profile <profile> --as user --output json
 ```
 
-- 将 `verification_uri_complete` 作为不可拆分的完整 HTTPS URL 原样展示，不省略、拆分、解码或重拼 query。
+- 将 `verification_uri_complete` 作为不可拆分的完整 HTTPS URL，按“授权登录详情入口”生成 `[授权登录详情](<verification_uri_complete>)`；展示文字可以隐藏 URL，但链接目标必须逐字一致，不省略、拆分、解码或重拼 query。
 - 展示链接后结束当前轮次。只有用户在新消息中明确表示已完成浏览器授权，才执行一次 `auth complete`。
 - `pending` 表示仍待用户完成；结束本轮，不持续轮询。
 - `succeeded` 后重新执行 `auth status`，再继续被中断的业务步骤一次。

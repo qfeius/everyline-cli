@@ -18,7 +18,12 @@ unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '`firstInstall
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'auth init --restart --profile <profile> --as user --output json' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '统一默认 `test` 环境' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '当前 Profile 是 dev、blue 或 prod 时不得继承它' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '发起任何授权事务前必须先固定 `user/app` 身份' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'WorkBuddy 固定调用 `AskUserQuestion` 并设置 `multiSelect=false`' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '[授权登录详情](<FULL_AUTHORIZATION_URL>)' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '[授权登录详情](<verification_uri_complete>)' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F -- '--stdin --name <filename>' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F '0. 通用审查清单（系统内置）' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '只包含以下三项' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不得单独展示 `taskId`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不追加“已完成”' >/dev/null

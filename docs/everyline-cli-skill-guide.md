@@ -248,6 +248,10 @@ $everyline-cli 使用当前 prod-user Profile 和 user 身份检查 CLI 版本�
 
 用户本轮没有指定 Profile 或环境时，Codex、WorkBuddy 和豆包统一默认 test：user 复用或创建 `test-user`，app 复用 `test-app`，缺少时在取得非敏感 app ID 后创建。当前 dev、blue、prod Profile 不会被默认继承；用户本轮显式指定的 Profile 或环境优先。宿主差异只影响 user 的授权协议：Codex 本地使用 OAuth/PKCE，豆包和 WorkBuddy 使用 Device Grant。
 
+所有 Agent 在发起授权前都先固定身份。用户本轮已经明确 `user` 或 `app` 时直接采用；尚未明确时，WorkBuddy 使用 `AskUserQuestion` 单选并设置 `multiSelect=false`，Codex 在 `request_user_input` 可用时使用互斥单选，豆包在原生单选组件可用时使用该组件。没有原生组件时统一显示 `1. user（个人账号授权）` 和 `2. app（应用授权）`，等待用户回复 `1/2` 或 `user/app`。收到选择前不执行身份相关的状态查询或授权命令。
+
+user 流程取得 CLI 返回的完整授权 URL 后，优先生成宿主原生链接按钮，按钮文字固定为“授权登录详情”；没有链接按钮时显示 `[授权登录详情](<FULL_AUTHORIZATION_URL>)`。链接目标逐字保留 CLI 返回值及全部 query 参数，由用户主动点击，Agent 不自动打开浏览器，也不为改变展示方式创建第二笔授权事务。app 流程没有此链接，继续使用下方隐藏输入 app secret 的方式。
+
 ### user 身份：推荐用于人工交互验证
 
 默认 test Profile 可由 Agent 自动创建；手工等价命令为：
@@ -266,8 +270,17 @@ Codex 本地交互可完成浏览器 OAuth 登录：
 everyline-cli auth login \
   --profile test-user \
   --as user \
+  --no-open-browser \
   --timeout 3m
 ```
+
+保持该 CLI 进程运行，从输出中取出完整授权地址并展示：
+
+```text
+[授权登录详情](<FULL_AUTHORIZATION_URL>)
+```
+
+用户点击并完成浏览器授权后，由原 CLI 进程接收 callback；不要自动打开页面或重新执行 `auth login`。
 
 检查结构化授权状态：
 
@@ -286,7 +299,7 @@ everyline-cli auth status \
 everyline-cli auth init --profile test-user --as user --output json
 ```
 
-把 `verification_uri_complete` 从 `https://` 到最后一个 query 参数完整原样交给用户。用户完成授权后只检查一次：
+把 `verification_uri_complete` 从 `https://` 到最后一个 query 参数逐字保留为链接目标，并展示 `[授权登录详情](<verification_uri_complete>)`。用户主动点击并完成授权后只检查一次：
 
 ```bash
 everyline-cli auth complete --profile test-user --as user --output json
@@ -370,7 +383,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 1. Skill 解析并固定 `prod-user` Profile 与 user 身份，检查 CLI 版本、`review task start/result` 帮助和授权状态。
 2. CLI 上传合同并返回内部文件身份。
-3. Skill 把 `0. 按合同类型自动匹配内置规则包` 和全部真实清单组成统一候选并冻结；按 `pageSize=4` 分页，6 个真实清单时第 1 页为 0、1、2、3，第 2 页为 4、5、6。WorkBuddy 调用 `AskUserQuestion` 且设置 `multiSelect=true`，Codex 和豆包按宿主能力使用同一快照的稳定编号协议。
+3. Skill 把 `0. 通用审查清单（系统内置）` 和全部真实清单组成统一候选并冻结；按 `pageSize=4` 分页，6 个真实清单时第 1 页为 0、1、2、3，第 2 页为 4、5、6。WorkBuddy 调用 `AskUserQuestion` 且设置 `multiSelect=true`，Codex 和豆包按宿主能力使用同一快照的稳定编号协议。
 4. 清单选择后无需额外完成或确认；CLI 提取合同主体，并在下一次独立交互中展示真实主体名称。WorkBuddy 使用 `AskUserQuestion` 单选，Codex 在当前回合提供原生选项工具且候选符合容量时使用单选选项卡。
 5. Skill 询问审查强度：弱势、中立或强势；WorkBuddy 使用 `AskUserQuestion` 单选，Codex 在原生选项工具可用时使用单选选项卡。
 6. 四项业务输入完整后，Skill 使用同一输入执行 dry-run；失败时不发送正式请求。
@@ -383,7 +396,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 用户：$everyline-review 使用 prod-user Profile 和 user 身份审查 /Users/me/Documents/采购合同.pdf
 
 Agent（WorkBuddy `AskUserQuestion`）：请选择审查规则来源。第 1/2 页，`multiSelect=true`：
-0. 按合同类型自动匹配内置规则包
+0. 通用审查清单（系统内置）
 1. 实际查询到的自定义清单 A
 2. 实际查询到的自定义清单 B
 3. 实际查询到的自定义清单 C

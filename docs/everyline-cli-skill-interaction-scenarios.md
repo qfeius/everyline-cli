@@ -47,6 +47,8 @@ flowchart TD
 - 用户看到名称、类型、风险等级和编号；内部 ID 只来自本次 CLI 查询。
 - WorkBuddy 的清单、立场方和强度均调用 `AskUserQuestion`；清单设置 `multiSelect=true` 并按统一候选快照分页，立场方和强度设置为单选。
 - Codex 当前回合提供原生结构化选项工具时，用选项卡收集符合组件容量的互斥单选；Codex 清单和豆包交互使用同一冻结快照的编号文字协议，不为展示选项卡切换协作模式。
+- 发起授权前，用户未明确身份时必须先选择 `user/app`：WorkBuddy 使用 `AskUserQuestion` 且 `multiSelect=false`，Codex 使用当前可用的 `request_user_input`，豆包优先使用原生单选组件；无组件时三端统一回退到 `1. user`、`2. app` 的稳定编号协议。
+- user 授权地址统一展示为文字固定的“授权登录详情”链接按钮或 Markdown 链接，完整 URL 只作为逐字不变的链接目标，由用户主动点击；app 授权不生成该入口。
 - 合同审查先用独立交互完成清单选择，再用下一次独立交互选择立场方；同一宿主选择卡片不得混合两类问题。
 - 默认解析 `--output json` 的 stdout；stderr 只作为进度和诊断信息。
 - 合同正文、access token、app secret、授权码、回调参数和完整内部请求不输出到对话；CLI 返回的签名 `reviewDetailUrl` 必须完整原样展示，不提取或单独输出其中的 token。
@@ -86,10 +88,10 @@ flowchart TD
 | PROFILE-03 | 受限 | 用户显式指定的 Profile 缺失或与显式环境不一致 | 不猜测或覆盖该 Profile | 用户修正后重新调用 |
 | AUTH-01 | 已支持 | `使用 user 身份审查` | 直接选择 user，不再询问身份 | 查询 user 授权状态 |
 | AUTH-02 | 已支持 | `使用 app 身份查询清单` | 直接选择 app，不再询问身份 | 查询 app 授权状态 |
-| AUTH-03 | 已支持 | 用户未说明身份，身份会影响资源范围 | 只询问一次使用 user 还是 app | 用户明确身份后继续 |
+| AUTH-03 | 已支持 | 用户发起授权但未说明身份 | 在任何身份相关 `auth status/login/init` 前只询问一次使用 user 还是 app，收到答案前不发起授权 | 用户明确身份后继续 |
 | AUTH-04 | 已支持 | 非首次安装门禁且 `auth status` 返回 `authenticated=true` | 视为已授权 | 进入业务流程 |
-| AUTH-05 | 已支持 | user 未授权 | 发起一次 OAuth 登录；CLI 打开浏览器后等待用户完成 | 重新查询状态为已授权 |
-| AUTH-06 | 已支持 | user 使用 `--no-open-browser` | 把 CLI 返回的授权链接原样交给用户 | 等待当前 OAuth 会话完成 |
+| AUTH-05 | 已支持 | Codex user 未授权 | 执行一次带 `--no-open-browser` 的 OAuth 登录，保持同一 CLI 会话，并生成“授权登录详情”入口 | 用户主动点击并完成授权后重新查询状态 |
+| AUTH-06 | 已支持 | user 流程取得完整授权 URL | 原生链接按钮可用时以“授权登录详情”为按钮文字，否则显示 `[授权登录详情](<FULL_AUTHORIZATION_URL>)`；链接目标逐字保留全部 query | 等待当前授权事务完成 |
 | AUTH-07 | 受限 | user 取消、失败或授权失效 | 返回 CLI 真实原因 | 停止业务调用 |
 | AUTH-08 | 已支持 | app 需要 secret | 只通过 stdin 或等价安全凭证源提供 | 登录后重新查询状态 |
 | AUTH-09 | 受限 | app 或 user 授权失败 | 不自动切换到另一身份 | 返回真实失败并停止 |
@@ -99,12 +101,15 @@ flowchart TD
 | AUTH-13 | 受限 | 服务端返回 `http=200 code=10003 msg=invalid param` | 原样报告通用参数错误；CLI 未指出具体字段时不推断 app ID/secret 失效、变更或轮换 | 保持原 Profile 和 app 身份，等待用户重试或主动指定变更 |
 | AUTH-14 | 已支持 | user 已授权，用户发起 app 授权 | 保留 user 凭据，直接以 `--as app` 检查或登录；不先执行 user logout | 两种身份凭据独立保存 |
 | AUTH-15 | 已支持 | 首次安装目录残留旧 user/app token | `auth status` 按 `authenticated=false/source=first_install` 处理；本地 user/app 重新 login，Device user 执行 `auth init --restart` + `auth complete` | 新凭证保存后解除门禁 |
-| AUTH-16 | 已支持 | Codex 当前回合提供原生选项工具且用户尚未指定 user/app | 像 WorkBuddy 一样用互斥单选选项卡收集身份；用户已明确身份时直接采用 | 固定身份后继续授权检查 |
+| AUTH-16 | 已支持 | Codex 当前回合提供原生选项工具且用户尚未指定 user/app | 使用 `request_user_input` 互斥单选收集身份；用户已明确身份时直接采用 | 固定身份后继续授权检查 |
 | AUTH-17 | 已支持 | WorkBuddy app 登录需要输入 secret | 展示带真实 Node `bin`、Profile 和 app ID 的单行 `auth login --app-secret-stdin` 命令，由用户在自己的终端隐藏输入；不使用对话输入组件 | 用户确认后只用 `auth status` 验证 |
 | AUTH-18 | 已支持 | app 身份已确定，但当前消息和 Profile 都没有 app ID | 先单独询问一次非敏感 app ID；该轮不请求 app secret，取得后创建或校验 app Profile | app ID 与 Profile 固定后查询授权状态 |
 | AUTH-19 | 已支持 | app ID 已固定且状态为未授权 | Codex、豆包或 WorkBuddy 按各自安全入口发起一笔登录事务，并只输入一次 app secret；命令结束后只查询一次状态，不自动重跑登录 | 成功进入业务；失败保留 Profile 与 app ID 并结束本次尝试 |
 | AUTH-20 | 已支持 | WorkBuddy user 进入 Device Grant | 在首次 `auth init` 前冻结 `CODEBUDDY_SESSION_ID`，并在 `auth init`、`auth complete`、`auth status` 中显式复用 | 用户只打开一条授权链接 |
 | AUTH-21 | 已支持 | WorkBuddy `auth complete` 本地未找到待完成事务 | 恢复首次 `auth init` 使用的 `CODEBUDDY_SESSION_ID` 并重试 `auth complete`，不直接 `auth init --restart` | 原事务完成；只有 `denied/expired/invalid_grant` 才经用户同意新建事务 |
+| AUTH-22 | 已支持 | WorkBuddy 发起授权且用户未指定身份 | 调用 `AskUserQuestion`，设置 `multiSelect=false`，选项为 user/app | 用户单选后才查询对应身份状态 |
+| AUTH-23 | 已支持 | 豆包发起授权且用户未指定身份 | 优先使用原生单选组件；组件不可用时展示稳定编号 `1. user`、`2. app` | 用户回复有效编号或身份后继续 |
+| AUTH-24 | 已支持 | user 授权入口已生成 | 用户自己点击“授权登录详情”；Agent 不自动打开浏览器，不在展示切换时重启授权 | 保持唯一授权事务 |
 
 当前 Skill 只自动创建缺失的默认 test Profile；其他环境的 Profile 仍由用户显式管理。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
 
@@ -141,8 +146,8 @@ flowchart TD
 | SELECT-07 | 已支持 | 存在同名清单 | 使用类型、规则名称、创建信息或对话编号区分 | 用户明确选择 |
 | SELECT-08 | 已支持 | 用户输入的名称无匹配或多项匹配 | 展示真实候选，不接受猜测 ID | 用户重新选择 |
 | SELECT-09 | 受限 | 用户既未选自定义清单也未选内置规则包 | 继续询问规则来源 | 不发起任务 |
-| SELECT-10 | 受限 | 用户要求选择并不存在的其他“内置清单” | 只展示当前已知的“按合同类型自动匹配内置规则包” | 用户改选或停止 |
-| SELECT-11 | 已支持 | 展示规则来源候选 | 固定 `0=按合同类型自动匹配内置规则包`，真实自定义清单从 1 开始连续编号，合并为统一候选快照 | 展示与解析共用同一编号映射 |
+| SELECT-10 | 受限 | 用户要求选择并不存在的其他“内置清单” | 只展示当前已知的“通用审查清单（系统内置）” | 用户改选或停止 |
+| SELECT-11 | 已支持 | 展示规则来源候选 | 固定 `0=通用审查清单（系统内置）`，真实自定义清单从 1 开始连续编号，合并为统一候选快照 | 展示与解析共用同一编号映射 |
 | SELECT-12 | 已支持 | `选择 0 和 14` | 设置内置规则包并采用编号 14 对应的真实清单 ID | 组合规则来源完成 |
 | SELECT-13 | 已支持 | 统一候选超过 4 项 | 内置项和真实清单共同按 `pageSize=4` 分页；6 个真实清单时第 1 页为 0、1、2、3，第 2 页为 4、5、6 | 显示第 1 页 |
 | SELECT-14 | 已支持 | 用户选择下一页或上一页 | 只更新当前页，沿用稳定全局编号，不产生清单选择 | 显示目标页 |

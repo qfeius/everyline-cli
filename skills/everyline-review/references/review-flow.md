@@ -76,7 +76,7 @@ review file upload-url --profile <profile> --as <identity> --file-url <url> --na
 ## 查询并选择清单
 
 1. 使用 `checklist list --profile <profile> --as <identity> --page-index 1 --page-size 100 --output json` 读取全部分页。
-2. 把固定内置项 `0. 按合同类型自动匹配内置规则包` 放在首位，再按 CLI 返回顺序追加从 1 连续编号的真实自定义清单；内置规则包与真实自定义清单组成一份统一候选列表。冻结完整列表、稳定编号以及编号到规则来源的映射，翻页和搜索都只读取该快照，不重新查询、截断或重排。
+2. 把固定内置项 `0. 通用审查清单（系统内置）` 放在首位，再按 CLI 返回顺序追加从 1 连续编号的真实自定义清单；内置规则包与真实自定义清单组成一份统一候选列表。冻结完整列表、稳定编号以及编号到规则来源的映射，翻页和搜索都只读取该快照，不重新查询、截断或重排。
 3. 统一设置 `pageSize = 4`、`totalCandidates = len(candidates)`、`pageCount = ceil(totalCandidates / pageSize)`；当前页只读取 `candidates[(currentPage-1)*pageSize:min(currentPage*pageSize,totalCandidates)]`。内置项与真实清单共同计入每页容量，所以编号 0 只出现在第一页。比如 6 个真实清单加内置项共 7 项时，第 1 页为 0、1、2、3，第 2 页为 4、5、6。
 4. 用独立会话状态保存 `currentPage`、`pageSize`、`pageCount` 和完整编号映射。翻页只更新当前页；`上一页`、`下一页` 不产生清单选择。到达首页或末页时保持合法页码并重新展示当前页，不把完整列表重新解释为单页内容。
 5. WorkBuddy 每次进入或刷新清单页都调用 `AskUserQuestion`，问题中显示 `第 X/Y 页`，业务 `options` 只包含当前页统一候选，且 `multiSelect=true`；末页只有 1 个业务候选时可按前述规则补充 1 个导航项。标签使用稳定全局编号和名称，说明只包含用户可读类型或规则摘要；选项值通过冻结映射解析，不使用显示文本充当真实 ID。
