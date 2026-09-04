@@ -116,7 +116,7 @@ everyline-cli auth status --profile <profile> --as user --output json
 everyline-cli auth login --profile <profile> --as user
 ```
 
-该命令会先调用当前环境的 `POST /open-api/v3/oauth/register/contract-review` 动态注册浏览器 public client，再使用返回的 `client_id` 发起 OAuth/PKCE；即使 Profile 中留有旧 `oauth_client_id`，本次显式登录也会用新返回值替换它。Agent 不单独调用注册接口，不复用或改写输出中的 client ID。浏览器 client 与 `oauth_device_client_id` 分开保存，Codex 登录不覆盖 Device client。
+该命令会先读取当前 authorization server metadata 的 `registration_endpoint`，通过该端点动态注册浏览器 public client，再使用返回的 `client_id` 发起 OAuth/PKCE；即使 Profile 中留有旧 `oauth_client_id`，本次显式登录也会用新返回值替换它。Agent 不单独调用注册接口，不猜测注册路径，也不复用或改写输出中的 client ID。浏览器 client 与 `oauth_device_client_id` 分开保存，Codex 登录不覆盖 Device client。
 
 CLI 打开浏览器时让用户在该页面完成授权；使用 `--no-open-browser` 时完整原样展示 CLI 返回的链接。保持同一次登录会话，不为切换展示方式重启登录。
 
@@ -135,7 +135,7 @@ CODEBUDDY_SESSION_ID=<same-session-id> everyline-cli auth complete --profile <pr
 
 如果 `auth complete` 返回“没有待完成的 Device 授权”，先恢复 `auth init` 使用的原 `CODEBUDDY_SESSION_ID` 并重试一次 `auth complete`；这次本地存储未命中的失败没有请求 token endpoint，不计作重复兑换。不得因此直接执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并且用户同意重新授权时，才开始新事务；原标识已经丢失时先如实说明事务状态丢失并等待用户决定。
 
-dev/test/prod 固定使用 `business_type=contract-review`、`scope=contract-review:full` 和对应开放平台 resource。Codex `auth login` 按上节规则动态注册并替换浏览器 client；`auth init` 继续使用 Device Grant client 规则。两类 client 分开使用，Agent 不把 `oauth_client_id` 当成 `oauth_device_client_id`，也不在两种授权方式之间复制 client ID。
+dev/test/prod 固定使用 `business_type=contract-review`、`scope=contract-review:full` 和对应开放平台 resource。Codex `auth login` 按上节规则动态注册浏览器 client，并始终走 OAuth Authorization Code + PKCE。豆包和 WorkBuddy 始终执行 `auth init`/`auth complete` Device Grant；dev/test 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，`auth init` 不动态注册 client，也不复用 Codex 浏览器 client。prod、blue 或自定义环境使用 Device Grant 时，Profile 必须配置平台确认的 `oauth_device_client_id`。两类 client 分开使用，Agent 不在两种授权方式之间复制 client ID。
 
 读取 `auth init --help` 和 `auth complete --help`。首次安装门禁期间执行：
 

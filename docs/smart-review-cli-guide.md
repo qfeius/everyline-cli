@@ -120,6 +120,7 @@ dev/test/prod 还内置了 user OAuth 配置：
 | OAuth metadata | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
 | business type | `contract-review` | `contract-review` | `contract-review` |
 | 浏览器 public client ID | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 |
+| Device client ID | `zscli_c77221e810ce3977` | `zscli_c77221e810ce3977` | 当前未配置，使用时显式提供 |
 | redirect URL | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` |
 | scope | `contract-review:full` | `contract-review:full` | `contract-review:full` |
 

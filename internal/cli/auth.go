@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -49,34 +48,25 @@ type deviceAuthOutput struct {
 	ExpiresAt               string `json:"expires_at,omitempty"`
 }
 
-// ensureOAuthClient 注册并持久化当前授权流程使用的 client_id；force 为 true 时替换历史缓存值。
-// 入参：ctx 控制请求；runtime 提供 HTTP 和 Profile 存储；profile 为当前配置；device 表示是否为 Device Grant；force 表示是否强制重新注册。
-// 返回值：config.Profile 为补齐后的配置；error 为注册参数、网络、协议或持久化错误。
-func ensureOAuthClient(ctx context.Context, runtime *Runtime, profile config.Profile, device bool, force bool) (config.Profile, error) {
-	if device {
-		if !force && profile.EffectiveOAuthDeviceClientID() != "" {
-			return profile, nil
-		}
-	} else if !force && strings.TrimSpace(profile.OAuthClientID) != "" {
+// ensureBrowserOAuthClient 通过 metadata 声明的动态注册端点获取并持久化 Codex PKCE 使用的浏览器 client_id。
+// 入参：ctx context.Context 控制请求；runtime *Runtime 提供 HTTP 和 Profile 存储；profile config.Profile 为当前配置；registrationEndpoint string 为 metadata 声明的注册端点；force bool 表示是否替换历史缓存值。
+// 返回值：config.Profile 为补齐浏览器 client 后的配置；error 为注册参数、网络、协议或持久化错误。
+func ensureBrowserOAuthClient(ctx context.Context, runtime *Runtime, profile config.Profile, registrationEndpoint string, force bool) (config.Profile, error) {
+	if !force && strings.TrimSpace(profile.OAuthClientID) != "" {
 		return profile, nil
 	}
 	if !profile.HasOAuthClientRegistrationConfiguration() {
 		return profile, fmt.Errorf("Profile %q 的 OAuth client 动态注册配置不完整", profile.Name)
 	}
-	registrationEndpoint := strings.TrimRight(profile.BaseURLFor(config.IdentityUser), "/") +
-		"/open-api/v3/oauth/register/" + url.PathEscape(strings.TrimSpace(profile.OAuthBusinessType))
 	clientID, err := auth.RegisterOAuthClient(ctx, runtime.HTTP, auth.OAuthClientRegistrationRequest{
-		Endpoint: registrationEndpoint, ClientName: "EveryLine CLI", RedirectURI: profile.OAuthRedirectURL,
+		Endpoint: strings.TrimSpace(registrationEndpoint), ClientName: "EveryLine CLI", RedirectURI: profile.OAuthRedirectURL,
 		Scope: strings.Join(profile.OAuthScopes, " "),
 	})
 	if err != nil {
 		return profile, err
 	}
-	if device {
-		profile.OAuthDeviceClientID = clientID
-	} else {
-		profile.OAuthClientID = clientID
-	}
+	// 浏览器 client 与 Device client 始终分开，Codex 动态注册不得覆盖豆包/WorkBuddy 的固定 Device client。
+	profile.OAuthClientID = clientID
 	if err := runtime.Profiles.Add(profile); err != nil {
 		return profile, err
 	}
@@ -154,10 +144,6 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 			if strings.TrimSpace(metadata.TokenEndpoint) == "" {
 				return fmt.Errorf("OAuth metadata 缺少 token_endpoint")
 			}
-			profile, err = ensureOAuthClient(authContext, runtime, profile, true, false)
-			if err != nil {
-				return err
-			}
 			deviceClientID := profile.EffectiveOAuthDeviceClientID()
 			response, err := auth.StartDeviceAuthorization(authContext, runtime.HTTP, auth.DeviceAuthorizationRequest{
 				Endpoint: deviceEndpoint, ClientID: deviceClientID,
@@ -199,7 +185,7 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 	}
 	command.Flags().BoolVar(&restart, "restart", false, "明确废弃已有事务并重新开始 Device 授权")
 	withNotes(command,
-		"Profile 未配置 client ID 时，CLI 会先通过当前开放平台动态注册并保存返回值。",
+		"Device Grant 只使用 Profile 或 dev/test 预设中的独立 Device client，不动态注册且不复用 Codex 浏览器 client。",
 		"把 verification_uri_complete 作为一个完整链接原样展示给用户，不拆分、不改写 query。",
 		"用户完成浏览器授权后执行 auth complete；每次 complete 只检查一次。",
 	)
@@ -391,8 +377,16 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				if strings.TrimSpace(profile.OAuthMetadataURL) != "" && profile.HasOAuthClientRegistrationConfiguration() {
 					registrationContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
 					defer cancel()
+					// 浏览器 client 的注册端点以 authorization server metadata 为准，与合同 CLI 的发现流程保持一致。
+					metadata, discoveryErr := auth.DiscoverOAuthMetadata(registrationContext, runtime.HTTP, profile.OAuthMetadataURL)
+					if discoveryErr != nil {
+						return discoveryErr
+					}
+					if strings.TrimSpace(metadata.RegistrationEndpoint) == "" {
+						return fmt.Errorf("OAuth metadata 缺少 registration_endpoint")
+					}
 					// 显式登录总是创建当前环境的 public client，避免升级后继续使用历史环境留下的无效 client_id。
-					profile, err = ensureOAuthClient(registrationContext, runtime, profile, false, true)
+					profile, err = ensureBrowserOAuthClient(registrationContext, runtime, profile, metadata.RegistrationEndpoint, true)
 					if err != nil {
 						return err
 					}
@@ -512,7 +506,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().StringVar(&appIDFlag, "app-id", "", "app 登录使用的 app ID；优先于环境变量和 Profile")
 	command.Flags().StringVar(&appSecretFlag, "app-secret", "", "app 登录使用的 app secret；不会输出到日志，优先于 stdin、环境变量和本地保存值")
 	withNotes(command,
-		"Codex 本地 user 每次显式登录都会通过当前开放平台动态注册 public client，并用返回的 client_id 完成本次 OAuth/PKCE。",
+		"Codex 本地 user 每次显式登录都会读取 OAuth metadata 的 registration_endpoint，动态注册 public client，并用返回的 client_id 完成本次 OAuth/PKCE。",
 		"动态注册只更新浏览器 OAuth client，不覆盖显式 Device Grant client。",
 	)
 	return command

@@ -201,6 +201,8 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"127.0.0.1:8000",
 		"不得执行 `auth login --profile <profile> --as user`",
 		"device_authorization_endpoint",
+		"独立 EveryLine Device client `zscli_c77221e810ce3977`",
+		"`auth init` 不动态注册 client，也不复用 Codex 浏览器 client",
 		"--profile <profile> --as <identity>",
 		"不得要求用户在对话中提供、粘贴或转述 app secret",
 		"发起或重试 app 授权只显式使用 `--as app`",
@@ -832,6 +834,7 @@ func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 				"Profile 不保存 app secret 或 access token。",
 				"user 身份可省略",
 				"--oauth-metadata-url string",
+				"dev/test 由预设提供",
 				"--oauth-redirect-url string",
 			},
 		},
@@ -841,7 +844,7 @@ func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 			expected: []string{
 				"everyline-cli auth login [flags]",
 				"豆包/WorkBuddy 沙箱使用 auth init/complete Device Grant",
-				"每次显式登录都会通过当前开放平台动态注册 public client",
+				"读取 OAuth metadata 的 registration_endpoint",
 				"--app-id string",
 				"--app-secret string",
 				"--app-secret-stdin",
@@ -851,6 +854,16 @@ func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 			},
 			unexpected: []string{
 				"--access-token-stdin",
+			},
+		},
+		{
+			name: "auth init",
+			args: []string{"auth", "init", "--help"},
+			expected: []string{
+				"everyline-cli auth init [flags]",
+				"独立 Device client",
+				"不动态注册",
+				"不复用 Codex 浏览器 client",
 			},
 		},
 	}

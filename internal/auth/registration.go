@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// OAuthClientRegistrationRequest 保存开放平台动态注册 public client 所需的非敏感参数。
+// OAuthClientRegistrationRequest 保存通过指定端点动态注册 public client 所需的非敏感参数。
 type OAuthClientRegistrationRequest struct {
 	Endpoint    string
 	ClientName  string
@@ -32,7 +32,7 @@ type oauthClientRegistrationResponse struct {
 	ClientID string `json:"client_id"`
 }
 
-// RegisterOAuthClient 通过开放平台匿名接口动态注册 OAuth public client，并仅返回后续授权所需的 client_id。
+// RegisterOAuthClient 通过指定匿名接口动态注册 OAuth public client，并仅返回后续授权所需的 client_id。
 // 入参：ctx 控制请求；client 为可注入 HTTP 客户端；input 提供注册端点、客户端名称、回调地址和 scope。
 // 返回值：string 为服务端生成的 client_id；error 为配置、网络、HTTP 或响应协议错误。
 func RegisterOAuthClient(ctx context.Context, client *http.Client, input OAuthClientRegistrationRequest) (string, error) {

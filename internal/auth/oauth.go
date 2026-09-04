@@ -42,6 +42,7 @@ type OAuthLoginOptions struct {
 type OAuthMetadata struct {
 	AuthorizationEndpoint       string   `json:"authorization_endpoint"`
 	TokenEndpoint               string   `json:"token_endpoint"`
+	RegistrationEndpoint        string   `json:"registration_endpoint"`
 	DeviceAuthorizationEndpoint string   `json:"device_authorization_endpoint"`
 	RevocationEndpoint          string   `json:"revocation_endpoint"`
 	CodeChallengeMethods        []string `json:"code_challenge_methods_supported"`

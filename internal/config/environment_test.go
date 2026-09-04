@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-// TestResolveEnvironment 验证 dev、test、blue、prod 预设环境的基础地址和 token 地址保持一致。
+// TestResolveEnvironment 验证四套环境连接参数，并锁定 dev/test 的平台专用 Device client。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestResolveEnvironment(t *testing.T) {
@@ -11,18 +11,21 @@ func TestResolveEnvironment(t *testing.T) {
 		authURL          string
 		tokenURL         string
 		oauthMetadataURL string
+		deviceClientID   string
 	}{
 		"dev": {
 			baseURL:          "https://dev-open.qtech.cn",
 			authURL:          "https://dev-contract-agent.qtech.cn",
 			tokenURL:         "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 			oauthMetadataURL: "https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
+			deviceClientID:   "zscli_c77221e810ce3977",
 		},
 		"test": {
 			baseURL:          "https://test-open.qtech.cn",
 			authURL:          "https://test-contract-agent.qtech.cn",
 			tokenURL:         "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 			oauthMetadataURL: "https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
+			deviceClientID:   "zscli_c77221e810ce3977",
 		},
 		"blue": {
 			baseURL:  "https://blue-open.qtech.cn",
@@ -46,6 +49,9 @@ func TestResolveEnvironment(t *testing.T) {
 		}
 		if preset.OAuthMetadataURL != expected.oauthMetadataURL {
 			t.Fatalf("environment=%s metadata=%q", name, preset.OAuthMetadataURL)
+		}
+		if preset.OAuthDeviceClientID != expected.deviceClientID {
+			t.Fatalf("environment=%s deviceClientID=%q", name, preset.OAuthDeviceClientID)
 		}
 		if expected.oauthMetadataURL != "" && (preset.OAuthBusinessType != "contract-review" || preset.OAuthRedirectURL == "" || len(preset.OAuthScopes) == 0) {
 			t.Fatalf("environment=%s 缺少 OAuth 动态注册参数: %#v", name, preset)

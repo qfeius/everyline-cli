@@ -294,7 +294,7 @@ everyline-cli auth complete --profile test-user --as user --output json
 
 WorkBuddy 在第一次 `auth init` 前固定一个非敏感的 `CODEBUDDY_SESSION_ID`，上面两条命令和随后的 `auth status` 都添加相同的 `CODEBUDDY_SESSION_ID=<same-session-id>` 前缀。若 `auth complete` 提示本地没有待完成事务，先恢复首次命令使用的原值并重试 `auth complete`；此时不要执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并经用户同意后，才创建新的授权事务。
 
-只有 `status=succeeded` 才继续。dev/test/prod 环境预设提供 `contract-review` metadata、回调地址和 `contract-review:full` scope。Codex 每次显式 `auth login --as user` 会通过当前开放平台的 `POST /open-api/v3/oauth/register/contract-review` 动态注册并替换浏览器 client ID；`auth init` 使用独立的 Device client 字段，两者不互相复用。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
+只有 `status=succeeded` 才继续。dev/test/prod 环境预设提供 `contract-review` metadata、回调地址和 `contract-review:full` scope。Codex 每次显式 `auth login --as user` 会读取 metadata 的 `registration_endpoint`，动态注册浏览器 client 并执行 OAuth Authorization Code + PKCE。豆包/WorkBuddy 的 `auth init` 只走 Device Grant：dev/test 使用独立 Device client `zscli_c77221e810ce3977`，不动态注册也不复用浏览器 client；prod 或自定义环境需显式配置平台确认的 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
 
 ### app 身份：适合无浏览器设备
 
@@ -477,7 +477,7 @@ CLI 与三项 Skill 更新并校验成功后展示“EveryLine CLI 已更新完�
 
 ### user OAuth 启动失败
 
-Codex 本地登录检查 Profile 是否具有 OAuth metadata、business type 和 loopback redirect，并确认当前开放平台动态注册接口可达；每次显式登录都会替换历史浏览器 client ID。豆包/WorkBuddy 还要检查 `contract-review` metadata 的 `device_authorization_endpoint`、独立 Device client 和沙箱安全存储环境变量。记录 CLI 原始提示并联系平台配置负责人。
+Codex 本地登录检查 Profile 是否具有 OAuth metadata、business type 和 loopback redirect，metadata 是否声明可达的 `registration_endpoint`；每次显式登录都会替换历史浏览器 client ID。豆包/WorkBuddy 还要检查 `contract-review` metadata 的 `device_authorization_endpoint`、独立 Device client 和沙箱安全存储环境变量。记录 CLI 原始提示并联系平台配置负责人。
 
 ### 返回 `code=20000019` 或“租户应用不匹配”
 

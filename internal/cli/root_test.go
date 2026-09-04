@@ -102,7 +102,7 @@ func TestConfigAddDefaultsToJSONAndPreservesExplicitOutput(t *testing.T) {
 	}
 }
 
-// TestConfigAddEnvironmentPreset 验证 config add 可创建四套预设，并为 dev/test/prod 保留动态注册参数而不内置 client ID。
+// TestConfigAddEnvironmentPreset 验证 config add 可创建四套预设，Codex 保留动态注册参数，dev/test 同时内置专用 Device client。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestConfigAddEnvironmentPreset(t *testing.T) {
@@ -134,11 +134,21 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if profile.AuthURL == "" {
 			t.Fatalf("environment=%s 缺少自有认证页面: %#v", test.name, profile)
 		}
-		if test.name != "blue" && (!profile.HasOAuthClientRegistrationConfiguration() || !profile.HasDeviceOAuthConfiguration()) {
-			t.Fatalf("environment=%s 缺少 OAuth 动态注册预设: %#v", test.name, profile)
+		if test.name != "blue" && !profile.HasOAuthClientRegistrationConfiguration() {
+			t.Fatalf("environment=%s 缺少 Codex OAuth 动态注册预设: %#v", test.name, profile)
 		}
-		if test.name != "blue" && (profile.OAuthClientID != "" || profile.OAuthDeviceClientID != "") {
-			t.Fatalf("environment=%s 不应内置 client_id: %#v", test.name, profile)
+		if profile.OAuthClientID != "" {
+			t.Fatalf("environment=%s 不应内置浏览器 client_id: %#v", test.name, profile)
+		}
+		expectedDeviceClientID := ""
+		if test.name == "dev" || test.name == "test" {
+			expectedDeviceClientID = "zscli_c77221e810ce3977"
+		}
+		if profile.OAuthDeviceClientID != expectedDeviceClientID {
+			t.Fatalf("environment=%s deviceClientID=%q", test.name, profile.OAuthDeviceClientID)
+		}
+		if expectedDeviceClientID != "" && !profile.HasDeviceOAuthConfiguration() {
+			t.Fatalf("environment=%s 缺少 Device Grant 预设: %#v", test.name, profile)
 		}
 	}
 }
@@ -727,11 +737,11 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/open-api/v3/oauth/register/contract-review":
+		case "/oauth/register/contract-review":
 			registrationCalls++
 			_, _ = writer.Write([]byte(`{"client_id":"dynamic-oauth-client","client_id_issued_at":1788480000,"client_secret_expires_at":0,"token_endpoint_auth_method":"none"}`))
 		case "/metadata":
-			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","code_challenge_methods_supported":["S256"]}`))
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","registration_endpoint":"` + server.URL + `/oauth/register/contract-review","code_challenge_methods_supported":["S256"]}`))
 		case "/token":
 			if err := request.ParseForm(); err != nil {
 				t.Fatal(err)
@@ -810,6 +820,37 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	storedProfile, err := runtime.Profiles.Get(profile.Name)
 	if err != nil || storedProfile.OAuthClientID != "dynamic-oauth-client" || storedProfile.OAuthDeviceClientID != "existing-device-client" {
 		t.Fatalf("storedProfile=%#v err=%v", storedProfile, err)
+	}
+}
+
+// TestAuthUserLoginRequiresMetadataRegistrationEndpoint 验证 Codex 登录不再猜测开放平台动态注册路径。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；metadata 缺少 registration_endpoint 时未明确停止则通过 t.Fatal 报告。
+func TestAuthUserLoginRequiresMetadataRegistrationEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/metadata" {
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"https://auth.example.com/token","code_challenge_methods_supported":["S256"]}`))
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	defer server.Close()
+
+	runtime, _, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{
+		Name: "test-user", BaseURL: server.URL, TokenURL: server.URL + "/tenant-token",
+		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review",
+		OAuthClientID: "stale-client", OAuthRedirectURL: "http://127.0.0.1:8000/login",
+		OAuthScopes: []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--profile", profile.Name, "--as", "user"})
+	if err == nil || !strings.Contains(err.Error(), "OAuth metadata 缺少 registration_endpoint") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

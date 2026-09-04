@@ -154,96 +154,15 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 	}
 }
 
-// TestAuthDeviceInitRegistersOAuthClient 验证未配置 client_id 时，CLI 先通过开放平台动态注册并持久化返回值。
+// TestAuthDeviceInitRequiresDedicatedClient 验证 Device Grant 缺少专用 client 时在任何网络请求前停止。
 // 入参：t *testing.T 为测试上下文。
-// 返回值：无；请求协议、Device client 传递或持久化不正确时通过 t.Fatal 报告。
-func TestAuthDeviceInitRegistersOAuthClient(t *testing.T) {
-	var registrationRequest struct {
-		ClientName              string   `json:"client_name"`
-		RedirectURIs            []string `json:"redirect_uris"`
-		GrantTypes              []string `json:"grant_types"`
-		ResponseTypes           []string `json:"response_types"`
-		TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
-		Scope                   string   `json:"scope"`
-	}
-	var deviceClientID string
+// 返回值：无；Device 流程尝试动态注册、复用浏览器 client 或访问授权端点时通过 t.Fatal 报告。
+func TestAuthDeviceInitRequiresDedicatedClient(t *testing.T) {
+	requestCalled := false
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/open-api/v3/oauth/register/contract-review":
-			if request.Method != http.MethodPost {
-				t.Fatalf("registration method=%s", request.Method)
-			}
-			if request.Header.Get("Authorization") != "" {
-				t.Fatalf("动态注册不应携带 Authorization: %q", request.Header.Get("Authorization"))
-			}
-			if err := json.NewDecoder(request.Body).Decode(&registrationRequest); err != nil {
-				t.Fatal(err)
-			}
-			writer.Header().Set("Content-Type", "application/json")
-			_, _ = writer.Write([]byte(`{"client_id":"dynamic-client","client_id_issued_at":1788480000,"client_secret_expires_at":0,"token_endpoint_auth_method":"none"}`))
-		case "/metadata":
-			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","device_authorization_endpoint":"` + server.URL + `/device"}`))
-		case "/device":
-			_ = request.ParseForm()
-			deviceClientID = request.Form.Get("client_id")
-			_, _ = writer.Write([]byte(`{"device_code":"private-device-code","user_code":"ABCD","verification_uri":"https://auth.example.com/device","verification_uri_complete":"https://auth.example.com/device?user_code=ABCD","expires_in":600}`))
-		default:
-			http.NotFound(writer, request)
-		}
-	}))
-	defer server.Close()
-
-	runtime, _, _ := testRuntime(t)
-	runtime.HTTP = server.Client()
-	runtime.DeviceCredentials = &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{}}
-	profile := config.Profile{
-		Name: "test-user", BaseURL: server.URL, UserBaseURL: server.URL, TokenURL: server.URL + "/token",
-		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review",
-		OAuthRedirectURL: "http://127.0.0.1:8000/login", OAuthScopes: []string{"contract-review:full"},
-		DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
-	}
-	if err := runtime.Profiles.Add(profile); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Execute(context.Background(), runtime, []string{"auth", "init", "--profile", profile.Name, "--as", "user"}); err != nil {
-		t.Fatal(err)
-	}
-	if registrationRequest.ClientName != "EveryLine CLI" ||
-		strings.Join(registrationRequest.RedirectURIs, " ") != profile.OAuthRedirectURL ||
-		strings.Join(registrationRequest.GrantTypes, " ") != "authorization_code" ||
-		strings.Join(registrationRequest.ResponseTypes, " ") != "code" ||
-		registrationRequest.TokenEndpointAuthMethod != "none" || registrationRequest.Scope != "contract-review:full" {
-		t.Fatalf("registration request=%#v", registrationRequest)
-	}
-	if deviceClientID != "dynamic-client" {
-		t.Fatalf("device client_id=%q", deviceClientID)
-	}
-	storedProfile, err := runtime.Profiles.Get(profile.Name)
-	if err != nil || storedProfile.OAuthClientID != "" || storedProfile.OAuthDeviceClientID != "dynamic-client" {
-		t.Fatalf("storedProfile=%#v err=%v", storedProfile, err)
-	}
-}
-
-// TestAuthDeviceInitStopsWhenOAuthClientRegistrationFails 验证动态注册失败时不会使用内置 client_id 继续授权。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；注册失败被吞掉或 Device endpoint 被调用时通过 t.Fatal 报告。
-func TestAuthDeviceInitStopsWhenOAuthClientRegistrationFails(t *testing.T) {
-	deviceCalled := false
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/open-api/v3/oauth/register/contract-review":
-			writer.WriteHeader(http.StatusServiceUnavailable)
-		case "/metadata":
-			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","device_authorization_endpoint":"` + server.URL + `/device"}`))
-		case "/device":
-			deviceCalled = true
-			writer.WriteHeader(http.StatusInternalServerError)
-		default:
-			http.NotFound(writer, request)
-		}
+		requestCalled = true
+		http.Error(writer, "unexpected request", http.StatusInternalServerError)
 	}))
 	defer server.Close()
 
@@ -261,11 +180,11 @@ func TestAuthDeviceInitStopsWhenOAuthClientRegistrationFails(t *testing.T) {
 	}
 
 	err := Execute(context.Background(), runtime, []string{"auth", "init", "--profile", profile.Name, "--as", "user"})
-	if err == nil || !strings.Contains(err.Error(), "注册 OAuth client 失败: http=503") {
+	if err == nil || !strings.Contains(err.Error(), "Device OAuth 配置不完整") {
 		t.Fatalf("err=%v", err)
 	}
-	if deviceCalled {
-		t.Fatal("动态注册失败后不应调用 Device Authorization endpoint")
+	if requestCalled {
+		t.Fatal("缺少专用 Device client 时不应发起任何网络请求")
 	}
 }
 

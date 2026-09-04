@@ -37,7 +37,7 @@ Profile 保存在 `~/.everyline-cli/config.json`。可以通过 `EVERYLINE_CONFI
 | `oauth_metadata_url` | `--oauth-metadata-url` | user OAuth 登录时必填 | OAuth authorization server metadata URL |
 | `oauth_business_type` | `--oauth-business-type` | user OAuth 登录时必填 | OAuth 业务类型 |
 | `oauth_client_id` | `--oauth-client-id` | 可选；每次显式 Codex user 登录动态注册并替换 | 浏览器 public client ID |
-| `oauth_device_client_id` | `--oauth-device-client-id` | 可选；缺少时由 `auth init` 独立获取 | Device Grant client ID；不复用浏览器 client |
+| `oauth_device_client_id` | `--oauth-device-client-id` | dev/test 由预设提供；其他环境使用 Device Grant 时必填 | Device Grant client ID；`auth init` 不动态注册且不复用浏览器 client |
 | `oauth_redirect_url` | `--oauth-redirect-url` | user OAuth 登录时必填 | 本机 loopback callback；当前应使用 HTTP |
 | `oauth_scopes` | `--oauth-scope` | 可选 | OAuth scope；参数可重复或使用逗号分隔 |
 | `oauth_device_authorization_url` | `--oauth-device-authorization-url` | metadata 未发布对应端点时可选 | 平台确认的 Device Authorization endpoint |
@@ -114,7 +114,7 @@ everyline-cli config add custom-user \
 | `oauth_metadata_url` | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | 当前未配置 | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
 | `oauth_business_type` | `contract-review` | `contract-review` | 当前未配置 | `contract-review` |
 | `oauth_client_id` | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 | 当前未配置 | 每次显式 Codex user 登录动态注册并替换 |
-| `oauth_device_client_id` | `auth init` 独立获取并写入 | `auth init` 独立获取并写入 | 当前未配置 | `auth init` 独立获取并写入 |
+| `oauth_device_client_id` | `zscli_c77221e810ce3977` | `zscli_c77221e810ce3977` | 当前未配置 | 当前未配置；Device Grant 需显式提供 |
 | `oauth_redirect_url` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | 当前未配置 | `http://127.0.0.1:8000/login` |
 | `oauth_scopes` | `contract-review:full` | `contract-review:full` | 当前未配置 | `contract-review:full` |
 
@@ -174,7 +174,7 @@ everyline-cli config add prod-app \
   --default-output json
 ```
 
-prod user Profile 直接使用同一预设，每次显式 Codex user 登录都从正式开放平台动态注册浏览器 client ID：
+prod user Profile 直接使用同一预设，每次显式 Codex user 登录都从 metadata 声明的 `registration_endpoint` 动态注册浏览器 client ID：
 
 ```bash
 everyline-cli config add prod-user \
@@ -195,7 +195,7 @@ everyline-cli config add prod-app-explicit \
   --default-output json
 ```
 
-prod 已内置 user OAuth metadata、business type、redirect URL 和 scope，但不内置 client ID。
+prod 已内置 user OAuth metadata、business type、redirect URL 和 scope，但不内置浏览器或 Device client ID。Codex 浏览器 client 在显式登录时动态注册；豆包/WorkBuddy 使用 prod Device Grant 时需显式配置平台确认的 `oauth_device_client_id`。
 
 ## 3. Profile 解析与请求流程
 
@@ -400,7 +400,7 @@ user OAuth 使用 Profile 中的动态端点，不计入固定的 25 个 operati
 
 CLI 缓存 token，但 stdout 仍只输出登录状态对象。metadata 声明 `refresh_token` grant 时，CLI 在 token 到期前五分钟刷新；临时失败时保留尚未真正过期的旧 token。业务请求收到服务端可信 `code=110004` 时强制刷新并只重放一次；服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token。如果缓存已由并发重新登录更新，CLI 会保留新 token。
 
-豆包/WorkBuddy 沙箱使用 `auth init` 和 `auth complete`。`auth init` 输出 `status=pending`、完整 `verification_uri_complete` 与 `expires_at`，不输出 device code；`auth complete` 一次检查返回 `succeeded/pending/denied/expired/uncertain/invalid_grant`，成功后把 access/refresh token 写入会话隔离的安全存储。豆包 AgentKit 使用 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` 加密工作区凭证，豆包工作任务按 `SESSION_ID` 派生隔离密钥，WorkBuddy 按固定的 `CODEBUDDY_SESSION_ID` 使用系统凭证库。WorkBuddy 从 `auth init` 到 `auth complete` 及后续状态检查必须复用同一标识；本地找不到待完成事务时恢复原标识后重试 `auth complete`，避免生成第二条授权链接。加密 Profile 快照支持沙箱重建后通过显式 `--profile` 恢复。
+豆包/WorkBuddy 沙箱使用 `auth init` 和 `auth complete`。dev/test 预设使用独立 Device client `zscli_c77221e810ce3977`；`auth init` 不动态注册，也不复用 Codex 浏览器 client。`auth init` 输出 `status=pending`、完整 `verification_uri_complete` 与 `expires_at`，不输出 device code；`auth complete` 一次检查返回 `succeeded/pending/denied/expired/uncertain/invalid_grant`，成功后把 access/refresh token 写入会话隔离的安全存储。豆包 AgentKit 使用 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` 加密工作区凭证，豆包工作任务按 `SESSION_ID` 派生隔离密钥，WorkBuddy 按固定的 `CODEBUDDY_SESSION_ID` 使用系统凭证库。WorkBuddy 从 `auth init` 到 `auth complete` 及后续状态检查必须复用同一标识；本地找不到待完成事务时恢复原标识后重试 `auth complete`，避免生成第二条授权链接。加密 Profile 快照支持沙箱重建后通过显式 `--profile` 恢复。
 
 `auth status` 字段：
 
