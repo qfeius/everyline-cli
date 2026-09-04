@@ -113,17 +113,17 @@ everyline-cli config add test-app \
 | `blue` | `https://blue-open.qtech.cn` | `https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://blue-contract-agent.qtech.cn` |
 | `prod` | `https://open.qfei.cn` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://contract-agent.qfei.cn` |
 
-dev/test 还内置了 user OAuth 配置：
+dev/test/prod 还内置了 user OAuth 配置：
 
-| 配置 | dev | test |
-|---|---|---|
-| OAuth metadata | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` |
-| business type | `contract-review` | `contract-review` |
-| public client ID | `zscli_a9f2a3ce87fa5bb6` | `zscli_a94c9aa398389bd7` |
-| redirect URL | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` |
-| scope | `contract-review:full` | `contract-review:full` |
+| 配置 | dev | test | prod |
+|---|---|---|---|
+| OAuth metadata | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
+| business type | `contract-review` | `contract-review` | `contract-review` |
+| public client ID | 首次 user 授权时动态注册并写入 Profile | 首次 user 授权时动态注册并写入 Profile | 首次 user 授权时动态注册并写入 Profile |
+| redirect URL | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` |
+| scope | `contract-review:full` | `contract-review:full` | `contract-review:full` |
 
-blue/prod 当前未内置 user OAuth metadata、public client ID、redirect URL 和 scope。需要使用 user 身份时，由对应环境提供这些参数后显式注入。
+blue 当前未内置 user OAuth metadata、business type、redirect URL 和 scope。需要使用 user 身份时，由对应环境提供这些参数后显式注入；client ID 由 CLI 动态注册。
 
 其他内置环境的 app Profile：
 

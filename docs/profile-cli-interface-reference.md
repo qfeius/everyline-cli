@@ -36,8 +36,8 @@ Profile 保存在 `~/.everyline-cli/config.json`。可以通过 `EVERYLINE_CONFI
 | `app_id` | `--app-id` | 默认身份为 app 时必填 | 非敏感 app ID；也可在登录时由 flag/环境变量覆盖 |
 | `oauth_metadata_url` | `--oauth-metadata-url` | user OAuth 登录时必填 | OAuth authorization server metadata URL |
 | `oauth_business_type` | `--oauth-business-type` | user OAuth 登录时必填 | OAuth 业务类型 |
-| `oauth_client_id` | `--oauth-client-id` | user OAuth 登录时必填 | public client ID |
-| `oauth_device_client_id` | `--oauth-device-client-id` | Device client 与 public client 不同时必填 | Device Grant client ID |
+| `oauth_client_id` | `--oauth-client-id` | 可选；缺少时首次 user 授权动态注册 | public client ID |
+| `oauth_device_client_id` | `--oauth-device-client-id` | 可选；缺少时复用 public client 或动态注册 | Device Grant client ID |
 | `oauth_redirect_url` | `--oauth-redirect-url` | user OAuth 登录时必填 | 本机 loopback callback；当前应使用 HTTP |
 | `oauth_scopes` | `--oauth-scope` | 可选 | OAuth scope；参数可重复或使用逗号分隔 |
 | `oauth_device_authorization_url` | `--oauth-device-authorization-url` | metadata 未发布对应端点时可选 | 平台确认的 Device Authorization endpoint |
@@ -111,12 +111,12 @@ everyline-cli config add custom-user \
 | `user_base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` |
 | `auth_url` | `https://dev-contract-agent.qtech.cn` | `https://test-contract-agent.qtech.cn` | `https://blue-contract-agent.qtech.cn` | `https://contract-agent.qfei.cn` |
 | `token_url` | `https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` |
-| `oauth_metadata_url` | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | 当前未配置 | 当前未配置 |
-| `oauth_business_type` | `contract-review` | `contract-review` | 当前未配置 | 当前未配置 |
-| `oauth_client_id` | `zscli_a9f2a3ce87fa5bb6` | `zscli_a94c9aa398389bd7` | 当前未配置 | 当前未配置 |
-| `oauth_device_client_id` | `zscli_c77221e810ce3977` | `zscli_c77221e810ce3977` | 当前未配置 | 当前未配置 |
-| `oauth_redirect_url` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | 当前未配置 | 当前未配置 |
-| `oauth_scopes` | `contract-review:full` | `contract-review:full` | 当前未配置 | 当前未配置 |
+| `oauth_metadata_url` | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | 当前未配置 | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
+| `oauth_business_type` | `contract-review` | `contract-review` | 当前未配置 | `contract-review` |
+| `oauth_client_id` | 首次 user 授权时动态注册并写入 | 首次 user 授权时动态注册并写入 | 当前未配置 | 首次 user 授权时动态注册并写入 |
+| `oauth_device_client_id` | 首次 user 授权时动态注册并写入 | 首次 user 授权时动态注册并写入 | 当前未配置 | 首次 user 授权时动态注册并写入 |
+| `oauth_redirect_url` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | 当前未配置 | `http://127.0.0.1:8000/login` |
+| `oauth_scopes` | `contract-review:full` | `contract-review:full` | 当前未配置 | `contract-review:full` |
 
 #### dev user Profile
 
@@ -127,8 +127,6 @@ everyline-cli config add dev-user \
   --auth-url 'https://dev-contract-agent.qtech.cn' \
   --oauth-metadata-url 'https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review' \
   --oauth-business-type 'contract-review' \
-  --oauth-client-id 'zscli_a9f2a3ce87fa5bb6' \
-  --oauth-device-client-id 'zscli_c77221e810ce3977' \
   --oauth-redirect-url 'http://127.0.0.1:8000/login' \
   --oauth-scope 'contract-review:full' \
   --default-identity user \
@@ -144,8 +142,6 @@ everyline-cli config add test-user \
   --auth-url 'https://test-contract-agent.qtech.cn' \
   --oauth-metadata-url 'https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review' \
   --oauth-business-type 'contract-review' \
-  --oauth-client-id 'zscli_a94c9aa398389bd7' \
-  --oauth-device-client-id 'zscli_c77221e810ce3977' \
   --oauth-redirect-url 'http://127.0.0.1:8000/login' \
   --oauth-scope 'contract-review:full' \
   --default-identity user \
@@ -164,7 +160,7 @@ everyline-cli config add blue-app \
   --default-output json
 ```
 
-blue 当前没有内置 OAuth metadata、business type、public client ID、redirect URL 或 scope。配置这些字段前需要由对应环境提供确认值。
+blue 当前没有内置 OAuth metadata、business type、redirect URL 或 scope。配置这些字段前需要由对应环境提供确认值；client ID 在首次 user 授权时动态注册。
 
 #### prod Profile
 
@@ -175,6 +171,15 @@ everyline-cli config add prod-app \
   --env prod \
   --app-id '<PROD_APP_ID>' \
   --default-identity app \
+  --default-output json
+```
+
+prod user Profile 直接使用同一预设，首次授权时从正式开放平台动态注册 client ID：
+
+```bash
+everyline-cli config add prod-user \
+  --env prod \
+  --default-identity user \
   --default-output json
 ```
 
@@ -190,7 +195,7 @@ everyline-cli config add prod-app-explicit \
   --default-output json
 ```
 
-prod 当前也没有内置 user OAuth 参数；使用 user 身份前需要补充 `--oauth-*` 配置。
+prod 已内置 user OAuth metadata、business type、redirect URL 和 scope，但不内置 client ID。
 
 ## 3. Profile 解析与请求流程
 

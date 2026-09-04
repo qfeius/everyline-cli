@@ -82,12 +82,6 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				if !command.Flags().Changed("oauth-business-type") {
 					oauthBusinessType = preset.OAuthBusinessType
 				}
-				if !command.Flags().Changed("oauth-client-id") {
-					oauthClientID = preset.OAuthClientID
-				}
-				if !command.Flags().Changed("oauth-device-client-id") {
-					oauthDeviceClientID = preset.OAuthDeviceClientID
-				}
 				if !command.Flags().Changed("oauth-redirect-url") {
 					oauthRedirectURL = preset.OAuthRedirectURL
 				}
@@ -195,8 +189,8 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().StringVar(&appID, "app-id", "", "EveryLine app ID；app 身份必需，user 身份可省略")
 	command.Flags().StringVar(&oauthMetadataURL, "oauth-metadata-url", "", "用户 OAuth authorization server metadata URL")
 	command.Flags().StringVar(&oauthBusinessType, "oauth-business-type", "", "用户 OAuth business type")
-	command.Flags().StringVar(&oauthClientID, "oauth-client-id", "", "用户 OAuth public client ID")
-	command.Flags().StringVar(&oauthDeviceClientID, "oauth-device-client-id", "", "用户 OAuth Device Grant client ID；为空时复用 oauth-client-id")
+	command.Flags().StringVar(&oauthClientID, "oauth-client-id", "", "可选用户 OAuth public client ID；为空时首次授权动态注册")
+	command.Flags().StringVar(&oauthDeviceClientID, "oauth-device-client-id", "", "可选用户 OAuth Device Grant client ID；为空时复用 public client 或动态注册")
 	command.Flags().StringVar(&oauthRedirectURL, "oauth-redirect-url", "", "用户 OAuth loopback 回调 URL")
 	command.Flags().StringSliceVar(&oauthScopes, "oauth-scope", nil, "用户 OAuth scope，可重复传入")
 	command.Flags().StringVar(&oauthDeviceAuthorizationURL, "oauth-device-authorization-url", "", "可选 Device Authorization endpoint；默认从 metadata 发现")

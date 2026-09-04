@@ -61,7 +61,7 @@ everyline-cli auth init --profile prod-user --as user --output json
 everyline-cli auth complete --profile prod-user --as user --output json
 ~~~
 
-`auth init` 不监听 `127.0.0.1`。dev/test 的 `contract-review` metadata 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，scope 固定为 `contract-review:full`；已有旧 Profile 会按标准 metadata URL 自动选择该 client。其他环境也可把平台确认的 endpoint/client ID 写入 Profile。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
+`auth init` 不监听 `127.0.0.1`。dev/test/prod 预设不内置 client ID；首次 user 授权会调用当前环境的 `POST /open-api/v3/oauth/register/contract-review` 动态获取 client ID、写入 Profile，再启动 OAuth 或 Device Grant。显式配置及旧 Profile 已保存的 client ID 保持兼容。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
 
 WorkBuddy 必须在第一次 `auth init` 前固定一个 `CODEBUDDY_SESSION_ID`，并在 `auth init`、用户回复“已授权”后的 `auth complete` 以及后续 `auth status` 中复用同一值。`auth complete` 本地提示没有待完成事务时，先用原值重试 `auth complete`；只有服务端状态明确为 `denied`、`expired` 或 `invalid_grant` 后才开始新的授权事务，避免让用户重复打开授权链接。
 
@@ -76,7 +76,7 @@ everyline-cli auth status \
 
 `auth status` 默认读取当前身份对应的安全缓存。OAuth metadata 声明 refresh grant 时，CLI 会在过期前五分钟尝试刷新；业务请求收到可信 `code=110004` 时只刷新并重放一次。服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token；并发写入的新 token 会保留。
 
-如果 prod 预设尚未包含正式的 OAuth metadata、client ID 和 loopback redirect，需要由平台提供确认后的配置，再通过 --oauth-* 参数补充。CLI 不猜测 OAuth 地址，也不把 AuthURL 直接当作 OAuth authorization endpoint。
+prod 预设已包含正式 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env prod` 创建 user Profile 后，client ID 会在首次授权时通过正式开放平台动态注册。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
 
 ## app 应用授权
 

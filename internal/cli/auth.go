@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -46,6 +47,46 @@ type deviceAuthOutput struct {
 	Status                  string `json:"status"`
 	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
 	ExpiresAt               string `json:"expires_at,omitempty"`
+}
+
+// ensureOAuthClient 注册并持久化当前授权流程缺少的 client_id；已有显式或历史配置保持不变。
+// 入参：ctx 控制请求；runtime 提供 HTTP 和 Profile 存储；profile 为当前配置；device 表示是否为 Device Grant。
+// 返回值：config.Profile 为补齐后的配置；error 为注册参数、网络、协议或持久化错误。
+func ensureOAuthClient(ctx context.Context, runtime *Runtime, profile config.Profile, device bool) (config.Profile, error) {
+	if device {
+		if profile.EffectiveOAuthDeviceClientID() != "" {
+			return profile, nil
+		}
+	} else if strings.TrimSpace(profile.OAuthClientID) != "" {
+		return profile, nil
+	}
+	if !profile.HasOAuthClientRegistrationConfiguration() {
+		return profile, fmt.Errorf("Profile %q 的 OAuth client 动态注册配置不完整", profile.Name)
+	}
+	registrationEndpoint := strings.TrimRight(profile.BaseURLFor(config.IdentityUser), "/") +
+		"/open-api/v3/oauth/register/" + url.PathEscape(strings.TrimSpace(profile.OAuthBusinessType))
+	clientID, err := auth.RegisterOAuthClient(ctx, runtime.HTTP, auth.OAuthClientRegistrationRequest{
+		Endpoint: registrationEndpoint, ClientName: "EveryLine CLI", RedirectURI: profile.OAuthRedirectURL,
+		Scope: strings.Join(profile.OAuthScopes, " "),
+	})
+	if err != nil {
+		return profile, err
+	}
+	if device {
+		profile.OAuthDeviceClientID = clientID
+		if strings.TrimSpace(profile.OAuthClientID) == "" {
+			profile.OAuthClientID = clientID
+		}
+	} else {
+		profile.OAuthClientID = clientID
+		if strings.TrimSpace(profile.OAuthDeviceClientID) == "" {
+			profile.OAuthDeviceClientID = clientID
+		}
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		return profile, err
+	}
+	return profile, nil
 }
 
 // newAuthDeviceInitCommand 创建不依赖 loopback callback 的 OAuth Device Grant 授权事务。
@@ -114,13 +155,18 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 				deviceEndpoint = strings.TrimSpace(metadata.DeviceAuthorizationEndpoint)
 			}
 			if deviceEndpoint == "" {
-				return fmt.Errorf("OAuth metadata 尚未发布 device_authorization_endpoint；请在认证服务启用 Device Grant 并提供对应 Device client，或通过 config add --oauth-device-authorization-url/--oauth-device-client-id 写入平台确认配置")
+				return fmt.Errorf("OAuth metadata 尚未发布 device_authorization_endpoint；请在认证服务启用 Device Grant 并发布该端点，或通过 config add --oauth-device-authorization-url 写入平台确认配置")
 			}
 			if strings.TrimSpace(metadata.TokenEndpoint) == "" {
 				return fmt.Errorf("OAuth metadata 缺少 token_endpoint")
 			}
+			profile, err = ensureOAuthClient(authContext, runtime, profile, true)
+			if err != nil {
+				return err
+			}
+			deviceClientID := profile.EffectiveOAuthDeviceClientID()
 			response, err := auth.StartDeviceAuthorization(authContext, runtime.HTTP, auth.DeviceAuthorizationRequest{
-				Endpoint: deviceEndpoint, ClientID: profile.EffectiveOAuthDeviceClientID(),
+				Endpoint: deviceEndpoint, ClientID: deviceClientID,
 				Scope: strings.Join(profile.OAuthScopes, " "), Resource: profile.EffectiveOAuthResource(),
 			})
 			if err != nil {
@@ -147,7 +193,7 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 				Status: auth.DevicePending, DeviceCode: response.DeviceCode,
 				VerificationURIComplete: response.VerificationURIComplete,
 				TokenEndpoint:           metadata.TokenEndpoint, RevocationEndpoint: revocationEndpoint,
-				ClientID: profile.EffectiveOAuthDeviceClientID(), ExpiresAt: expiresAt,
+				ClientID: deviceClientID, ExpiresAt: expiresAt,
 			}
 			if err := store.Save(profile.Name, existing); err != nil {
 				return err
@@ -159,6 +205,7 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 	}
 	command.Flags().BoolVar(&restart, "restart", false, "明确废弃已有事务并重新开始 Device 授权")
 	withNotes(command,
+		"Profile 未配置 client ID 时，CLI 会先通过当前开放平台动态注册并保存返回值。",
 		"把 verification_uri_complete 作为一个完整链接原样展示给用户，不拆分、不改写 query。",
 		"用户完成浏览器授权后执行 auth complete；每次 complete 只检查一次。",
 	)
@@ -347,6 +394,14 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			}
 			appSecret := ""
 			if identity == config.IdentityUser {
+				if strings.TrimSpace(profile.OAuthClientID) == "" && strings.TrimSpace(profile.OAuthMetadataURL) != "" && profile.HasOAuthClientRegistrationConfiguration() {
+					registrationContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
+					defer cancel()
+					profile, err = ensureOAuthClient(registrationContext, runtime, profile, false)
+					if err != nil {
+						return err
+					}
+				}
 				if !profile.HasOAuthConfiguration() {
 					page := profile.AuthURLFor(identity)
 					if page != "" {

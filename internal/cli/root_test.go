@@ -102,7 +102,7 @@ func TestConfigAddDefaultsToJSONAndPreservesExplicitOutput(t *testing.T) {
 	}
 }
 
-// TestConfigAddEnvironmentPreset 验证 config add 可用预设环境创建 test 和 blue Profile。
+// TestConfigAddEnvironmentPreset 验证 config add 可创建四套预设，并为 dev/test/prod 保留动态注册参数而不内置 client ID。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestConfigAddEnvironmentPreset(t *testing.T) {
@@ -112,8 +112,10 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		baseURL  string
 		tokenURL string
 	}{
+		{name: "dev", baseURL: "https://dev-open.qtech.cn", tokenURL: "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
 		{name: "test", baseURL: "https://test-open.qtech.cn", tokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
 		{name: "blue", baseURL: "https://blue-open.qtech.cn", tokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
+		{name: "prod", baseURL: "https://open.qfei.cn", tokenURL: "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal"},
 	} {
 		if err := Execute(context.Background(), runtime, []string{
 			"config", "add", test.name,
@@ -132,11 +134,11 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if profile.AuthURL == "" {
 			t.Fatalf("environment=%s 缺少自有认证页面: %#v", test.name, profile)
 		}
-		if test.name == "test" && !profile.HasOAuthConfiguration() {
-			t.Fatalf("environment=%s 缺少 OAuth 预设: %#v", test.name, profile)
+		if test.name != "blue" && (!profile.HasOAuthClientRegistrationConfiguration() || !profile.HasDeviceOAuthConfiguration()) {
+			t.Fatalf("environment=%s 缺少 OAuth 动态注册预设: %#v", test.name, profile)
 		}
-		if test.name == "test" && profile.OAuthDeviceClientID != "zscli_c77221e810ce3977" {
-			t.Fatalf("environment=%s Device client=%q", test.name, profile.OAuthDeviceClientID)
+		if test.name != "blue" && (profile.OAuthClientID != "" || profile.OAuthDeviceClientID != "") {
+			t.Fatalf("environment=%s 不应内置 client_id: %#v", test.name, profile)
 		}
 	}
 }
@@ -721,9 +723,13 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	_ = callbackListener.Close()
 
 	var tokenRequest url.Values
+	var registrationCalls int
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
+		case "/open-api/v3/oauth/register/contract-review":
+			registrationCalls++
+			_, _ = writer.Write([]byte(`{"client_id":"dynamic-oauth-client","client_id_issued_at":1788480000,"client_secret_expires_at":0,"token_endpoint_auth_method":"none"}`))
 		case "/metadata":
 			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","code_challenge_methods_supported":["S256"]}`))
 		case "/token":
@@ -763,12 +769,11 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	}
 	profile := config.Profile{
 		Name:              "dev",
-		BaseURL:           "https://api.example.com",
+		BaseURL:           server.URL,
 		AuthURL:           "https://auth.example.com",
-		TokenURL:          "https://api.example.com/token",
+		TokenURL:          server.URL + "/tenant-token",
 		OAuthMetadataURL:  server.URL + "/metadata",
 		OAuthBusinessType: "contract-review",
-		OAuthClientID:     "oauth-client",
 		OAuthRedirectURL:  fmt.Sprintf("http://127.0.0.1:%d/login", callbackPort),
 		OAuthScopes:       []string{"contract-review:full"},
 		DefaultIdentity:   config.IdentityUser,
@@ -781,7 +786,7 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	if err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user"}); err != nil {
 		t.Fatal(err)
 	}
-	if tokenRequest.Get("code") != "authorization-code" || tokenRequest.Get("client_id") != "oauth-client" || tokenRequest.Get("grant_type") != "authorization_code" {
+	if registrationCalls != 1 || tokenRequest.Get("code") != "authorization-code" || tokenRequest.Get("client_id") != "dynamic-oauth-client" || tokenRequest.Get("grant_type") != "authorization_code" {
 		t.Fatalf("token request=%v", tokenRequest)
 	}
 	if tokenRequest.Get("code_verifier") == "" || tokenRequest.Get("redirect_uri") != profile.OAuthRedirectURL {
@@ -799,6 +804,10 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	cached, err := identityStore.LoadForIdentity("dev", config.IdentityUser)
 	if err != nil || cached.AccessToken != "oauth-token" || cached.RefreshToken != "refresh-token" {
 		t.Fatalf("cached=%#v err=%v", cached, err)
+	}
+	storedProfile, err := runtime.Profiles.Get(profile.Name)
+	if err != nil || storedProfile.OAuthClientID != "dynamic-oauth-client" || storedProfile.OAuthDeviceClientID != "dynamic-oauth-client" {
+		t.Fatalf("storedProfile=%#v err=%v", storedProfile, err)
 	}
 }
 

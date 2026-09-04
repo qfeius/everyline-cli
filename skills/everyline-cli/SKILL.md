@@ -133,7 +133,7 @@ CODEBUDDY_SESSION_ID=<same-session-id> everyline-cli auth complete --profile <pr
 
 如果 `auth complete` 返回“没有待完成的 Device 授权”，先恢复 `auth init` 使用的原 `CODEBUDDY_SESSION_ID` 并重试一次 `auth complete`；这次本地存储未命中的失败没有请求 token endpoint，不计作重复兑换。不得因此直接执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并且用户同意重新授权时，才开始新事务；原标识已经丢失时先如实说明事务状态丢失并等待用户决定。
 
-dev/test 固定使用 `business_type=contract-review`、独立 EveryLine Device client `zscli_c77221e810ce3977`、`scope=contract-review:full` 和对应开放平台 resource。优先使用环境预设；已有旧 Profile 会由 CLI 按标准 `contract-review` metadata URL 自动选择该 Device client，Agent 不改写 client ID 或 scope。
+dev/test/prod 固定使用 `business_type=contract-review`、`scope=contract-review:full` 和对应开放平台 resource，但不内置 client ID。Profile 没有 client ID 时，CLI 会在 `auth login` 或 `auth init` 内部调用当前环境的 `POST /open-api/v3/oauth/register/contract-review`，保存返回的 client ID 后继续授权；Agent 不单独调用注册接口，也不伪造或改写 client ID。显式配置及旧 Profile 已保存的 client ID 保持兼容。
 
 读取 `auth init --help` 和 `auth complete --help`。首次安装门禁期间执行：
 

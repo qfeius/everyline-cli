@@ -294,7 +294,7 @@ everyline-cli auth complete --profile test-user --as user --output json
 
 WorkBuddy 在第一次 `auth init` 前固定一个非敏感的 `CODEBUDDY_SESSION_ID`，上面两条命令和随后的 `auth status` 都添加相同的 `CODEBUDDY_SESSION_ID=<same-session-id>` 前缀。若 `auth complete` 提示本地没有待完成事务，先恢复首次命令使用的原值并重试 `auth complete`；此时不要执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并经用户同意后，才创建新的授权事务。
 
-只有 `status=succeeded` 才继续。dev/test 的 `contract-review` metadata、独立 EveryLine Device client `zscli_c77221e810ce3977` 和 `contract-review:full` scope 由环境预设提供；已有旧 Profile 也会自动选择该 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
+只有 `status=succeeded` 才继续。dev/test/prod 环境预设提供 `contract-review` metadata、回调地址和 `contract-review:full` scope，但不内置 client ID；CLI 在首次授权时通过当前开放平台的 `POST /open-api/v3/oauth/register/contract-review` 获取并保存 client ID。显式配置及旧 Profile 已保存的 client ID 保持兼容。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
 
 ### app 身份：适合无浏览器设备
 
@@ -477,7 +477,7 @@ CLI 与三项 Skill 更新并校验成功后展示“EveryLine CLI 已更新完�
 
 ### user OAuth 启动失败
 
-Codex 本地登录检查 Profile 是否具有平台确认过的 OAuth metadata、client ID 和 loopback redirect。豆包/WorkBuddy 检查 `contract-review` metadata 的 `device_authorization_endpoint`、独立 EveryLine Device client ID 以及沙箱安全存储环境变量；记录 CLI 原始提示并联系平台配置负责人。
+Codex 本地登录检查 Profile 是否具有 OAuth metadata、business type 和 loopback redirect，并确认动态注册接口可达。豆包/WorkBuddy 还要检查 `contract-review` metadata 的 `device_authorization_endpoint` 以及沙箱安全存储环境变量；CLI 会自动注册并保存 client ID。记录 CLI 原始提示并联系平台配置负责人。
 
 ### 返回 `code=20000019` 或“租户应用不匹配”
 
