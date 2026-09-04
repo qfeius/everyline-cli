@@ -115,7 +115,7 @@ func enforceFirstInstallAuthorization(runtime *Runtime, command *cobra.Command) 
 		return err
 	}
 	if isBusinessCommand(command) {
-		return fmt.Errorf("%w；首次安装需要完成一次新的授权，请先使用 everyline-shared 执行授权流程", auth.ErrUserAuthentication)
+		return fmt.Errorf("%w；首次安装需要完成一次新的授权，请先使用 everyline-cli Skill 执行授权流程", auth.ErrUserAuthentication)
 	}
 	return nil
 }

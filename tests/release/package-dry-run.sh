@@ -49,9 +49,6 @@ function requiredPackageFiles() {
     "scripts/run.js",
     "scripts/verify-package-version.js",
     "skills/everyline-cli/SKILL.md",
-    "skills/everyline-cli/references/management.md",
-    "skills/everyline-cli/references/review-flow.md",
-    "skills/everyline-shared/SKILL.md",
     "skills/everyline-review/SKILL.md",
     "skills/everyline-review/references/review-flow.md",
     "skills/everyline-review-config/SKILL.md",
@@ -69,6 +66,15 @@ const files = new Set(manifest[0].files.map((entry) => entry.path));
 const missing = requiredPackageFiles().filter((file) => !files.has(file));
 if (missing.length > 0) {
   throw new Error(`npm pack 缺少文件: ${missing.join(", ")}`);
+}
+for (const obsolete of [
+  "skills/everyline-shared/SKILL.md",
+  "skills/everyline-cli/references/management.md",
+  "skills/everyline-cli/references/review-flow.md",
+]) {
+  if (files.has(obsolete)) {
+    throw new Error(`npm pack 仍包含已合并的 Skill 文件: ${obsolete}`);
+  }
 }
 if (files.has("bin/everyline-cli") || files.has("bin/everyline-cli.exe")) {
   throw new Error("npm pack 不得包含未标注平台架构的本机构建");

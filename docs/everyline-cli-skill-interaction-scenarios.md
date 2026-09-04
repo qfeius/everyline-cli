@@ -1,6 +1,6 @@
 # EveryLine CLI Skill 全量交互场景
 
-本文以当前 `skills/everyline-cli/` 下的 `SKILL.md`、`references/review-flow.md` 和 `references/management.md` 为行为基线，梳理已经定义的全部用户交互、分支、停止条件和当前范围外能力。它可用于产品评审、验收测试和其他设备上的对话验证。
+本文以当前三项 Skill 为行为基线：`skills/everyline-cli/SKILL.md` 负责公共接入与授权，`skills/everyline-review/` 负责单份合同审查，`skills/everyline-review-config/` 负责清单与规则管理。本文梳理已经定义的全部用户交互、分支、停止条件和当前范围外能力，可用于产品评审、验收测试和其他设备上的对话验证。
 
 ## 1. 场景状态说明
 
@@ -71,6 +71,9 @@ flowchart TD
 | READY-07 | 受限 | CLI 未说明清单与内置规则包可组合 | 不假设组合语义，不上传合同 | 停止合同审查 |
 | READY-08 | 受限 | `review task result --help` 未提供等待最终结果能力 | 不自行模拟任务状态机 | 停止合同审查 |
 | READY-09 | 已支持 | `firstInstall=true` 且 `authorizationRequired=true` | 进入强制新授权流程，不接受旧 dev token，不调用业务 API | 新授权成功并返回 `authorizationRequired=false` |
+| READY-10 | 已支持 | CLI 与三项 Skill 更新成功 | 展示统一更新完成文案，并对已固定的 Profile/身份执行一次 `auth status` | 进入唯一一个授权状态分支 |
+| READY-11 | 已支持 | 更新后 `authenticated=false` | 提示需要账号授权并等待用户确认 | 用户确认后按宿主进入授权流程 |
+| READY-12 | 已支持 | 更新后 `authenticated=true` | 提示当前授权生效且可直接调用 CLI | 当前请求结束或进入下一项业务 |
 
 ## 5. 身份与授权交互
 

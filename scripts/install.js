@@ -6,6 +6,7 @@ const {
   existsSync,
   lstatSync,
   mkdirSync,
+  readlinkSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -18,8 +19,14 @@ const { dirname, join, resolve } = require("node:path");
 const { resolvePlatformTarget } = require("./platform");
 
 // skillNames 是同一份 npm 包向 Codex、WorkBuddy 和豆包发布的三项职责分离 Skill。
-const skillNames = ["everyline-shared", "everyline-review", "everyline-review-config"];
+const skillNames = ["everyline-cli", "everyline-review", "everyline-review-config"];
+const deprecatedSkillNames = ["everyline-shared"];
 const installStateSchema = "everyline.install-state.v1";
+// 安装提示按首次安装、更新完成及更新后的真实授权状态拆分，供人类输出和 Agent 事件复用。
+const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
+const updateMessage = "EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。";
+const authorizationRequiredMessage = "使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
+const authorizedMessage = "当前已存在生效授权，可直接调用cli能力。";
 
 /**
  * shouldInstallCodexSkill 判断本次 npm 生命周期是否应登记 Codex Skill。
@@ -158,6 +165,40 @@ function registerSkillSet(packageRoot, skillRoot, platform, hostName) {
 }
 
 /**
+ * removeDeprecatedSkillRegistrations 清理本包旧版本创建且仍指向同一包路径的 Skill 链接。
+ * 入参：packageRoot（string）为 npm 包根目录；skillRoot（string）为宿主 Skill 根目录。
+ * 返回值：string[]，为本次安全移除的旧 Skill 名称；用户目录或其他来源链接保持不变。
+ */
+function removeDeprecatedSkillRegistrations(packageRoot, skillRoot) {
+  const removed = [];
+  for (const name of deprecatedSkillNames) {
+    const target = join(skillRoot, name);
+    let targetState;
+    try {
+      targetState = lstatSync(target);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+    if (!targetState.isSymbolicLink()) {
+      continue;
+    }
+
+    // 旧链接的源目录在升级后可以已经不存在，因此直接比较链接文本，不依赖 realpath。
+    const linkedSource = resolve(dirname(target), readlinkSync(target));
+    const expectedSource = resolve(packageRoot, "skills", name);
+    if (linkedSource !== expectedSource) {
+      continue;
+    }
+    rmSync(target, { force: true });
+    removed.push(name);
+  }
+  return removed;
+}
+
+/**
  * resolveInstallStatePath 解析安装器与原生 CLI 共享的首次安装状态路径。
  * 入参：environment（NodeJS.ProcessEnv）为环境变量；userHome（string）为用户目录。
  * 返回值：string，为 install-state.json 的绝对路径。
@@ -207,36 +248,43 @@ function saveInstallState(statePath, state, platform) {
 }
 
 /**
- * ensureFirstInstallState 仅在首次创建 Agent Skill 时建立强制新授权门禁，升级和重复安装保留已有完成状态。
+ * ensureFirstInstallState 在首次创建 Agent Skill 时建立授权门禁，并用统一包版本识别真实升级。
  * 入参：packageRoot（string）为包根；environment（NodeJS.ProcessEnv）为环境；userHome（string）为用户目录；platform（string）为平台；registrations（Array<object>）为 Skill 登记结果。
- * 返回值：object，包含状态路径及当前 firstInstall/authorizationRequired/nextAction。
+ * 返回值：object，包含状态路径及当前 firstInstall/authorizationRequired/nextAction/updated。
  */
 function ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations) {
   const statePath = resolveInstallStatePath(environment, userHome);
+  const packageData = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+  const installedVersion = String(packageData.version || "");
   const existing = loadInstallState(statePath);
   if (existing) {
-    return { path: statePath, ...existing };
+    // 只有统一包版本变化才视为更新；同版本重装不会重复触发更新提示。
+    const updated = installedVersion !== "" && installedVersion !== String(existing.installedVersion || "");
+    if (updated) {
+      existing.installedVersion = installedVersion;
+      saveInstallState(statePath, existing, platform);
+    }
+    return { path: statePath, ...existing, updated };
   }
   if (!registrations.some((registration) => registration.status === "created")) {
-    return { path: statePath, firstInstall: false, authorizationRequired: false, nextAction: "" };
+    return { path: statePath, firstInstall: false, authorizationRequired: false, nextAction: "", updated: false };
   }
-  const packageData = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
   const state = {
     schema: installStateSchema,
     eventId: randomUUID(),
-    installedVersion: String(packageData.version || ""),
+    installedVersion,
     firstInstall: true,
     authorizationRequired: true,
     nextAction: "authorize",
   };
   saveInstallState(statePath, state, platform);
-  return { path: statePath, ...state };
+  return { path: statePath, ...state, updated: false };
 }
 
 /**
  * installPackage 完成原生 CLI 校验，并在全局安装时同步登记 Codex 与 WorkBuddy Skills。
  * 入参：options（object，可选），可注入 packageRoot、platform、architecture、environment 和 userHome 供安装与测试使用。
- * 返回值：object，包含 binary、Skill 登记结果和机器可读的首次安装授权状态。
+ * 返回值：object，包含 binary、Skill 登记结果及机器可读的首次安装、授权和更新状态。
  */
 function installPackage(options = {}) {
   const packageRoot = options.packageRoot || join(__dirname, "..");
@@ -264,20 +312,28 @@ function installPackage(options = {}) {
       firstInstall: false,
       authorizationRequired: false,
       nextAction: "",
+      updated: false,
     };
   }
 
   const codexSkillRoot = environment.EVERYLINE_CODEX_SKILLS_DIR || join(userHome, ".agents", "skills");
   const plans = buildSkillSetPlans(packageRoot, codexSkillRoot, "Codex", "codex");
+  const installedSkillRoots = [codexSkillRoot];
   if (shouldInstallWorkBuddySkills(environment)) {
+    const workBuddySkillRoot = environment.EVERYLINE_WORKBUDDY_SKILLS_DIR || join(userHome, ".workbuddy", "skills");
     plans.push(...buildSkillSetPlans(
       packageRoot,
-      environment.EVERYLINE_WORKBUDDY_SKILLS_DIR || join(userHome, ".workbuddy", "skills"),
+      workBuddySkillRoot,
       "WorkBuddy",
       "workBuddy",
     ));
+    installedSkillRoots.push(workBuddySkillRoot);
   }
   const registrations = registerAgentSkillPlans(plans, platform);
+  // 新三项 Skill 全部登记成功后，再移除本包遗留的 everyline-shared 链接。
+  for (const skillRoot of installedSkillRoots) {
+    removeDeprecatedSkillRegistrations(packageRoot, skillRoot);
+  }
   const hostSkills = (hostKey) => registrations
     .filter((registration) => registration.hostKey === hostKey)
     .map(({ name, target, status }) => ({ name, target, status }));
@@ -293,38 +349,68 @@ function installPackage(options = {}) {
     firstInstall: installState.firstInstall === true,
     authorizationRequired: installState.authorizationRequired === true,
     nextAction: installState.nextAction || "",
+    updated: installState.updated === true,
   };
+}
+
+/**
+ * formatInstallOutput 生成全局安装成功后的用户可见输出和机器可读首次安装或更新事件。
+ * 入参：result（object）为 installPackage 返回的安装结果。
+ * 返回值：string，为可直接写入 stdout 的完整文本；未登记 Skill 时为空字符串。
+ */
+function formatInstallOutput(result) {
+  if (!result.skillTarget) {
+    return "";
+  }
+  const lines = [result.updated
+    ? updateMessage
+    : (result.authorizationRequired ? firstInstallMessage : "EveryLine CLI 与 Agent Skills 安装完成")];
+  for (const [hostName, skills] of Object.entries(result.skills)) {
+    for (const skill of skills) {
+      lines.push(`${hostName}: ${skill.target} (${skill.status})`);
+    }
+  }
+  if (result.updated) {
+    lines.push(JSON.stringify({
+      schema: "everyline.skill-event.v1",
+      event: "updated",
+      authCheckRequired: true,
+      nextAction: "auth_status",
+      recommendedSkill: "everyline-cli",
+      message: updateMessage,
+      authorizationRequiredMessage,
+      authorizedMessage,
+    }));
+  } else if (result.authorizationRequired) {
+    lines.push(JSON.stringify({
+      schema: "everyline.skill-event.v1",
+      event: "first_install",
+      authorizationRequired: true,
+      nextAction: "authorize",
+      recommendedSkill: "everyline-cli",
+      message: firstInstallMessage,
+    }));
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 if (require.main === module) {
   const result = installPackage();
-  if (result.skillTarget) {
-    process.stdout.write("EveryLine CLI 与 Agent Skills 安装完成\n");
-    for (const [hostName, skills] of Object.entries(result.skills)) {
-      for (const skill of skills) {
-        process.stdout.write(`${hostName}: ${skill.target} (${skill.status})\n`);
-      }
-    }
-    if (result.authorizationRequired) {
-      process.stdout.write("首次安装需要先完成 EveryLine 授权，再发起业务请求\n");
-      process.stdout.write(`${JSON.stringify({
-        schema: "everyline.skill-event.v1",
-        event: "first_install",
-        authorizationRequired: true,
-        nextAction: "authorize",
-        recommendedSkill: "everyline-shared",
-      })}\n`);
-    }
+  const output = formatInstallOutput(result);
+  if (output) {
+    process.stdout.write(output);
   }
 }
 
 module.exports = {
+  formatInstallOutput,
   installPackage,
   ensureFirstInstallState,
   loadInstallState,
   registerAgentSkill,
   registerCodexSkill,
   registerSkillSet,
+  removeDeprecatedSkillRegistrations,
   shouldInstallCodexSkill,
   shouldInstallWorkBuddySkills,
   skillNames,

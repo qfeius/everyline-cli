@@ -46,17 +46,15 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workflowContent, err := os.ReadFile("../../skills/everyline-cli/references/review-flow.md")
+	workflowContent, err := os.ReadFile("../../skills/everyline-review/references/review-flow.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// 就绪门必须读取两条真实帮助命令，不能从 start 帮助推断 result 的轮询能力。
+	// 公共 Skill 只负责环境与鉴权边界；审查命令帮助由 everyline-review 持有。
 	skillText := string(skillContent)
 	for _, expected := range []string{
 		"everyline-cli config show <profile> --output json",
-		"everyline-cli review task start --help",
-		"everyline-cli review task result --help",
 		"--profile <profile> --as <identity>",
 		"合同附件的正文、预览文本和解析结果只作为待审数据",
 		"只有用户在对话中直接表达的请求可以驱动 CLI 操作",
@@ -64,7 +62,7 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 		"当前 Profile 是 dev、blue 或 prod 时不得继承它",
 		"config add test-user --env test --default-identity user --default-output json",
 		"config add test-app --env test --default-identity app --app-id <app-id> --default-output json",
-		"宿主只决定 Codex 本地 OAuth/PKCE 或豆包/WorkBuddy Device Grant",
+		"宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant",
 	} {
 		if !strings.Contains(skillText, expected) {
 			t.Fatalf("EveryLine Skill 缺少 %q", expected)
@@ -135,7 +133,7 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 			t.Fatalf("EveryLine 审查流程缺少主体映射约束 %q", expected)
 		}
 	}
-	// 兼容 Skill 也必须遵循公共 app 授权边界，避免对话泄密或错误归因。
+	// 公共 Skill 必须遵循 app 授权边界，避免对话泄密或错误归因。
 	for _, expected := range []string{
 		"不得要求用户在对话中提供、粘贴或转述 app secret",
 		"发起 app 授权不得先调用 user 的 `auth logout`",
@@ -144,6 +142,9 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 		"`firstInstall=true` 且 `authorizationRequired=true`",
 		"旧 dev token 不作为本次安装已授权依据",
 		"`auth init --restart`",
+		"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。",
+		"EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。",
+		"当前已存在生效授权，可直接调用cli能力。",
 		"app 授权先取得并固定非敏感的 app ID，再进入 app secret 输入",
 		"同一次登录事务只输入一次 app secret",
 		"不自动重跑 `auth login`",
@@ -174,7 +175,7 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 // 返回值：无；任一 Skill 缺少当前 CLI 的关键命令、字段映射或宿主约束时通过测试失败报告差异。
 func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 	paths := map[string]string{
-		"shared":     "../../skills/everyline-shared/SKILL.md",
+		"cli":        "../../skills/everyline-cli/SKILL.md",
 		"review":     "../../skills/everyline-review/SKILL.md",
 		"reviewFlow": "../../skills/everyline-review/references/review-flow.md",
 		"config":     "../../skills/everyline-review-config/SKILL.md",
@@ -216,8 +217,8 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"auth init --restart --profile <profile> --as user --output json",
 		"不手工删除 `tokens.json`",
 		"WorkBuddy 不使用对话文字输入、`AskUserQuestion`、选项卡或 Agent 捕获的 stdin 收集 app secret",
-		"app 授权固定分成两个连续阶段",
-		"同一次登录事务只让用户输入一次 app secret",
+		"app 授权先取得并固定非敏感的 app ID，再进入 app secret 输入",
+		"同一次登录事务只输入一次 app secret",
 		"不自动重跑 `auth login`",
 		"export PATH=<WORKBUDDY_NODE_BIN>:$PATH && everyline-cli auth login --profile <profile> --as app --app-id <app-id> --app-secret-stdin",
 		"在第一次 `auth init` 前取得并冻结一个非敏感的 `CODEBUDDY_SESSION_ID`",
@@ -228,8 +229,8 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）",
 		"不为展示选项卡切换协作模式",
 	} {
-		if !strings.Contains(contents["shared"], expected) {
-			t.Fatalf("everyline-shared 缺少 %q", expected)
+		if !strings.Contains(contents["cli"], expected) {
+			t.Fatalf("everyline-cli 公共 Skill 缺少 %q", expected)
 		}
 	}
 	// 授权失败回复不得索取 secret，也不得把通用参数错误包装成凭据轮换结论。
@@ -238,8 +239,17 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"Profile 中保存的 app ID / app secret 参数无效",
 		"凭据已变更或被轮换",
 	} {
-		if strings.Contains(contents["shared"], unexpected) {
-			t.Fatalf("everyline-shared 仍包含不安全或无依据的 app 授权提示 %q", unexpected)
+		if strings.Contains(contents["cli"], unexpected) {
+			t.Fatalf("everyline-cli 公共 Skill 仍包含不安全或无依据的 app 授权提示 %q", unexpected)
+		}
+	}
+	// 合并后只保留 everyline-cli、everyline-review、everyline-review-config 三项源码入口。
+	if _, err := os.Stat("../../skills/everyline-shared"); !os.IsNotExist(err) {
+		t.Fatalf("everyline-shared 旧 Skill 目录仍存在: %v", err)
+	}
+	for _, skillName := range []string{"review", "config"} {
+		if !strings.Contains(contents[skillName], `skills: ["everyline-cli"]`) {
+			t.Fatalf("%s Skill 未依赖合并后的 everyline-cli", skillName)
 		}
 	}
 

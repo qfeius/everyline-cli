@@ -9,6 +9,8 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 )
 
+const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。"
+
 // firstInstallEvent 是首次安装期间写入 stderr 的稳定 NDJSON 事件。
 type firstInstallEvent struct {
 	Schema                string `json:"schema"`
@@ -18,6 +20,7 @@ type firstInstallEvent struct {
 	RecommendedSkill      string `json:"recommendedSkill"`
 	AuthorizationRequired bool   `json:"authorizationRequired"`
 	NextAction            string `json:"nextAction"`
+	Message               string `json:"message"`
 }
 
 // pendingFirstInstallAuthorization 读取首次安装授权门禁；旧版本没有状态文件时保持兼容。
@@ -59,9 +62,10 @@ func emitFirstInstallEvent(runtime *Runtime, state config.InstallState) error {
 		Event:                 "first_install",
 		EventID:               state.EventID,
 		CLIVersion:            build.Current().Version,
-		RecommendedSkill:      "everyline-shared",
+		RecommendedSkill:      "everyline-cli",
 		AuthorizationRequired: true,
 		NextAction:            "authorize",
+		Message:               firstInstallMessage,
 	})
 	if err != nil {
 		return fmt.Errorf("编码首次安装事件: %w", err)

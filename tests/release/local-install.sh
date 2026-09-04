@@ -30,9 +30,9 @@ npm install --silent --prefix "$temporary_dir/install" "$temporary_dir/$package_
 output=$(EVERYLINE_CONFIG_DIR="$temporary_dir/local-config" "$temporary_dir/install/node_modules/.bin/everyline-cli" version --output json)
 package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$temporary_dir/install/node_modules/everyline-cli/package.json")
 
-# 外部消费者应能从 npm 包中取得职责分离的三项 Skill，并保留旧版兼容 Skill。
+# 外部消费者应能从 npm 包中取得合并后的三项职责分离 Skill。
 test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/SKILL.md"
-test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-shared/SKILL.md"
+test ! -e "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-shared"
 test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review/SKILL.md"
 test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review/references/review-flow.md"
 test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review-config/SKILL.md"
@@ -40,8 +40,8 @@ test -f "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-revi
 test -f "$temporary_dir/install/node_modules/everyline-cli/docs/everyline-cli-skill-guide.md"
 test -f "$temporary_dir/install/node_modules/everyline-cli/docs/everyline-cli-skill-interaction-scenarios.md"
 # 安装包必须保留主体展示项到后端 name/role 的映射，避免发布后回退为两个字段都填写公司名称。
-grep -F '用户回复完整展示项 `猎聘123（乙方）`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/references/review-flow.md" >/dev/null
-grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-cli/references/review-flow.md" >/dev/null
+grep -F '用户回复完整展示项 `猎聘123（乙方）`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review/references/review-flow.md" >/dev/null
+grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_dir/install/node_modules/everyline-cli/skills/everyline-review/references/review-flow.md" >/dev/null
 
 # 全局安装必须在同一次 npm 生命周期中登记 Codex 与 WorkBuddy Skills；两个宿主目录都显式隔离。
 global_prefix="$temporary_dir/global"
@@ -50,7 +50,7 @@ workbuddy_skills_dir="$temporary_dir/workbuddy-skills"
 global_config_dir="$temporary_dir/global-config"
 EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
 global_package_root=$(npm root --global --prefix "$global_prefix")
-for skill_name in everyline-shared everyline-review everyline-review-config; do
+for skill_name in everyline-cli everyline-review everyline-review-config; do
   codex_skill_target="$codex_skills_dir/$skill_name"
   workbuddy_skill_target="$workbuddy_skills_dir/$skill_name"
   test -L "$codex_skill_target"

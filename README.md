@@ -112,7 +112,7 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 ## Codex/Agent 最佳实践
 
-仓库和 npm 发布包包含三项职责分离的交互式 Skill：`everyline-shared` 负责首次配置、身份和授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单、规则和规则分组。三项 Skill 共用当前 CLI 的实时帮助和结构化输出约束；旧 `skills/everyline-cli/` 作为兼容内容继续随包发布。
+仓库和 npm 发布包包含三项职责分离的交互式 Skill：`everyline-cli` 负责首次配置、身份和授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单、规则和规则分组。三项 Skill 共用当前 CLI 的实时帮助和结构化输出约束；原 `everyline-shared` 已合并到 `everyline-cli`。
 
 全局安装 npm 包时，`postinstall` 会把三项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills` 和 WorkBuddy 的 `$HOME/.workbuddy/skills`，并在首次安装建立授权门禁：旧 token 保留，但必须完成一次新的 user/app 授权后才能调用审查、清单或规则业务命令。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包通过 `make skill-assets` 生成的三个独立 ZIP 从界面导入。Skill 不修改或替代 CLI 接口。
 

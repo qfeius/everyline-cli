@@ -1,6 +1,6 @@
 # EveryLine CLI 交互 Skill 安装与验证（Codex / WorkBuddy / 豆包）
 
-本文用于安装 `everyline-cli` 及三项配套 Skill，并验证合同审查的多轮对话流程：`everyline-shared` 负责接入与授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单和规则管理。CLI 继续负责授权、上传、主体提取、查询和写入；全局 npm 安装默认同时登记 Codex 与 WorkBuddy Skills。
+本文用于安装 `everyline-cli` CLI 及三项配套 Skill，并验证合同审查的多轮对话流程：`everyline-cli` Skill 负责接入与授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单和规则管理。CLI 继续负责授权、上传、主体提取、查询和写入；全局 npm 安装默认同时登记 Codex 与 WorkBuddy Skills。
 
 需要逐项评审或测试当前 Skill 的全部分支时，请结合 [EveryLine CLI Skill 全量交互场景](everyline-cli-skill-interaction-scenarios.md)。
 
@@ -67,12 +67,12 @@ everyline-cli version --output json
 everyline-cli --help
 ```
 
-预期结果：命令可以执行，版本与待验证版本一致，stdout 返回 JSON 版本信息。首次安装时还应包含 `firstInstall=true`、`authorizationRequired=true` 和 `nextAction=authorize`，随后必须通过 `everyline-shared` 完成一次新的 user 或 app 授权。
+预期结果：命令可以执行，版本与待验证版本一致，stdout 返回 JSON 版本信息。首次安装时还应包含 `firstInstall=true`、`authorizationRequired=true` 和 `nextAction=authorize`，随后必须通过 `everyline-cli` Skill 完成一次新的 user 或 app 授权。
 
 同时检查 Codex 与 WorkBuddy Skills：
 
 ```bash
-for skill_name in everyline-shared everyline-review everyline-review-config; do
+for skill_name in everyline-cli everyline-review everyline-review-config; do
   test -f "$HOME/.agents/skills/$skill_name/SKILL.md"
   test -f "$HOME/.workbuddy/skills/$skill_name/SKILL.md"
 done
@@ -83,7 +83,7 @@ done
 npm 包内的三项 Skill 位于：
 
 ```text
-<npm-global-root>/everyline-cli/skills/everyline-shared/
+<npm-global-root>/everyline-cli/skills/everyline-cli/
 <npm-global-root>/everyline-cli/skills/everyline-review/
 <npm-global-root>/everyline-cli/skills/everyline-review-config/
 ```
@@ -110,7 +110,7 @@ WorkBuddy 的清单、立场方和审查强度都使用原生 `AskUserQuestion`�
 ```bash
 npm_global_root="${EVERYLINE_NPM_ROOT:-$(npm root -g)}"
 mkdir -p "$HOME/.agents/skills"
-for skill_name in everyline-shared everyline-review everyline-review-config; do
+for skill_name in everyline-cli everyline-review everyline-review-config; do
   skill_source="$npm_global_root/everyline-cli/skills/$skill_name"
   skill_target="$HOME/.agents/skills/$skill_name"
   test -f "$skill_source/SKILL.md"
@@ -129,7 +129,7 @@ done
 $NpmRoot = (npm root -g).Trim()
 $SkillTargetRoot = Join-Path $HOME ".agents\skills"
 New-Item -ItemType Directory -Force -Path $SkillTargetRoot | Out-Null
-foreach ($SkillName in @("everyline-shared", "everyline-review", "everyline-review-config")) {
+foreach ($SkillName in @("everyline-cli", "everyline-review", "everyline-review-config")) {
     $SkillSource = Join-Path $NpmRoot "everyline-cli\skills\$SkillName"
     $SkillTarget = Join-Path $SkillTargetRoot $SkillName
     if (-not (Test-Path (Join-Path $SkillSource "SKILL.md"))) {
@@ -153,7 +153,7 @@ Windows 目录联接与 macOS/Linux 符号链接一样，会持续指向 npm 包
 
 #### 从源码目录验证
 
-从源码验证时，把 `skills/everyline-shared/`、`skills/everyline-review/` 和 `skills/everyline-review-config/` 分别复制或链接到：
+从源码验证时，把 `skills/everyline-cli/`、`skills/everyline-review/` 和 `skills/everyline-review-config/` 分别复制或链接到：
 
 ```text
 $HOME/.agents/skills/<同名 Skill>/
@@ -170,7 +170,7 @@ macOS 或 Linux：
 ```bash
 npm_global_root="${EVERYLINE_NPM_ROOT:-$(npm root -g)}"
 mkdir -p "$HOME/.workbuddy/skills"
-for skill_name in everyline-shared everyline-review everyline-review-config; do
+for skill_name in everyline-cli everyline-review everyline-review-config; do
   skill_source="$npm_global_root/everyline-cli/skills/$skill_name"
   skill_target="$HOME/.workbuddy/skills/$skill_name"
   test -f "$skill_source/SKILL.md"
@@ -186,19 +186,19 @@ done
 豆包使用上传 Skill，不扫描 Codex 或 WorkBuddy 目录。仓库执行 `make skill-assets` 后生成：
 
 ```text
-dist/everyline-shared-skill.zip
+dist/everyline-cli-skill.zip
 dist/everyline-review-skill.zip
 dist/everyline-review-config-skill.zip
 ```
 
-每个 ZIP 根目录都直接包含自己的 `SKILL.md`；审查和配置 ZIP 还包含对应 `references/`。`dist/everyline-cli-skill.zip` 仅用于兼容旧的单 Skill 导入方式。
+每个 ZIP 根目录都直接包含自己的 `SKILL.md`；审查和配置 ZIP 还包含对应 `references/`。构建过程会清理旧的 `dist/everyline-shared-skill.zip`，避免重复导入公共授权入口。
 
 在豆包中安装：
 
 1. 打开豆包工作任务的「技能·连接器·伙伴 → 我的技能 → 上传技能」。
-2. 依次上传三个 ZIP，确认解析名称分别为 `everyline-shared`、`everyline-review`、`everyline-review-config`。
+2. 依次上传三个 ZIP，确认解析名称分别为 `everyline-cli`、`everyline-review`、`everyline-review-config`。
 3. 启用三项 Skill 并新建任务验证；ZIP 应作为 Skill 导入，不作为普通聊天附件总结。
-4. 远端沙箱准备对应 Linux CLI，并按 shared Skill 提供 Device Grant 的会话变量；合同通过附件字节流、沙箱内路径或完整 URL 交付。
+4. 远端沙箱准备对应 Linux CLI，并按 `everyline-cli` 公共 Skill 提供 Device Grant 的会话变量；合同通过附件字节流、沙箱内路径或完整 URL 交付。
 
 豆包的 Skill 功能和入口仍在快速更新；本手册以客户端存在“上传技能”为前提。当前客户端只有“对话新建技能”时，应等待或启用本地 Skill 上传入口，避免把 `SKILL.md` 正文复制成缺少 references 的不完整技能。
 
@@ -212,14 +212,14 @@ dist/everyline-review-config-skill.zip
 /skills
 ```
 
-预期列表中出现 `everyline-shared`、`everyline-review` 和 `everyline-review-config`。
+预期列表中出现 `everyline-cli`、`everyline-review` 和 `everyline-review-config`。
 
 如果目录已经正确但列表尚未刷新，重启 Codex 后再检查。官方文档说明 Codex 支持自动检测 Skill 变化，未出现时可通过重启刷新。
 
 先运行一个不上传合同的冒烟验证：
 
 ```text
-$everyline-shared 使用当前 prod-user Profile 和 user 身份检查 CLI 版本和授权状态，先不要上传合同。
+$everyline-cli 使用当前 prod-user Profile 和 user 身份检查 CLI 版本和授权状态，先不要上传合同。
 ```
 
 预期行为：Codex 检查 `everyline-cli` 路径、版本、两条任务命令的帮助信息和授权状态，解析当前 `prod-user` Profile，并在后续调用中固定传入该 Profile 与 user 身份；不要求填写 `businessId`、`fileHash` 等内部字段。
@@ -229,7 +229,7 @@ $everyline-shared 使用当前 prod-user Profile 和 user 身份检查 CLI 版�
 重新打开 WorkBuddy 任务，在「专家·技能·连接器」中确认三项 EveryLine Skill 已启用。先发送：
 
 ```text
-使用 everyline-shared 技能，检查 CLI 路径、版本和当前授权状态，先不要上传合同。
+使用 everyline-cli 技能，检查 CLI 路径、版本和当前授权状态，先不要上传合同。
 ```
 
 预期 WorkBuddy 执行真实 CLI 命令并返回结构化检查结果，而不是只复述安装文档。WorkBuddy 中不需要前往 Codex 执行 `/skills`。
@@ -239,7 +239,7 @@ $everyline-shared 使用当前 prod-user Profile 和 user 身份检查 CLI 版�
 在豆包「我的技能」中确认三项 EveryLine Skill 已启用，再新建工作任务并发送：
 
 ```text
-使用 everyline-shared 技能，执行 command -v everyline-cli 和 everyline-cli version --output json；再检查当前授权状态，先不要上传合同。
+使用 everyline-cli 技能，执行 command -v everyline-cli 和 everyline-cli version --output json；再检查当前授权状态，先不要上传合同。
 ```
 
 继续条件：豆包实际返回命令路径和 CLI JSON 版本，不只是描述应该执行哪些命令。找不到命令时，先让豆包本地任务环境包含 npm 全局 bin 或 `$HOME/.local/bin`，然后重新打开任务。
@@ -422,7 +422,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 | 检查项 | 通过标准 |
 | --- | --- |
-| Skill 发现 | 三个宿主中均出现 `everyline-shared`、`everyline-review`、`everyline-review-config` |
+| Skill 发现 | 三个宿主中均出现 `everyline-cli`、`everyline-review`、`everyline-review-config` |
 | CLI 发现 | `everyline-cli version --output json` 成功，版本符合预期 |
 | 调用上下文 | 所有授权和业务命令显式使用同一 `--profile/--as` |
 | 授权 | `auth status` 返回 `authenticated=true` |
@@ -443,7 +443,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 ### `/skills` 中缺少拆分后的 EveryLine Skill
 
-- 检查 `$HOME/.agents/skills/everyline-shared/SKILL.md`、`everyline-review/SKILL.md` 和 `everyline-review-config/SKILL.md`。
+- 检查 `$HOME/.agents/skills/everyline-cli/SKILL.md`、`everyline-review/SKILL.md` 和 `everyline-review-config/SKILL.md`。
 - 检查是否误生成同名双层目录。
 - 重启 Codex 后重新执行 `/skills`。
 
@@ -468,6 +468,8 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 ### Skill 在上传前提示 CLI 版本不满足要求
 
 解析 `version --output json`。`updateRequired=true` 时先记住 `updateCommand`，继续完成当前完整业务流程；CLI 同时会在 stderr 输出 `code=UPDATE_PENDING`、当前版本、最新版本、更新命令和 `updateAfter=current_business_workflow`。全部业务 API 结束并保留结果后原样执行一次更新命令，再次检查版本；下一条新业务重新加载新版 Skill。
+
+CLI 与三项 Skill 更新并校验成功后展示“EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。”，随后对当前 Profile 和身份执行一次 `auth status`。只有 `authenticated=true` 时追加“当前已存在生效授权，可直接调用cli能力。”；`authenticated=false` 时追加“使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。”并等待用户确认。状态查询报错时保留未知状态并报告原始错误，不从 token 文件或安装成功推断授权有效。
 
 ### 提示尚未选择 Profile
 
@@ -526,7 +528,7 @@ macOS/Linux 使用符号链接、Windows 使用目录联接时，Codex 与 WorkB
 Codex 的 macOS/Linux 符号链接：
 
 ```bash
-for skill_name in everyline-shared everyline-review everyline-review-config; do
+for skill_name in everyline-cli everyline-review everyline-review-config; do
   unlink "$HOME/.agents/skills/$skill_name"
 done
 ```
@@ -534,14 +536,14 @@ done
 WorkBuddy 的符号链接卸载：
 
 ```bash
-for skill_name in everyline-shared everyline-review everyline-review-config; do
+for skill_name in everyline-cli everyline-review everyline-review-config; do
   unlink "$HOME/.workbuddy/skills/$skill_name"
 done
 ```
 
 豆包在「我的技能」中分别移除三项 Skill；不手工删除豆包客户端内部数据目录，也不因此卸载其他宿主仍在使用的 CLI。
 
-Windows 目录联接在确认路径后，分别对两个宿主下的 `everyline-shared`、`everyline-review`、`everyline-review-config` 执行 `Remove-Item`。WorkBuddy 通过界面安装时，也只在其「专家·技能·连接器」中移除对应技能。
+Windows 目录联接在确认路径后，分别对两个宿主下的 `everyline-cli`、`everyline-review`、`everyline-review-config` 执行 `Remove-Item`。WorkBuddy 通过界面安装时，也只在其「专家·技能·连接器」中移除对应技能。
 
 ### 全局卸载 CLI 和 npm 包
 

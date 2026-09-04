@@ -4,13 +4,13 @@ description: "使用 EveryLine CLI 查询或管理审查清单、审查规则和
 metadata:
   requires:
     bins: ["everyline-cli"]
-    skills: ["everyline-shared"]
+    skills: ["everyline-cli"]
   cliHelp: "everyline-cli checklist --help;everyline-cli rule --help;everyline-cli rule group --help"
 ---
 
 # EveryLine 审查配置管理
 
-处理审查清单、审查规则和规则分组的查询与管理。执行具体操作前必须读取 [references/management.md](references/management.md)，并遵守 `everyline-shared` 的 Profile、身份、授权、结构化输出和故障恢复约定。
+处理审查清单、审查规则和规则分组的查询与管理。执行具体操作前必须读取 [references/management.md](references/management.md)，并遵守 `everyline-cli` 公共 Skill 的 Profile、身份、授权、结构化输出和故障恢复约定。
 
 ## 触发与路由
 
@@ -33,7 +33,7 @@ everyline-cli rule --help
 everyline-cli rule group --help
 ```
 
-先按 `everyline-shared` 记录 `version` 的 `updateRequired`；完整完成当前查询或单次已确认写入及回读后，再执行延迟更新，不在写入链路中途替换 CLI。
+先按 `everyline-cli` 公共 Skill 记录 `version` 的 `updateRequired`；完整完成当前查询或单次已确认写入及回读后，再执行延迟更新，不在写入链路中途替换 CLI。
 
 每次写入前读取具体子命令 `--help` 和输入约束。只有实时 CLI 能提供目标的完整当前状态、真实 ID、分页、引用/级联影响和所需原子写操作时才继续；能力缺失时列出缺口并保留可执行的只读查询。
 

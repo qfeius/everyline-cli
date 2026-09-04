@@ -196,7 +196,7 @@ func TestFirstInstallStatusRejectsExistingToken(t *testing.T) {
 			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
 		}
 	}
-	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) {
+	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) || !strings.Contains(stderr.String(), `"recommendedSkill":"everyline-cli"`) || !strings.Contains(stderr.String(), `"message":"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。"`) {
 		t.Fatalf("stderr=%s，缺少首次安装 NDJSON 事件", stderr.String())
 	}
 	stdout.Reset()
@@ -235,6 +235,9 @@ func TestFirstInstallBlocksBusinessCommands(t *testing.T) {
 	}
 	if businessCalls != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"authorizationRequired":true`) {
 		t.Fatalf("businessCalls=%d stdout=%q stderr=%q", businessCalls, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(err.Error(), "everyline-cli Skill") {
+		t.Fatalf("err=%v，首次安装提示未指向合并后的 Skill", err)
 	}
 }
 
