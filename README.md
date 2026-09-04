@@ -63,6 +63,8 @@ everyline-cli auth complete --profile prod-user --as user --output json
 
 `auth init` 不监听 `127.0.0.1`。dev/test 的 `contract-review` metadata 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，scope 固定为 `contract-review:full`；已有旧 Profile 会按标准 metadata URL 自动选择该 client。其他环境也可把平台确认的 endpoint/client ID 写入 Profile。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
 
+WorkBuddy 必须在第一次 `auth init` 前固定一个 `CODEBUDDY_SESSION_ID`，并在 `auth init`、用户回复“已授权”后的 `auth complete` 以及后续 `auth status` 中复用同一值。`auth complete` 本地提示没有待完成事务时，先用原值重试 `auth complete`；只有服务端状态明确为 `denied`、`expired` 或 `invalid_grant` 后才开始新的授权事务，避免让用户重复打开授权链接。
+
 检查授权状态：
 
 ~~~bash

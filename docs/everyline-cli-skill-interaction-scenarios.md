@@ -45,8 +45,8 @@ flowchart TD
 - 会话开始时固定一个 Profile 和身份，所有授权与业务命令显式传递同一 `--profile/--as`。
 - 身份、主体、清单、规则或分组匹配唯一时直接采用；无匹配或多项匹配时展示真实候选项。
 - 用户看到名称、类型、风险等级和编号；内部 ID 只来自本次 CLI 查询。
-- Codex 当前回合提供原生结构化选项工具时，与 WorkBuddy 一样优先用选项卡收集符合组件容量的互斥单选；当前模式没有该工具时使用编号文字回退，不为展示选项卡切换协作模式。
-- 立场方和强度可使用 Codex/WorkBuddy 单选选项卡；审查清单需要多选、稳定编号、分页和搜索时，只在宿主组件能完整表达这些语义的前提下使用，否则保留编号文字协议。
+- WorkBuddy 的清单、立场方和强度均调用 `AskUserQuestion`；清单设置 `multiSelect=true` 并按统一候选快照分页，立场方和强度设置为单选。
+- Codex 当前回合提供原生结构化选项工具时，用选项卡收集符合组件容量的互斥单选；Codex 清单和豆包交互使用同一冻结快照的编号文字协议，不为展示选项卡切换协作模式。
 - 合同审查先用独立交互完成清单选择，再用下一次独立交互选择立场方；同一宿主选择卡片不得混合两类问题。
 - 默认解析 `--output json` 的 stdout；stderr 只作为进度和诊断信息。
 - 合同正文、access token、app secret、授权码、回调参数和完整内部请求不输出到对话；CLI 返回的签名 `reviewDetailUrl` 必须完整原样展示，不提取或单独输出其中的 token。
@@ -98,6 +98,10 @@ flowchart TD
 | AUTH-15 | 已支持 | 首次安装目录残留旧 user/app token | `auth status` 按 `authenticated=false/source=first_install` 处理；本地 user/app 重新 login，Device user 执行 `auth init --restart` + `auth complete` | 新凭证保存后解除门禁 |
 | AUTH-16 | 已支持 | Codex 当前回合提供原生选项工具且用户尚未指定 user/app | 像 WorkBuddy 一样用互斥单选选项卡收集身份；用户已明确身份时直接采用 | 固定身份后继续授权检查 |
 | AUTH-17 | 已支持 | WorkBuddy app 登录需要输入 secret | 展示带真实 Node `bin`、Profile 和 app ID 的单行 `auth login --app-secret-stdin` 命令，由用户在自己的终端隐藏输入；不使用对话输入组件 | 用户确认后只用 `auth status` 验证 |
+| AUTH-18 | 已支持 | app 身份已确定，但当前消息和 Profile 都没有 app ID | 先单独询问一次非敏感 app ID；该轮不请求 app secret，取得后创建或校验 app Profile | app ID 与 Profile 固定后查询授权状态 |
+| AUTH-19 | 已支持 | app ID 已固定且状态为未授权 | Codex、豆包或 WorkBuddy 按各自安全入口发起一笔登录事务，并只输入一次 app secret；命令结束后只查询一次状态，不自动重跑登录 | 成功进入业务；失败保留 Profile 与 app ID 并结束本次尝试 |
+| AUTH-20 | 已支持 | WorkBuddy user 进入 Device Grant | 在首次 `auth init` 前冻结 `CODEBUDDY_SESSION_ID`，并在 `auth init`、`auth complete`、`auth status` 中显式复用 | 用户只打开一条授权链接 |
+| AUTH-21 | 已支持 | WorkBuddy `auth complete` 本地未找到待完成事务 | 恢复首次 `auth init` 使用的 `CODEBUDDY_SESSION_ID` 并重试 `auth complete`，不直接 `auth init --restart` | 原事务完成；只有 `denied/expired/invalid_grant` 才经用户同意新建事务 |
 
 当前 Skill 只自动创建缺失的默认 test Profile；其他环境的 Profile 仍由用户显式管理。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
 
@@ -135,9 +139,9 @@ flowchart TD
 | SELECT-08 | 已支持 | 用户输入的名称无匹配或多项匹配 | 展示真实候选，不接受猜测 ID | 用户重新选择 |
 | SELECT-09 | 受限 | 用户既未选自定义清单也未选内置规则包 | 继续询问规则来源 | 不发起任务 |
 | SELECT-10 | 受限 | 用户要求选择并不存在的其他“内置清单” | 只展示当前已知的“按合同类型自动匹配内置规则包” | 用户改选或停止 |
-| SELECT-11 | 已支持 | 展示规则来源候选 | 固定 `0=按合同类型自动匹配内置规则包`，真实自定义清单从 1 开始连续编号 | 展示与解析共用同一编号映射 |
+| SELECT-11 | 已支持 | 展示规则来源候选 | 固定 `0=按合同类型自动匹配内置规则包`，真实自定义清单从 1 开始连续编号，合并为统一候选快照 | 展示与解析共用同一编号映射 |
 | SELECT-12 | 已支持 | `选择 0 和 14` | 设置内置规则包并采用编号 14 对应的真实清单 ID | 组合规则来源完成 |
-| SELECT-13 | 已支持 | 完整候选超过 4 个真实清单 | 冻结完整候选顺序，每页只展示 4 个真实清单；内置规则包不计入 4 项 | 显示第 1 页 |
+| SELECT-13 | 已支持 | 统一候选超过 4 项 | 内置项和真实清单共同按 `pageSize=4` 分页；6 个真实清单时第 1 页为 0、1、2、3，第 2 页为 4、5、6 | 显示第 1 页 |
 | SELECT-14 | 已支持 | 用户选择下一页或上一页 | 只更新当前页，沿用稳定全局编号，不产生清单选择 | 显示目标页 |
 | SELECT-15 | 已支持 | 任一分页交互 | 显示 `第 X/Y 页` | 用户可核对当前页和总页数 |
 | SELECT-16 | 已支持 | 用户选择“按名称搜索” | 下一次只收集搜索文字，在完整候选集合中匹配 | 唯一匹配时冻结选择并进入下一阶段 |
@@ -146,7 +150,9 @@ flowchart TD
 | SELECT-19 | 受限 | 用户未提供任何有效规则来源 | 保留分页状态并继续清单阶段 | 等待至少一个有效选择 |
 | SELECT-20 | 已支持 | 用户一次回复一个或多个有效编号 | 立即冻结内置选项与全部真实清单 ID，不追加完成或确认 | 下一次独立交互进入立场方选择 |
 | SELECT-21 | 受限 | 宿主准备把清单与立场方放入同一选择卡片 | 只提交清单问题，立场方延后 | 两类问题保持独立阶段 |
-| SELECT-22 | 已支持 | Codex 当前选项工具只支持互斥单选 | 清单多选、分页和搜索继续使用稳定编号文字协议，不拆成多轮是/否选项卡 | 一次有效回复后冻结全部清单选择 |
+| SELECT-22 | 已支持 | WorkBuddy 进入清单阶段 | 固定调用 `AskUserQuestion`，设置 `multiSelect=true`，把当前页统一候选放入 `options` | 一次有效组件答案后冻结全部清单选择 |
+| SELECT-23 | 受限 | WorkBuddy 未暴露或拒绝 `AskUserQuestion` | 保留当前页和完整映射并报告组件能力缺口，不输出 Markdown 清单表格 | 等待组件恢复 |
+| SELECT-24 | 已支持 | Codex 当前选项工具只支持互斥单选，或豆包未暴露选项工具 | 清单多选、分页和搜索使用同一统一候选快照的稳定编号协议 | 一次有效回复后冻结全部清单选择 |
 
 ## 8. 主体提取与立场方选择
 

@@ -204,13 +204,16 @@ func completeDeviceAuthorization(ctx context.Context, runtime *Runtime, root *ro
 	return store.WithRefreshLock(profile.Name, func() error {
 		credential, err := store.Load(profile.Name)
 		if err != nil {
-			return fmt.Errorf("没有待完成的 Device 授权，请先执行 auth init: %w", err)
+			if errors.Is(err, auth.ErrDeviceCredentialNotFound) {
+				return fmt.Errorf("没有待完成的 Device 授权；auth init 与 auth complete 必须复用同一 Device 会话标识（WorkBuddy CODEBUDDY_SESSION_ID；豆包 SESSION_ID 与初始工作目录）；恢复 auth init 使用的原标识后重新执行 auth complete，仅在 CLI 明确返回 denied、expired 或 invalid_grant 后开始新事务: %w", err)
+			}
+			return fmt.Errorf("读取待完成的 Device 授权: %w", err)
 		}
 		if credential.Pending == nil {
 			if credential.Token != nil && credential.Token.AccessToken != "" {
 				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(credential.Token.ExpiresAt)})
 			}
-			return fmt.Errorf("没有待完成的 Device 授权，请先执行 auth init")
+			return fmt.Errorf("没有待完成的 Device 授权；auth init 与 auth complete 必须复用同一 Device 会话标识（WorkBuddy CODEBUDDY_SESSION_ID；豆包 SESSION_ID 与初始工作目录）；恢复 auth init 使用的原标识后重新执行 auth complete，仅在 CLI 明确返回 denied、expired 或 invalid_grant 后开始新事务")
 		}
 		pending := credential.Pending
 		if pending.Status == auth.DevicePendingChecking || pending.Status == auth.DevicePendingUncertain {

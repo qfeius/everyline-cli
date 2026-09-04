@@ -101,7 +101,7 @@ export EVERYLINE_NPM_ROOT="$(npm root -g --prefix "$EVERYLINE_NPM_PREFIX")"
 
 ### 3.1 Codex
 
-Codex 当前回合提供原生结构化选项工具时，EveryLine Skill 会像 WorkBuddy 一样优先使用可点击选项卡收集互斥单选。立场方与审查强度在候选数量符合组件限制时使用选项卡；审查清单需要多选、分页和搜索时继续使用稳定编号文字协议。当前模式没有选项工具时自动使用相同的编号回退，不需要切换协作模式。
+WorkBuddy 的清单、立场方和审查强度都使用原生 `AskUserQuestion`。清单问题设置 `multiSelect=true` 并按统一候选快照逻辑分页，立场方与强度设置为单选；WorkBuddy 不用 Markdown 表格模拟清单组件。Codex 当前回合提供原生结构化选项工具时，立场方与审查强度使用互斥单选选项卡；当前只支持互斥单选的 Codex 在清单阶段使用相同快照的稳定编号回退，不需要切换协作模式。
 
 #### macOS 或 Linux
 
@@ -292,9 +292,13 @@ everyline-cli auth init --profile test-user --as user --output json
 everyline-cli auth complete --profile test-user --as user --output json
 ```
 
+WorkBuddy 在第一次 `auth init` 前固定一个非敏感的 `CODEBUDDY_SESSION_ID`，上面两条命令和随后的 `auth status` 都添加相同的 `CODEBUDDY_SESSION_ID=<same-session-id>` 前缀。若 `auth complete` 提示本地没有待完成事务，先恢复首次命令使用的原值并重试 `auth complete`；此时不要执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并经用户同意后，才创建新的授权事务。
+
 只有 `status=succeeded` 才继续。dev/test 的 `contract-review` metadata、独立 EveryLine Device client `zscli_c77221e810ce3977` 和 `contract-review:full` scope 由环境预设提供；已有旧 Profile 也会自动选择该 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
 
 ### app 身份：适合无浏览器设备
+
+三个宿主统一按两阶段交互：先单独输入并固定非敏感的 app ID，再输入一次 app secret。当前消息和 Profile 都没有 app ID 时，Agent 只询问 app ID，不在同一轮索取 secret；Profile 创建或校验完成并确认 app 未授权后，才发起一笔登录事务。该事务只读取一次 secret，结束后只用 `auth status` 验证，不自动重跑登录。失败时保留 Profile 和 app ID，等待用户明确要求新的重试。
 
 macOS 或 Linux：
 
@@ -366,9 +370,9 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 1. Skill 解析并固定 `prod-user` Profile 与 user 身份，检查 CLI 版本、`review task start/result` 帮助和授权状态。
 2. CLI 上传合同并返回内部文件身份。
-3. Skill 查询并保存全部真实清单；每页展示 4 个真实清单，用户一次回复一个或多个有效编号后立即冻结选择。Codex 当前的互斥单选选项工具不用于承载这一步多选。
-4. 清单选择后无需额外完成或确认；CLI 提取合同主体，并在下一次独立交互中展示真实主体名称。Codex 或 WorkBuddy 的原生选项卡可用且候选数量符合限制时，用选项卡选择审查立场方。
-5. Skill 询问审查强度：弱势、中立或强势；Codex 或 WorkBuddy 原生选项卡可用时使用单选选项卡。
+3. Skill 把 `0. 按合同类型自动匹配内置规则包` 和全部真实清单组成统一候选并冻结；按 `pageSize=4` 分页，6 个真实清单时第 1 页为 0、1、2、3，第 2 页为 4、5、6。WorkBuddy 调用 `AskUserQuestion` 且设置 `multiSelect=true`，Codex 和豆包按宿主能力使用同一快照的稳定编号协议。
+4. 清单选择后无需额外完成或确认；CLI 提取合同主体，并在下一次独立交互中展示真实主体名称。WorkBuddy 使用 `AskUserQuestion` 单选，Codex 在当前回合提供原生选项工具且候选符合容量时使用单选选项卡。
+5. Skill 询问审查强度：弱势、中立或强势；WorkBuddy 使用 `AskUserQuestion` 单选，Codex 在原生选项工具可用时使用单选选项卡。
 6. 四项业务输入完整后，Skill 使用同一输入执行 dry-run；失败时不发送正式请求。
 7. dry-run 通过后，Skill 使用同一 Profile 和身份自动发起一次任务并记录 task ID。
 8. Skill 只查询该 task ID；等待成功后仅返回审查结果概要、以“审查结果详情”为文字的可点击链接和默认两小时的有效期提示，不展示 task ID、终态字段或其他服务端参数。
@@ -378,11 +382,12 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 ```text
 用户：$everyline-review 使用 prod-user Profile 和 user 身份审查 /Users/me/Documents/采购合同.pdf
 
-Agent：请选择审查规则来源。第 1/1 页：
+Agent（WorkBuddy `AskUserQuestion`）：请选择审查规则来源。第 1/2 页，`multiSelect=true`：
 0. 按合同类型自动匹配内置规则包
 1. 实际查询到的自定义清单 A
 2. 实际查询到的自定义清单 B
-操作：可多选，请一次回复全部编号；也可按名称搜索
+3. 实际查询到的自定义清单 C
+分页示例：统一候选共 7 项时，第 1 页为 0、1、2、3，第 2 页为 4、5、6；需要浏览时通过组件自由输入入口输入“下一页”。
 
 用户：选择 0 和 1
 
@@ -421,10 +426,10 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 | CLI 发现 | `everyline-cli version --output json` 成功，版本符合预期 |
 | 调用上下文 | 所有授权和业务命令显式使用同一 `--profile/--as` |
 | 授权 | `auth status` 返回 `authenticated=true` |
-| 输入交互 | 用户只需提供合同附件、路径或 URL 形式的合同来源，以及立场方、清单和强度；单附件不再追问路径；Codex 与 WorkBuddy 在原生能力可用时使用选项卡 |
+| 输入交互 | 用户只需提供合同附件、路径或 URL 形式的合同来源，以及立场方、清单和强度；单附件不再追问路径；WorkBuddy 固定使用 `AskUserQuestion`，Codex 按当前工具能力使用选项卡 |
 | 内部参数 | Skill 不向用户索要 `businessId/fileId/fileHash/selectedAuditRole/wait` |
 | 候选数据 | 主体、清单、规则均来自实时 CLI 查询 |
-| 清单分页 | 先读取全部候选，每页展示 4 个真实清单；稳定全局编号可引用此前浏览页，多选在一次回复中给出，全局名称搜索可用 |
+| 清单分页 | 先把内置项与真实清单组成统一候选，每页最多展示 4 项；WorkBuddy 使用 `AskUserQuestion` 多选，稳定全局编号可引用此前浏览页，全局名称搜索可用 |
 | 阶段隔离 | 先用独立交互完成清单选择，再用下一次独立交互选择立场方；同一选择卡片不混合两类问题 |
 | Codex 选项卡 | 当前回合提供原生结构化选项工具时，立场方和强度使用互斥单选选项卡；清单多选、分页与搜索保留稳定编号文字协议 |
 | 主体映射 | 主体按 `name（role）` 展示；用户回复完整展示项或唯一名称时，所选候选的 `name` 写入 `selectedPosition`，同一候选的 `role` 写入 `selectedAuditRole` |

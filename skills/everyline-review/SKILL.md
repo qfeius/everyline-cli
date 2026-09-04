@@ -47,6 +47,7 @@ everyline-cli review task result --help
 - 主体提取返回同一候选的 `name` 与 `role`；
 - 沙箱可使用 `upload --stdin`，完整 URL 可使用 `upload-url`；
 - `review task result` 等待同一 task ID 的终态并获取详情。
+- WorkBuddy 的清单、主体和强度选择使用 `AskUserQuestion`；清单开启多选，并按统一候选快照进行逻辑分页。
 
 关键能力缺失时列出缺口，停止上传和任务创建；保留授权、帮助查询和无关只读操作。
 

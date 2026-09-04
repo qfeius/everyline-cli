@@ -73,6 +73,10 @@ CLI 通过 `version` 的 `firstInstall/authorizationRequired/nextAction` 和 std
 
 豆包沙箱与用户本机浏览器不共享网络命名空间，`127.0.0.1:8000` 指向沙箱自身。豆包和 WorkBuddy Device 运行时不得执行 `auth login --profile <profile> --as user`。固定流程为：CLI 执行 `auth init` → 原样返回完整 HTTPS 授权链接 → 用户在任意浏览器批准 → 用户在新消息中确认“已授权” → CLI 执行一次 `auth complete` 查询账号服务并保存凭证。
 
+WorkBuddy 在第一次 `auth init` 前取得并冻结一个非敏感的 `CODEBUDDY_SESSION_ID`：优先记录宿主已有的稳定值；宿主未提供时只生成一次并保留为当前授权事务状态。`auth init`、`auth complete` 和随后的 `auth status` 都显式复用完全相同的值，不使用每次命令都会变化的通用 `SESSION_ID`。调用时统一添加 `CODEBUDDY_SESSION_ID=<same-session-id>` 前缀，且 `<same-session-id>` 在整个事务中逐字不变。
+
+如果 `auth complete` 返回“没有待完成的 Device 授权”，先恢复 `auth init` 使用的原 `CODEBUDDY_SESSION_ID` 并重试一次 `auth complete`；该本地存储未命中的失败没有请求 token endpoint，不计作重复兑换。不得因此直接执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并且用户同意重新授权时，才开始新事务；原标识已经丢失时先如实说明事务状态丢失并等待用户决定。
+
 dev/test 的 Device Grant 固定使用 `business_type=contract-review`、独立 EveryLine Device client `zscli_c77221e810ce3977` 和 `scope=contract-review:full`。这些值由环境预设和旧 Profile 兼容逻辑提供，Agent 不替换为合同 CLI 的共享 client，也不改写 scope。
 
 1. 用户在本次请求中明确提供 Profile 或环境时以该选择为准；指定 Profile 执行 `everyline-cli config show <profile> --output json` 校验并读取。
@@ -87,11 +91,12 @@ dev/test 的 Device Grant 固定使用 `business_type=contract-review`、独立 
 3. user 未授权且运行在豆包/WorkBuddy 沙箱时，首次安装门禁使用 `auth init --restart --profile <profile> --as user --output json`，普通未授权使用不带 `--restart` 的 `auth init`。把 `verification_uri_complete` 当作不可拆分字符串，以完整可点击 URL 原样展示给用户；不得省略 query、拆出 user code 或自行重建链接。用户确认浏览器授权完成后执行一次 `auth complete --profile <profile> --as user --output json`，只按 `succeeded/pending/denied/expired/uncertain/invalid_grant` 结构化状态继续处理；`pending` 时等待用户完成，`expired/invalid_grant` 时经用户确认后使用 `auth init --restart` 开始新事务，`uncertain` 时不重复兑换同一 device code。
 4. user 未授权且 CLI 与用户浏览器位于同一台本机时，执行 `auth login --profile <profile> --as user` 发起 OAuth/PKCE 登录。CLI 已打开浏览器时让用户在该页面完成授权；使用 `--no-open-browser` 返回链接时，将链接原样交给用户。不要为了切换呈现方式重启当前 OAuth 会话。
 5. 当前 Profile 的 metadata 未声明 `device_authorization_endpoint` 时，原样说明认证服务尚未启用 Device Grant；不要在远端沙箱回退到 loopback `auth login`。显式 Device endpoint 只能来自已配置的 Profile，不能由 Agent 猜测。
-6. app secret 只通过 stdin 或等价安全凭证源传入，不放入命令参数、JSON、日志或回复。WorkBuddy 不通过对话输入框、`AskUserQuestion` 或 Agent 捕获的 stdin 收集 secret；Agent 将 `export PATH=<WORKBUDDY_NODE_BIN>:$PATH && everyline-cli auth login --profile <profile> --as app --app-id <app-id> --app-secret-stdin` 替换为真实非敏感参数后展示给用户，由用户在自己的 WorkBuddy 终端亲自执行。CLI 显示 `App secret:`，用户输入时终端不回显字符并以回车结束；用户确认完成后，Agent 只调用 `auth status` 验证。
-7. 不得要求用户在对话中提供、粘贴或转述 app secret；Agent 捕获 stdin 时只让用户在自己的终端或平台密钥入口输入。
-8. user 与 app 凭据按身份独立保存；发起 app 授权不得先调用 user 的 `auth logout`，也不得把退出登录当作身份切换步骤。
-9. app token 过期不证明 app ID 或 app secret 失效。`http=200 code=10003 msg=invalid param` 只按通用参数错误报告；CLI 未明确指出具体凭据字段时，不推断凭据已变更或轮换，也不自动建议切换 Profile 或身份。
-10. 登录完成后重新查询结构化状态；取消、失败或失效时停止业务调用并返回真实原因。CLI 会在 metadata 声明刷新能力时尝试刷新；只有服务端可信的 `110004` 会触发一次刷新和请求重放，其他业务错误不得当作登录失效重试。
+6. app 授权先取得并固定非敏感的 app ID，再进入 app secret 输入。当前消息和目标 Profile 都没有 app ID 时，只询问一次 app ID，该轮不同时请求 app secret；已有唯一 app ID 时直接复用。固定 app ID、创建或校验 Profile 并确认 `authenticated=false` 后，只发起一次 `auth login --as app`，同一次登录事务只输入一次 app secret；命令结束后只调用 `auth status` 验证，不自动重跑登录或再次索取 secret。
+7. app secret 只通过 stdin 或等价安全凭证源传入，不放入命令参数、JSON、日志或回复。Codex 本地由用户在自己的终端隐藏输入一次；豆包使用平台密钥入口完成一次安全输入或注入；WorkBuddy 不通过对话输入框、`AskUserQuestion` 或 Agent 捕获的 stdin 收集 secret，Agent 将 `export PATH=<WORKBUDDY_NODE_BIN>:$PATH && everyline-cli auth login --profile <profile> --as app --app-id <app-id> --app-secret-stdin` 替换为真实非敏感参数后展示给用户，由用户在自己的 WorkBuddy 终端亲自执行。CLI 显示 `App secret:`，用户输入时终端不回显字符并以回车结束；用户确认完成后，Agent 只调用 `auth status` 验证。
+8. 登录失败时保留已经固定的 Profile 和 app ID，报告原始错误并结束本次尝试，不自动重跑 `auth login`。只有用户随后明确要求重试时才开始一笔新的登录事务，并在该事务中输入一次 app secret。不得要求用户在对话中提供、粘贴或转述 app secret；Agent 捕获 stdin 时只让用户在自己的终端或平台密钥入口输入。
+9. user 与 app 凭据按身份独立保存；发起 app 授权不得先调用 user 的 `auth logout`，也不得把退出登录当作身份切换步骤。
+10. app token 过期不证明 app ID 或 app secret 失效。`http=200 code=10003 msg=invalid param` 只按通用参数错误报告；CLI 未明确指出具体凭据字段时，不推断凭据已变更或轮换，也不自动建议切换 Profile 或身份。
+11. 登录完成后重新查询结构化状态；取消、失败或失效时停止业务调用并返回真实原因。CLI 会在 metadata 声明刷新能力时尝试刷新；只有服务端可信的 `110004` 会触发一次刷新和请求重放，其他业务错误不得当作登录失效重试。
 
 ## 对话规则
 
@@ -102,8 +107,9 @@ dev/test 的 Device Grant 固定使用 `business_type=contract-review`、独立 
 - 用户输入能唯一匹配候选项时直接采用；无匹配或匹配不唯一时，展示可区分候选项并继续询问。
 - 主体候选按 `name（role）` 展示；用户回复完整展示项或唯一主体名称时，必须选中本次查询中的同一个结构化候选，并分别使用其 `name` 和 `role`，不得把主体名称写入角色字段。
 - Agent 可以使用编号帮助用户选择，但传给 CLI 的 ID 必须来自本次查询，不能让用户手工输入内部 ID。
-- Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）时，与 WorkBuddy 一样优先把立场方、审查强度等互斥单选显示为选项卡；候选超过组件容量、当前模式没有该工具，或审查清单需要多选和翻页时按审查流程使用稳定编号文字交互，不为展示选项卡切换协作模式。
-- 合同审查必须先用独立交互完成审查清单选择，再用下一次独立交互完成立场方选择；不得把清单和立场方合并到同一个宿主选择卡片。清单候选超过 4 个时按审查流程进行对话级分页。
+- WorkBuddy 的审查清单选择固定使用 `AskUserQuestion` 并设置 `multiSelect=true`；内置规则包与真实自定义清单组成一份统一候选列表，按每页最多 4 项进行逻辑分页。WorkBuddy 不因审查清单需要多选或分页回退到编号文字交互；组件缺失时保留状态并报告宿主能力缺口。
+- Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）时，优先把立场方、审查强度等互斥单选显示为选项卡；其当前单选工具不承载审查清单多选。豆包与 Codex 的清单回退使用同一稳定编号和分页快照，不为展示选项卡切换协作模式。
+- 合同审查必须先用独立交互完成审查清单选择，再用下一次独立交互完成立场方选择；不得把清单和立场方合并到同一个宿主选择卡片。统一候选超过 4 项时按审查流程进行对话级逻辑分页。
 - 用户回复一个或多个有效清单编号或唯一名称后立即冻结选择，下一次交互直接进入立场方选择，不再追加“完成选择”或二次确认。
 - 审查输入完整后按审查流程自动发起，不额外询问是否开始或是否消耗点数。
 - 创建、更新、删除等管理写操作必须遵循管理参考中的确认规则；一次审查中的清单选择不授权修改清单。

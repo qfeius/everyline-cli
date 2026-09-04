@@ -131,3 +131,40 @@ func TestWorkBuddyDeviceCredentialStoreUsesSessionNamespace(t *testing.T) {
 		t.Fatalf("got=%#v err=%v", got, err)
 	}
 }
+
+// TestWorkBuddyDeviceCredentialStoreIgnoresGenericSessionDrift 验证固定 WorkBuddy 标识优先于每次调用可能变化的通用 SESSION_ID。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；相同 WorkBuddy 授权事务因通用会话变化而丢失时通过 t.Fatal 报告。
+func TestWorkBuddyDeviceCredentialStoreIgnoresGenericSessionDrift(t *testing.T) {
+	backend := &fakeDeviceKeyring{values: map[string]string{}}
+	newStore := func(genericSessionID string) DeviceCredentialStore {
+		store, err := NewDeviceCredentialStore(DeviceCredentialOptions{
+			LookupEnv: func(name string) (string, bool) {
+				switch name {
+				case "CODEBUDDY_SESSION_ID":
+					return "fixed-workbuddy-session", true
+				case "SESSION_ID":
+					return genericSessionID, true
+				default:
+					return "", false
+				}
+			},
+			Keyring: backend,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store
+	}
+
+	initStore := newStore("tool-call-a")
+	completeStore := newStore("tool-call-b")
+	want := DeviceCredential{Pending: &DevicePendingTransaction{DeviceCode: "pending-device-code"}}
+	if err := initStore.Save("test-user", want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := completeStore.Load("test-user")
+	if err != nil || got.Pending == nil || got.Pending.DeviceCode != want.Pending.DeviceCode {
+		t.Fatalf("got=%#v err=%v", got, err)
+	}
+}

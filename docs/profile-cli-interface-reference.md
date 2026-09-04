@@ -395,7 +395,7 @@ user OAuth 使用 Profile 中的动态端点，不计入固定的 25 个 operati
 
 CLI 缓存 token，但 stdout 仍只输出登录状态对象。metadata 声明 `refresh_token` grant 时，CLI 在 token 到期前五分钟刷新；临时失败时保留尚未真正过期的旧 token。业务请求收到服务端可信 `code=110004` 时强制刷新并只重放一次；服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token。如果缓存已由并发重新登录更新，CLI 会保留新 token。
 
-豆包/WorkBuddy 沙箱使用 `auth init` 和 `auth complete`。`auth init` 输出 `status=pending`、完整 `verification_uri_complete` 与 `expires_at`，不输出 device code；`auth complete` 一次检查返回 `succeeded/pending/denied/expired/uncertain/invalid_grant`，成功后把 access/refresh token 写入会话隔离的安全存储。豆包 AgentKit 使用 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` 加密工作区凭证，豆包工作任务按 `SESSION_ID` 派生隔离密钥，WorkBuddy 按 `CODEBUDDY_SESSION_ID` 使用系统凭证库。加密 Profile 快照支持沙箱重建后通过显式 `--profile` 恢复。
+豆包/WorkBuddy 沙箱使用 `auth init` 和 `auth complete`。`auth init` 输出 `status=pending`、完整 `verification_uri_complete` 与 `expires_at`，不输出 device code；`auth complete` 一次检查返回 `succeeded/pending/denied/expired/uncertain/invalid_grant`，成功后把 access/refresh token 写入会话隔离的安全存储。豆包 AgentKit 使用 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` 加密工作区凭证，豆包工作任务按 `SESSION_ID` 派生隔离密钥，WorkBuddy 按固定的 `CODEBUDDY_SESSION_ID` 使用系统凭证库。WorkBuddy 从 `auth init` 到 `auth complete` 及后续状态检查必须复用同一标识；本地找不到待完成事务时恢复原标识后重试 `auth complete`，避免生成第二条授权链接。加密 Profile 快照支持沙箱重建后通过显式 `--profile` 恢复。
 
 `auth status` 字段：
 

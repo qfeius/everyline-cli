@@ -207,6 +207,36 @@ func TestAuthUserLoginRedirectsSandboxToDeviceGrant(t *testing.T) {
 	}
 }
 
+// TestAuthDeviceCompleteExplainsSessionRecovery 验证待完成事务不可见时优先恢复原会话标识，而不是误导用户重新授权。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；错误提示缺少 WorkBuddy 会话绑定和无重复授权恢复步骤时通过 t.Fatal 报告。
+func TestAuthDeviceCompleteExplainsSessionRecovery(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	profile := config.Profile{
+		Name: "test-user", BaseURL: "https://test-open.qtech.cn", TokenURL: "https://test-open.qtech.cn/token",
+		DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	runtime.DeviceCredentials = &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{}}
+
+	err := Execute(context.Background(), runtime, []string{"auth", "complete", "--profile", profile.Name, "--as", "user"})
+	if err == nil {
+		t.Fatal("auth complete 缺少待完成事务时应返回错误")
+	}
+	for _, expected := range []string{
+		"auth init 与 auth complete 必须复用同一 Device 会话标识",
+		"WorkBuddy CODEBUDDY_SESSION_ID",
+		"恢复 auth init 使用的原标识后重新执行 auth complete",
+		"仅在 CLI 明确返回 denied、expired 或 invalid_grant 后开始新事务",
+	} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("auth complete 恢复提示缺少 %q: %v", expected, err)
+		}
+	}
+}
+
 // TestAuthDeviceCompleteSerializesConcurrentChecks 验证两个 complete 命令串行兑换同一 Device code，并共同返回成功状态。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；第二个命令提前返回 uncertain、重复兑换或凭证写回错误时通过 t.Fatal 报告。

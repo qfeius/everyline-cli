@@ -94,7 +94,7 @@ everyline-cli auth status --profile <profile> --as user --output json
 | Codex 本地任务 | `auth login` OAuth/PKCE | CLI 与浏览器共享本机 loopback |
 | 豆包 AgentKit / Skills Sandbox | `auth init` + `auth complete` Device Grant | `SKILL_SESSION_WORKSPACE` 和平台注入的 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` |
 | 豆包普通工作任务 | `auth init` + `auth complete` Device Grant | 稳定的 `SESSION_ID`，并始终从任务初始工作目录执行 |
-| WorkBuddy | `auth init` + `auth complete` Device Grant | `CODEBUDDY_SESSION_ID` 和系统凭证库 |
+| WorkBuddy | `auth init` + `auth complete` Device Grant | 同一授权事务内固定的 `CODEBUDDY_SESSION_ID` 和系统凭证库 |
 
 ### Codex 本地 OAuth
 
@@ -111,6 +111,15 @@ CLI 打开浏览器时让用户在该页面完成授权；使用 `--no-open-brow
 豆包沙箱与用户本机浏览器不共享网络命名空间，`127.0.0.1:8000` 指向沙箱自身。豆包和 WorkBuddy Device 运行时不得执行 `auth login --profile <profile> --as user`，也不得等待 loopback callback。
 
 固定流程为：CLI 执行 `auth init` → 原样返回完整 HTTPS 授权链接 → 用户在任意浏览器批准 → 用户在新消息中确认“已授权” → CLI 执行一次 `auth complete` 查询账号服务并保存凭证。
+
+WorkBuddy 在第一次 `auth init` 前取得并冻结一个非敏感的 `CODEBUDDY_SESSION_ID`：优先记录宿主已有的稳定值；宿主未提供时只生成一次，并把该值保留为当前授权事务状态。`auth init`、`auth complete` 和随后的 `auth status` 都显式复用完全相同的值，不使用每次命令都会变化的通用 `SESSION_ID`。等价调用形式如下，其中两处 `<same-session-id>` 必须逐字相同：
+
+```bash
+CODEBUDDY_SESSION_ID=<same-session-id> everyline-cli auth init --profile <profile> --as user --output json
+CODEBUDDY_SESSION_ID=<same-session-id> everyline-cli auth complete --profile <profile> --as user --output json
+```
+
+如果 `auth complete` 返回“没有待完成的 Device 授权”，先恢复 `auth init` 使用的原 `CODEBUDDY_SESSION_ID` 并重试一次 `auth complete`；这次本地存储未命中的失败没有请求 token endpoint，不计作重复兑换。不得因此直接执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并且用户同意重新授权时，才开始新事务；原标识已经丢失时先如实说明事务状态丢失并等待用户决定。
 
 dev/test 固定使用 `business_type=contract-review`、独立 EveryLine Device client `zscli_c77221e810ce3977`、`scope=contract-review:full` 和对应开放平台 resource。优先使用环境预设；已有旧 Profile 会由 CLI 按标准 `contract-review` metadata URL 自动选择该 Device client，Agent 不改写 client ID 或 scope。
 
@@ -140,6 +149,10 @@ Device code、access token、refresh token 和加密密钥不进入对话、日�
 
 先执行 `auth status --profile <profile> --as app --output json`。未授权时读取 `auth login --help`，只采用帮助中真实存在的安全入口：
 
+- app 授权固定分成两个连续阶段，顺序不得颠倒：先取得并固定非敏感的 app ID，再进入 app secret 输入。当前消息和目标 Profile 都没有 app ID 时，只询问一次 app ID；该轮不同时请求 app secret。已有唯一 app ID 时直接复用，不重复询问。
+- 取得 app ID 后先创建或校验目标 Profile，再查询 app 授权状态。只有 `authenticated=false` 时才发起一次 `auth login --as app`；同一次登录事务只让用户输入一次 app secret。登录命令结束后只执行一次 `auth status` 验证，不再次启动登录或要求第二次输入 secret。
+- 登录失败时保留已固定的 Profile 和 app ID，报告原始错误后结束本次尝试；不自动重跑 `auth login`。只有用户随后明确要求重试时才开始一笔新的登录事务，并在该新事务中输入一次 app secret。
+- Codex 本地在 app ID 固定后，让用户在自己的终端通过 `--app-secret-stdin` 隐藏输入一次；豆包在 app ID 固定后使用平台密钥入口完成一次安全输入或注入，再由 Agent 发起一次登录；WorkBuddy 按下方专用终端命令执行。三个宿主都不在对话里收集 app secret。
 - WorkBuddy 不使用对话文字输入、`AskUserQuestion`、选项卡或 Agent 捕获的 stdin 收集 app secret。取得非敏感的 Profile、app ID 和当前 WorkBuddy Node `bin` 目录后，把下面的一行命令替换成真实值并完整展示，让用户在自己的 WorkBuddy 终端亲自执行，然后结束当前轮等待用户确认：
 
 ```bash

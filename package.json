@@ -1,6 +1,6 @@
 {
   "name": "everyline-cli",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "EveryLine CLI 工具的 npm/npx 薄包装",
   "license": "UNLICENSED",
   "bin": {
