@@ -148,7 +148,7 @@ everyline-cli config add custom-app \
 
 自定义 user Profile 可增加 `--user-base-url`，并通过 `--oauth-metadata-url`、`--oauth-business-type`、`--oauth-client-id`、`--oauth-redirect-url`、`--oauth-scope` 注入 OAuth 配置。
 
-Profile 默认保存在 `~/.everyline-cli/config.json`，可通过 `EVERYLINE_CONFIG_DIR` 修改目录。Profile 不保存 access token、OAuth code 或未显式保存的 app secret。
+Profile 默认保存在 `~/.everyline-cli/config.json`，可通过 `EVERYLINE_CONFIG_DIR` 修改目录；相对路径以用户主目录为基准。Profile 不保存 access token、OAuth code 或未显式保存的 app secret。
 
 ### 3. 完成授权
 

@@ -12,6 +12,7 @@ const {
   renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } = require("node:fs");
 const { homedir } = require("node:os");
@@ -192,7 +193,7 @@ function removeDeprecatedSkillRegistrations(packageRoot, skillRoot) {
     if (linkedSource !== expectedSource) {
       continue;
     }
-    rmSync(target, { force: true });
+    unlinkSync(target);
     removed.push(name);
   }
   return removed;
@@ -205,7 +206,7 @@ function removeDeprecatedSkillRegistrations(packageRoot, skillRoot) {
  */
 function resolveInstallStatePath(environment, userHome) {
   const configured = String(environment.EVERYLINE_CONFIG_DIR || "").trim();
-  return join(configured ? resolve(configured) : join(userHome, ".everyline-cli"), "install-state.json");
+  return join(configured ? resolve(userHome, configured) : join(userHome, ".everyline-cli"), "install-state.json");
 }
 
 /**

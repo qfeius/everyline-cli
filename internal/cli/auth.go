@@ -48,9 +48,9 @@ type deviceAuthOutput struct {
 	ExpiresAt               string `json:"expires_at,omitempty"`
 }
 
-// ensureBrowserOAuthClient 通过 metadata 声明的动态注册端点获取并持久化 Codex PKCE 使用的浏览器 client_id。
-// 入参：ctx context.Context 控制请求；runtime *Runtime 提供 HTTP 和 Profile 存储；profile config.Profile 为当前配置；registrationEndpoint string 为 metadata 声明的注册端点；force bool 表示是否替换历史缓存值。
-// 返回值：config.Profile 为补齐浏览器 client 后的配置；error 为注册参数、网络、协议或持久化错误。
+// ensureBrowserOAuthClient 通过 metadata 声明的动态注册端点获取本次 Codex PKCE 使用的浏览器 client_id。
+// 入参：ctx context.Context 控制请求；runtime *Runtime 提供 HTTP 客户端；profile config.Profile 为当前配置；registrationEndpoint string 为 metadata 声明的注册端点；force bool 表示是否替换历史缓存值。
+// 返回值：config.Profile 为仅在内存补齐浏览器 client 后的配置；error 为注册参数、网络或协议错误。
 func ensureBrowserOAuthClient(ctx context.Context, runtime *Runtime, profile config.Profile, registrationEndpoint string, force bool) (config.Profile, error) {
 	if !force && strings.TrimSpace(profile.OAuthClientID) != "" {
 		return profile, nil
@@ -67,9 +67,6 @@ func ensureBrowserOAuthClient(ctx context.Context, runtime *Runtime, profile con
 	}
 	// 浏览器 client 与 Device client 始终分开，Codex 动态注册不得覆盖豆包/WorkBuddy 的固定 Device client。
 	profile.OAuthClientID = clientID
-	if err := runtime.Profiles.Add(profile); err != nil {
-		return profile, err
-	}
 	return profile, nil
 }
 
@@ -373,6 +370,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				return fmt.Errorf("%w: --app-secret 不能为空", auth.ErrCredentialsMissing)
 			}
 			appSecret := ""
+			browserOAuthClientRegistered := false
 			if identity == config.IdentityUser {
 				if strings.TrimSpace(profile.OAuthMetadataURL) != "" && profile.HasOAuthClientRegistrationConfiguration() {
 					registrationContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
@@ -390,6 +388,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 					if err != nil {
 						return err
 					}
+					browserOAuthClientRegistered = true
 				}
 				if !profile.HasOAuthConfiguration() {
 					page := profile.AuthURLFor(identity)
@@ -466,6 +465,12 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			}
 			if err != nil {
 				return err
+			}
+			if identity == config.IdentityUser && browserOAuthClientRegistered {
+				// token 已绑定本次签发 client；先保存 token 再更新 Profile，授权失败时不会污染旧配置。
+				if err := runtime.Profiles.Add(profile); err != nil {
+					return err
+				}
 			}
 			if identity == config.IdentityApp && saveAppSecret {
 				if runtime.Secrets == nil {

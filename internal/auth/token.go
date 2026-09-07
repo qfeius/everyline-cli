@@ -31,12 +31,13 @@ const userTokenRefreshWindow = 5 * time.Minute
 
 // Token 是缓存中的访问凭证及其可选生命周期信息。
 type Token struct {
-	AccessToken  string    `json:"access_token" yaml:"-"`
-	TokenType    string    `json:"token_type,omitempty" yaml:"-"`
-	RefreshToken string    `json:"refresh_token,omitempty" yaml:"-"`
-	Scope        string    `json:"scope,omitempty" yaml:"-"`
-	IssuedAt     time.Time `json:"issued_at,omitempty" yaml:"-"`
-	ExpiresAt    time.Time `json:"expires_at" yaml:"expires_at"`
+	AccessToken   string    `json:"access_token" yaml:"-"`
+	TokenType     string    `json:"token_type,omitempty" yaml:"-"`
+	RefreshToken  string    `json:"refresh_token,omitempty" yaml:"-"`
+	OAuthClientID string    `json:"oauth_client_id,omitempty" yaml:"-"`
+	Scope         string    `json:"scope,omitempty" yaml:"-"`
+	IssuedAt      time.Time `json:"issued_at,omitempty" yaml:"-"`
+	ExpiresAt     time.Time `json:"expires_at" yaml:"expires_at"`
 }
 
 // ValidAt 判断 token 在预留刷新窗口后是否仍有效。
@@ -247,7 +248,11 @@ func (provider *Provider) refreshDeviceUserToken(ctx context.Context, profile co
 			result = *credential.Token
 			return nil
 		}
-		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, *credential.Token, profile.EffectiveOAuthDeviceClientID())
+		clientID := strings.TrimSpace(credential.Token.OAuthClientID)
+		if clientID == "" {
+			clientID = profile.EffectiveOAuthDeviceClientID()
+		}
+		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, *credential.Token, clientID)
 		if err != nil {
 			if IsDeviceGrantError(err, "invalid_grant") {
 				credential.Token = nil
@@ -292,7 +297,11 @@ func (provider *Provider) refreshFileUserToken(ctx context.Context, profile conf
 			result = current
 			return nil
 		}
-		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, current, profile.OAuthClientID)
+		clientID := strings.TrimSpace(current.OAuthClientID)
+		if clientID == "" {
+			clientID = profile.OAuthClientID
+		}
+		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, current, clientID)
 		if err != nil {
 			if IsDeviceGrantError(err, "invalid_grant") {
 				if deleteErr := identityStore.DeleteForIdentityIfAccessTokenMatches(profile.Name, config.IdentityUser, expectedAccessToken); deleteErr != nil {

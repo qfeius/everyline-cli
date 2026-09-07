@@ -167,7 +167,7 @@ func exchangeOAuthToken(ctx context.Context, client *http.Client, endpoint strin
 	issuedAt := now()
 	token := Token{
 		AccessToken: payload.AccessToken, TokenType: payload.TokenType, RefreshToken: payload.RefreshToken,
-		Scope: payload.Scope, IssuedAt: issuedAt,
+		OAuthClientID: form.Get("client_id"), Scope: payload.Scope, IssuedAt: issuedAt,
 	}
 	if payload.ExpiresIn > 0 {
 		token.ExpiresAt = issuedAt.Add(time.Duration(payload.ExpiresIn) * time.Second)

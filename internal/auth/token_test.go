@@ -205,6 +205,10 @@ func TestProviderConcurrentFileRefreshReusesNewToken(t *testing.T) {
 		case "/metadata":
 			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","grant_types_supported":["refresh_token"]}`))
 		case "/token":
+			if err := request.ParseForm(); err != nil || request.Form.Get("client_id") != "issuing-client" {
+				http.Error(writer, "wrong client", http.StatusBadRequest)
+				return
+			}
 			if refreshCalls.Add(1) == 1 {
 				close(refreshStarted)
 				<-releaseRefresh
@@ -219,11 +223,14 @@ func TestProviderConcurrentFileRefreshReusesNewToken(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "tokens.json")
 	firstStore := NewFileTokenStore(tokenPath)
 	secondStore := NewFileTokenStore(tokenPath)
-	oldToken := Token{AccessToken: "old-user-token", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(time.Hour)}
+	oldToken := Token{
+		AccessToken: "old-user-token", RefreshToken: "old-refresh", OAuthClientID: "issuing-client",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
 	if err := firstStore.SaveForIdentity("test-user", config.IdentityUser, oldToken); err != nil {
 		t.Fatal(err)
 	}
-	profile := config.Profile{Name: "test-user", OAuthMetadataURL: server.URL + "/metadata", OAuthClientID: "oauth-client"}
+	profile := config.Profile{Name: "test-user", OAuthMetadataURL: server.URL + "/metadata", OAuthClientID: "newer-profile-client"}
 	providers := []*Provider{
 		NewProvider(firstStore, server.Client(), time.Now),
 		NewProvider(secondStore, server.Client(), time.Now),
@@ -251,7 +258,7 @@ func TestProviderConcurrentFileRefreshReusesNewToken(t *testing.T) {
 	for range providers {
 		select {
 		case result := <-results:
-			if result.err != nil || result.token.AccessToken != "new-user-token" {
+			if result.err != nil || result.token.AccessToken != "new-user-token" || result.token.OAuthClientID != "issuing-client" {
 				t.Fatalf("并发 refresh 结果=%#v err=%v", result.token, result.err)
 			}
 		case <-time.After(time.Second):

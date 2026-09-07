@@ -195,6 +195,25 @@ test("首次安装保留旧 token 但仍要求完成一次新授权", (t) => {
   assert.match(readFileSync(tokenPath, "utf8"), /old-dev-token/);
 });
 
+test("相对 EVERYLINE_CONFIG_DIR 始终按用户目录解析", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+
+  const result = installPackage({
+    packageRoot: fixture.packageRoot,
+    platform: "linux",
+    architecture: "x64",
+    environment: {
+      npm_config_global: "true",
+      EVERYLINE_CONFIG_DIR: join("settings", "everyline"),
+    },
+    userHome: fixture.userHome,
+  });
+
+  assert.equal(result.installStatePath, join(fixture.userHome, "settings", "everyline", "install-state.json"));
+  assert.equal(existsSync(result.installStatePath), true);
+});
+
 test("重复安装不会重新打开已经完成的首次授权门禁", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));

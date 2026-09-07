@@ -249,7 +249,7 @@ Profile 只影响 C 到 Q 的本地路由和鉴权过程；服务端业务请求
 
 | 环境变量 | 用途 |
 |---|---|
-| `EVERYLINE_CONFIG_DIR` | 覆盖默认的 `~/.everyline-cli` 配置目录 |
+| `EVERYLINE_CONFIG_DIR` | 覆盖默认的 `~/.everyline-cli` 配置目录；相对路径以用户主目录为基准 |
 | `EVERYLINE_ACCESS_TOKEN` | 覆盖 app access token；不用于 user 身份 |
 | `EVERYLINE_APP_ID` | 通用 app ID |
 | `EVERYLINE_APP_SECRET` | 通用 app secret |

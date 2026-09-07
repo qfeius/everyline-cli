@@ -47,16 +47,20 @@ func NewFileStore(path string) *FileStore {
 	return &FileStore{path: path}
 }
 
-// DefaultDir 返回 CLI 配置目录，测试可用 EVERYLINE_CONFIG_DIR 覆盖。
+// DefaultDir 返回 CLI 配置目录，相对的 EVERYLINE_CONFIG_DIR 统一以用户主目录为基准。
 // 入参：无。
-// 返回值：string，配置目录路径；error，无法解析用户主目录时非 nil。
+// 返回值：string，稳定的配置目录路径；error，无法解析用户主目录时非 nil。
 func DefaultDir() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("EVERYLINE_CONFIG_DIR")); configured != "" {
-		return configured, nil
+	configured := strings.TrimSpace(os.Getenv("EVERYLINE_CONFIG_DIR"))
+	if filepath.IsAbs(configured) {
+		return filepath.Clean(configured), nil
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("解析用户目录: %w", err)
+	}
+	if configured != "" {
+		return filepath.Join(homeDir, configured), nil
 	}
 	return filepath.Join(homeDir, ".everyline-cli"), nil
 }

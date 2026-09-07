@@ -9,6 +9,26 @@ import (
 	"testing"
 )
 
+// TestDefaultDirResolvesRelativeOverrideFromHome 验证相对配置覆盖不受 CLI 当前工作目录影响。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；相对路径未以用户主目录为基准时通过 t.Fatal 报告。
+func TestDefaultDirResolvesRelativeOverrideFromHome(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EVERYLINE_CONFIG_DIR", filepath.Join("settings", "everyline"))
+
+	got, err := DefaultDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(homeDir, "settings", "everyline")
+	if got != want {
+		t.Fatalf("config dir=%q，期望 %q", got, want)
+	}
+}
+
 // TestFileStoreLifecycle 验证 Profile 原子持久化、默认选择、排序和 0600 权限。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

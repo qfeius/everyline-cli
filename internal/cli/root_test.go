@@ -814,12 +814,72 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 		LoadForIdentity(string, config.IdentityKind) (auth.Token, error)
 	})
 	cached, err := identityStore.LoadForIdentity("dev", config.IdentityUser)
-	if err != nil || cached.AccessToken != "oauth-token" || cached.RefreshToken != "refresh-token" {
+	if err != nil || cached.AccessToken != "oauth-token" || cached.RefreshToken != "refresh-token" || cached.OAuthClientID != "dynamic-oauth-client" {
 		t.Fatalf("cached=%#v err=%v", cached, err)
 	}
 	storedProfile, err := runtime.Profiles.Get(profile.Name)
 	if err != nil || storedProfile.OAuthClientID != "dynamic-oauth-client" || storedProfile.OAuthDeviceClientID != "existing-device-client" {
 		t.Fatalf("storedProfile=%#v err=%v", storedProfile, err)
+	}
+}
+
+// TestAuthUserLoginFailurePreservesOAuthClientAndToken 验证动态注册后的授权失败不会让旧 Profile 与旧 token 失配。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败登录覆盖任一旧凭证关联时通过 t.Fatal 报告。
+func TestAuthUserLoginFailurePreservesOAuthClientAndToken(t *testing.T) {
+	metadataCalls := 0
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oauth/register/contract-review":
+			_, _ = writer.Write([]byte(`{"client_id":"new-oauth-client","token_endpoint_auth_method":"none"}`))
+		case "/metadata":
+			metadataCalls++
+			if metadataCalls > 1 {
+				http.Error(writer, "authorization unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","registration_endpoint":"` + server.URL + `/oauth/register/contract-review","code_challenge_methods_supported":["S256"]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	runtime, _, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{
+		Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/tenant-token",
+		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review",
+		OAuthClientID: "old-oauth-client", OAuthRedirectURL: "http://127.0.0.1:8000/login",
+		OAuthScopes: []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	identityStore := runtime.Tokens.(interface {
+		LoadForIdentity(string, config.IdentityKind) (auth.Token, error)
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	oldToken := auth.Token{
+		AccessToken: "old-access-token", RefreshToken: "old-refresh-token", OAuthClientID: profile.OAuthClientID,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if err := identityStore.SaveForIdentity(profile.Name, config.IdentityUser, oldToken); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--profile", profile.Name, "--as", "user"})
+	if err == nil || !strings.Contains(err.Error(), "获取 OAuth metadata 失败") {
+		t.Fatalf("err=%v", err)
+	}
+	storedProfile, profileErr := runtime.Profiles.Get(profile.Name)
+	if profileErr != nil || storedProfile.OAuthClientID != profile.OAuthClientID {
+		t.Fatalf("storedProfile=%#v err=%v", storedProfile, profileErr)
+	}
+	storedToken, tokenErr := identityStore.LoadForIdentity(profile.Name, config.IdentityUser)
+	if tokenErr != nil || storedToken.AccessToken != oldToken.AccessToken || storedToken.OAuthClientID != oldToken.OAuthClientID {
+		t.Fatalf("storedToken=%#v err=%v", storedToken, tokenErr)
 	}
 }
 
