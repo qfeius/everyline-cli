@@ -61,6 +61,33 @@ function createPackageFixture() {
   return { root, packageRoot, userHome };
 }
 
+/**
+ * failInstallStateCommit 在最终登记时注入目录故障，验证真实原生 CLI 的失败会传回安装器。
+ * 入参：options（object）为隔离安装参数；failCall（number）为失败的登记调用序号，首次安装用 2、升级用 1。
+ * 返回值：void；没有到达指定提交或安装器未报告失败时断言失败，故障目录始终恢复。
+ */
+function failInstallStateCommit(options, failCall) {
+  execFileSync(process.execPath, ["-e", `
+const fs = require('node:fs');
+const child = require('node:child_process');
+const assert = require('node:assert/strict');
+const original = child.execFileSync;
+const failCall = Number(process.argv[3]);
+let calls = 0;
+child.execFileSync = (file, args, options) => {
+  if (args[0] !== '_record-install' || ++calls !== failCall) return original(file, args, options);
+  const directory = options.env.EVERYLINE_CONFIG_DIR;
+  const saved = directory + '-state-failure-fixture';
+  fs.renameSync(directory, saved);
+  fs.writeFileSync(directory, 'temporarily unavailable config directory');
+  try { return original(file, args, options); }
+  finally { fs.unlinkSync(directory); fs.renameSync(saved, directory); }
+};
+assert.throws(() => require(process.argv[1]).installPackage(JSON.parse(process.argv[2])));
+assert.equal(calls, failCall);
+`, join(__dirname, "../../scripts/install.js"), JSON.stringify(options), String(failCall)]);
+}
+
 test("Codex Skill 只在 npm 全局安装时自动登记", () => {
   assert.equal(shouldInstallCodexSkill({ npm_config_global: "true" }), true);
   assert.equal(shouldInstallCodexSkill({ npm_config_global: "false" }), false);
@@ -202,6 +229,152 @@ test("豆包同步中途失败会回滚所有宿主的本轮变更", (t) => {
   assert.deepEqual(readdirSync(nativeRoot), ["everyline-cli"]);
   assert.deepEqual(readdirSync(join(nativeRoot, "..")), [".user_skills"]);
   for (const host of [".agents", ".workbuddy"]) assert.deepEqual(readdirSync(join(fixture.userHome, host, "skills")), []);
+});
+
+/**
+ * 验证已安装状态或旧版无状态升级的最终提交失败时，三个宿主和废弃入口都恢复原状。
+ * 入参：t（TestContext）为授权状态子场景及临时目录清理上下文。
+ * 返回值：Promise<void>，原链接、目录、token 或状态文件未恢复，或重试语义变化时断言失败。
+ */
+test("升级最终提交失败恢复三宿主和旧 shared 入口", async (t) => {
+  for (const stateKind of ["authorized", "pending", "legacy"]) {
+    await t.test(stateKind, (t) => {
+      const previous = createPackageFixture();
+      const current = createPackageFixture();
+      t.after(() => {
+        rmSync(previous.root, { recursive: true, force: true });
+        rmSync(current.root, { recursive: true, force: true });
+      });
+      const manifestPath = join(previous.packageRoot, "package.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      manifest.version = "9.8.6";
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      for (const name of skillNames) {
+        writeFileSync(join(current.packageRoot, "skills", name, "SKILL.md"), `---\nname: ${name}\n---\nnew version`);
+      }
+      const nativeRoot = join(previous.userHome, "workspace", ".user_skills");
+      const options = { packageRoot: previous.packageRoot, platform: "linux", architecture: "x64", userHome: previous.userHome, environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot } };
+      const original = installPackage(options);
+      const state = JSON.parse(readFileSync(original.installStatePath, "utf8"));
+      if (stateKind === "legacy") rmSync(original.installStatePath);
+      else {
+        if (stateKind === "authorized") Object.assign(state, { firstInstall: false, authorizationRequired: false, nextAction: "" });
+        writeFileSync(original.installStatePath, JSON.stringify(state));
+      }
+      const originalState = stateKind === "legacy" ? null : readFileSync(original.installStatePath, "utf8");
+      const tokenPath = join(previous.userHome, ".everyline-cli", "tokens.json");
+      const token = '{"tokens":{"test::user":{"access_token":"fixture-old-token"}}}';
+      writeFileSync(tokenPath, token);
+      const sharedContent = "---\nname: everyline-shared\n---\nold public skill";
+      mkdirSync(join(nativeRoot, "everyline-shared"));
+      writeFileSync(join(nativeRoot, "everyline-shared", "SKILL.md"), sharedContent);
+      for (const host of [".agents", ".workbuddy"]) {
+        symlinkSync(join(previous.packageRoot, "skills", "everyline-shared"), join(previous.userHome, host, "skills", "everyline-shared"), "dir");
+      }
+
+      options.packageRoot = current.packageRoot;
+      failInstallStateCommit(options, 1);
+
+      for (const host of [".agents", ".workbuddy"]) {
+        const root = join(previous.userHome, host, "skills");
+        assert.deepEqual(readdirSync(root).sort(), [...skillNames, "everyline-shared"].sort());
+        for (const name of skillNames) assert.equal(realpathSync(join(root, name)), realpathSync(join(previous.packageRoot, "skills", name)));
+        assert.equal(lstatSync(join(root, "everyline-shared")).isSymbolicLink(), true);
+      }
+      for (const name of skillNames) {
+        assert.equal(readFileSync(join(nativeRoot, name, "SKILL.md"), "utf8"), readFileSync(join(previous.packageRoot, "skills", name, "SKILL.md"), "utf8"));
+      }
+      assert.equal(readFileSync(join(nativeRoot, "everyline-shared", "SKILL.md"), "utf8"), sharedContent);
+      assert.deepEqual(readdirSync(join(nativeRoot, "..")), [".user_skills"]);
+      assert.equal(readFileSync(tokenPath, "utf8"), token);
+      assert.equal(stateKind === "legacy" ? existsSync(original.installStatePath) : readFileSync(original.installStatePath, "utf8"), stateKind === "legacy" ? false : originalState);
+
+      const retried = installPackage(options);
+      assert.equal(retried.updated, true);
+      assert.equal(retried.authorizationRequired, stateKind === "pending");
+      assert.equal(JSON.parse(readFileSync(retried.installStatePath, "utf8")).installedVersion, "9.8.7");
+      assert.deepEqual(readdirSync(nativeRoot).sort(), [...skillNames].sort());
+    });
+  }
+});
+
+/**
+ * 验证首次安装的第二次状态提交失败时撤回宿主写入，但保留首次授权意图供重试。
+ * 入参：t（TestContext）为临时目录清理上下文。
+ * 返回值：void，新建目录/链接残留或重试跳过首次授权时断言失败。
+ */
+test("首次安装最终提交失败保留门禁并撤回三宿主写入", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const nativeRoot = join(fixture.userHome, "workspace", ".user_skills");
+  const options = { packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", userHome: fixture.userHome, environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot } };
+  failInstallStateCommit(options, 2);
+  for (const root of [nativeRoot, join(fixture.userHome, ".agents", "skills"), join(fixture.userHome, ".workbuddy", "skills")]) {
+    assert.deepEqual(readdirSync(root), []);
+  }
+  const statePath = join(fixture.userHome, ".everyline-cli", "install-state.json");
+  const pending = JSON.parse(readFileSync(statePath, "utf8"));
+  assert.equal(pending.authorizationRequired, true);
+  const retried = installPackage(options);
+  assert.equal(retried.firstInstall, true);
+  assert.equal(retried.authorizationRequired, true);
+  assert.equal(retried.updated, false);
+  assert.equal(JSON.parse(readFileSync(statePath, "utf8")).eventId, pending.eventId);
+});
+
+/**
+ * 验证旧 ZIP 的 shared 普通目录迁出后只保留三项当前技能，备份完整且重试不重复提示重载。
+ * 入参：t（TestContext）为仅旧入口及旧三项布局子场景上下文。
+ * 返回值：Promise<void>，残留旧入口、备份丢失或旧安装被误判为首次安装时断言失败。
+ */
+test("豆包旧 shared 目录迁出扫描范围并保留备份", async (t) => {
+  for (const layout of ["shared-only", "legacy-three", "current-three"]) {
+    await t.test(layout, (t) => {
+      const fixture = createPackageFixture();
+      t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+      const nativeRoot = join(fixture.userHome, "workspace", ".user_skills");
+      const names = layout === "shared-only" ? ["everyline-shared"] : layout === "legacy-three" ? ["everyline-shared", "everyline-review", "everyline-review-config"] : ["everyline-shared", ...skillNames];
+      for (const name of names) {
+        mkdirSync(join(nativeRoot, name), { recursive: true });
+        writeFileSync(join(nativeRoot, name, "SKILL.md"), name === "everyline-shared" ? "---\nname: everyline-shared\n---\nold public skill" : readFileSync(join(fixture.packageRoot, "skills", name, "SKILL.md")));
+      }
+      const options = { packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", userHome: fixture.userHome, environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot } };
+      const result = installPackage(options);
+      assert.equal(result.updated, true);
+      assert.equal(result.authorizationRequired, false);
+      assert.equal(result.doubaoSkillReloadRequired, true);
+      assert.deepEqual(result.skills.doubao.map(({ name }) => name), skillNames);
+      assert.deepEqual(readdirSync(nativeRoot).sort(), [...skillNames].sort());
+      const backups = readdirSync(join(nativeRoot, "..")).filter((name) => name.startsWith(".everyline-skill-update-"));
+      assert.equal(backups.length, 1);
+      assert.match(readFileSync(join(nativeRoot, "..", backups[0], "previous", "SKILL.md"), "utf8"), /old public skill/);
+      const repeated = installPackage(options);
+      assert.equal(repeated.updated, false);
+      assert.equal(repeated.doubaoSkillReloadRequired, false);
+    });
+  }
+});
+
+/**
+ * 验证未确认身份的豆包 shared 目录保持不动，也不充当升级证据。
+ * 入参：t（TestContext）为缺失、重复或其他名称声明的子场景上下文。
+ * 返回值：Promise<void>，用户内容被迁出或首次授权被跳过时断言失败。
+ */
+test("豆包旧入口迁移保留身份不明的用户目录", async (t) => {
+  for (const content of ["user data", "---\nname: my-skill\n---\n", "---\nname: everyline-shared\nname: other\n---\n"]) {
+    await t.test(content.split("\n").join(" "), (t) => {
+      const fixture = createPackageFixture();
+      t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+      const nativeRoot = join(fixture.userHome, "workspace", ".user_skills");
+      const target = join(nativeRoot, "everyline-shared");
+      mkdirSync(target, { recursive: true });
+      writeFileSync(join(target, "SKILL.md"), content);
+      const result = installPackage({ packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", userHome: fixture.userHome, environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot } });
+      assert.equal(readFileSync(join(target, "SKILL.md"), "utf8"), content);
+      assert.equal(result.firstInstall, true);
+      assert.equal(result.authorizationRequired, true);
+    });
+  }
 });
 
 test("Codex Skill 登记可重复执行且始终指向包内同一来源", (t) => {

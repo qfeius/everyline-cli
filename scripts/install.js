@@ -114,24 +114,23 @@ function inspectAgentSkillRegistration(source, target, hostName = "Agent", metad
 }
 
 /**
- * registerAgentSkillPlans 先预检全部宿主，再登记链接或同步豆包文件夹；异常时撤回本轮变更。
- * 入参：plans（Array<object>）为来源、目标、宿主和元数据列表；platform（string）为 Node 平台名；beforeRegister（Function，可选）在全部预检通过后、写入链接前接收预检结果。
- * 返回值：Array<object>，每项保留计划元数据并带有 created/existing/updated 状态。
+ * registerAgentSkillPlans 预检全部宿主，登记当前技能并迁出旧入口，最终状态提交失败时撤回本轮变更。
+ * 入参：plans（Array<object>）为登记或迁出计划；platform（string）为 Node 平台名；beforeRegister（Function，可选）在预检后写入首次安装意图；commit（Function，可选）接收预检结果，作为事务的最终状态提交。
+ * 返回值：Array<object>，保留计划元数据及 created/existing/updated/removed/skipped 状态。
  */
-function registerAgentSkillPlans(plans, platform = process.platform, beforeRegister) {
+function registerAgentSkillPlans(plans, platform = process.platform, beforeRegister, commit) {
   // 全量预检发生在任何写入前，常见的同名目录冲突不会留下半套登记结果。
-  const inspected = plans.map((plan) => plan.installMode === "directory" ? inspectDoubaoSkillRegistration(plan) : inspectAgentSkillRegistration(
-    plan.source,
-    plan.target,
-    plan.hostName,
-    plan,
-  ));
+  const inspected = plans.map((plan) => {
+    if (plan.installMode === "deprecated-link") return plan;
+    if (plan.installMode === "directory") return inspectDoubaoSkillRegistration(plan);
+    return inspectAgentSkillRegistration(plan.source, plan.target, plan.hostName, plan);
+  });
   // 首次安装意图必须先可靠落盘；预检冲突不会创建门禁，登记中断也不会丢失待授权状态。
   beforeRegister?.(inspected);
   const changed = [];
   try {
     for (const registration of inspected) {
-      if (registration.status === "existing") {
+      if (registration.status === "existing" || registration.status === "skipped") {
         continue;
       }
       if (registration.installMode === "directory") {
@@ -140,7 +139,7 @@ function registerAgentSkillPlans(plans, platform = process.platform, beforeRegis
         continue;
       }
       mkdirSync(dirname(registration.target), { recursive: true });
-      if (registration.status === "updated") {
+      if (registration.status === "updated" || registration.status === "removed") {
         // 写入前再次核对旧链接，避免预检之后出现的用户目录或其他来源被覆盖。
         if (!lstatSync(registration.target).isSymbolicLink() || readlinkSync(registration.target) !== registration.previousLink) {
           throw new Error(`Skill 目标在安装期间发生变化，请重试: ${registration.target}`);
@@ -148,6 +147,7 @@ function registerAgentSkillPlans(plans, platform = process.platform, beforeRegis
         unlinkSync(registration.target);
         // 在新链接创建前记入回滚列表，即使 symlink 失败也能恢复原链接。
         changed.push(registration);
+        if (registration.status === "removed") continue;
       }
       symlinkSync(registration.source, registration.target, platform === "win32" ? "junction" : "dir");
       if (registration.status === "created") {
@@ -157,9 +157,12 @@ function registerAgentSkillPlans(plans, platform = process.platform, beforeRegis
     for (const registration of changed) {
       if (registration.installMode === "directory") finishDoubaoSkill(registration);
     }
+    // 旧目录备份与链接撤销信息仍在；状态提交是最后一个失败点，失败后统一恢复各宿主。
+    commit?.(inspected);
     return inspected;
   } catch (error) {
     // 只撤回本轮仍指向新来源的链接；旧目标保留在内存中，不在扫描目录里创建 .bak 副本。
+    const rollbackErrors = [];
     for (const registration of changed.reverse()) {
       try {
         if (registration.installMode === "directory") {
@@ -175,17 +178,23 @@ function registerAgentSkillPlans(plans, platform = process.platform, beforeRegis
           }
         }
         if (targetState) {
+          // 旧链接迁出后出现的新目标由其他进程拥有，回滚不覆盖它。
+          if (registration.status === "removed") continue;
           if (!targetState.isSymbolicLink() || realpathSync(registration.target) !== realpathSync(registration.source)) {
             continue;
           }
           unlinkSync(registration.target);
         }
-        if (registration.status === "updated") {
+        if (registration.status === "updated" || registration.status === "removed") {
           symlinkSync(registration.previousLink, registration.target, platform === "win32" ? "junction" : "dir");
         }
-      } catch {
-        // 回滚采用尽力而为策略，原始安装错误仍作为主错误返回。
+      } catch (rollbackError) {
+        // 继续恢复其他宿主，同时保留未恢复目录的备份位置供用户处理。
+        rollbackErrors.push(rollbackError.message);
       }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new Error(`${error.message}；部分 Skill 回滚失败: ${rollbackErrors.join("；")}`, { cause: error });
     }
     throw error;
   }
@@ -338,7 +347,7 @@ function ensureFirstInstallState(packageRoot, environment, userHome, platform, r
 }
 
 /**
- * installPackage 校验 CLI、保留首次安装意图，再同步 Codex、WorkBuddy 与可发现的豆包本地 Skills。
+ * installPackage 保留首次安装意图，将三宿主同步、废弃入口迁出和最终安装状态提交放在同一恢复流程中。
  * 入参：options（object，可选），可注入 packageRoot、platform、architecture、environment 和 userHome 供安装与测试使用。
  * 返回值：object，包含 binary、Skill 登记结果及机器可读的首次安装、授权和更新状态。
  */
@@ -386,36 +395,38 @@ function installPackage(options = {}) {
     ));
     installedSkillRoots.push(workBuddySkillRoot);
   }
-  plans.push(...buildDoubaoSkillPlans(packageRoot, skillNames, environment, platform, userHome));
-  // 清理前保留已验证的旧安装证据，跨 Node 前缀的 legacy 布局也属于升级。
-  let hadDeprecatedRegistrations = installedSkillRoots.some((skillRoot) => inspectDeprecatedSkillRegistrations(packageRoot, skillRoot).length > 0);
+  plans.push(...buildDoubaoSkillPlans(packageRoot, skillNames, environment, platform, userHome, deprecatedSkillNames));
+  // 已校验的旧链接进入同一撤销列表，避免最终提交失败后丢失原来的公共授权入口。
+  for (const skillRoot of installedSkillRoots) {
+    plans.push(...inspectDeprecatedSkillRegistrations(packageRoot, skillRoot).map((registration) => ({
+      ...registration, deprecated: true, installMode: "deprecated-link", status: "removed",
+    })));
+  }
+  let hadDeprecatedRegistrations = false;
+  let installState;
   const registrations = registerAgentSkillPlans(plans, platform, (inspected) => {
+    // 仅已确认需要迁出的目录或链接证明旧安装存在，跳过的未知目录不影响首次授权判定。
+    hadDeprecatedRegistrations = inspected.some((registration) => registration.deprecated && registration.status === "removed");
     const existingState = loadInstallState(resolveInstallStatePath(environment, userHome));
-    if (!existingState && !hadDeprecatedRegistrations && inspected.every(({ status }) => status === "created")) {
+    if (!existingState && !hadDeprecatedRegistrations && inspected.filter((registration) => !registration.deprecated).every(({ status }) => status === "created")) {
       // 只预提交全新安装的待授权意图；失败或进程中断后，重试仍读取该门禁，旧安装的版本更新留到登记成功后。
       ensureFirstInstallState(packageRoot, environment, userHome, platform, inspected, false, binary);
     }
+  }, (inspected) => {
+    installState = ensureFirstInstallState(packageRoot, environment, userHome, platform, inspected, hadDeprecatedRegistrations, binary);
   });
-  // 新三项 Skill 全部登记成功后，再移除本包遗留的 everyline-shared 链接。
-  for (const skillRoot of installedSkillRoots) {
-    const removed = removeDeprecatedSkillRegistrations(packageRoot, skillRoot);
-    if (removed.length > 0) {
-      hadDeprecatedRegistrations = true;
-    }
-  }
   const hostSkills = (hostKey) => registrations
-    .filter((registration) => registration.hostKey === hostKey)
+    .filter((registration) => registration.hostKey === hostKey && !registration.deprecated)
     .map(({ name, target, status, backupPath }) => ({ name, target, status, ...(backupPath ? { backupPath } : {}) }));
   const codexSkills = hostSkills("codex");
   const workBuddySkills = hostSkills("workBuddy");
   const doubaoSkills = hostSkills("doubao");
-  const installState = ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations, hadDeprecatedRegistrations, binary);
   return {
     binary,
     skillTarget: codexSkills[0].target,
     skillStatus: codexSkills[0].status,
     skills: { codex: codexSkills, workBuddy: workBuddySkills, doubao: doubaoSkills },
-    doubaoSkillReloadRequired: doubaoSkills.some((skill) => skill.status !== "existing"),
+    doubaoSkillReloadRequired: registrations.some((skill) => skill.hostKey === "doubao" && skill.status !== "existing" && skill.status !== "skipped"),
     installStatePath: installState.path,
     firstInstall: installState.firstInstall === true,
     authorizationRequired: installState.authorizationRequired === true,

@@ -47,7 +47,8 @@ everyline-cli review task result --help
 - 主体提取返回同一候选的 `name` 与 `role`；
 - 沙箱可使用 `upload --stdin`，完整 URL 可使用 `upload-url`；
 - `review task result` 等待同一 task ID 的终态并获取详情。
-- WorkBuddy 的清单、主体和强度选择使用 `AskUserQuestion`；清单开启多选，并按统一候选快照进行逻辑分页。
+- Codex、豆包和 WorkBuddy 的审查顺序统一为「主体 → 强度 → 清单」，每次只收集一个维度；已明确且能唯一匹配的值直接复用，清单选择完成后直接校验并发起审查。
+- 三端清单读取全部远端分页后，在正文完整展示内置项与全部真实清单，等待用户回复一个或多个编号；不做对话分页，不使用选项组件或搜索导航。WorkBuddy 的主体和强度也使用正文编号列表，Codex、豆包沿用各自的单选方式。
 
 关键能力缺失时列出缺口，停止上传和任务创建；保留授权、帮助查询和无关只读操作。
 
