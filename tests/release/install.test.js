@@ -1,7 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
+const { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
+const { execFileSync } = require("node:child_process");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const test = require("node:test");
@@ -13,6 +14,16 @@ const {
   shouldInstallWorkBuddySkills,
   skillNames,
 } = require("../../scripts/install");
+
+// 安装状态由真实 CLI 加锁写入；整组测试只构建一次，随后复制到隔离包中验证 Node/Go 接口。
+let nativeFixtureRoot;
+let nativeFixtureBinary;
+test.before(() => {
+  nativeFixtureRoot = mkdtempSync(join(tmpdir(), "everyline-installer-binary-"));
+  nativeFixtureBinary = join(nativeFixtureRoot, process.platform === "win32" ? "everyline-cli.exe" : "everyline-cli");
+  execFileSync("go", ["build", "-o", nativeFixtureBinary, "./cmd/everyline-cli"], { cwd: join(__dirname, "../..") });
+});
+test.after(() => rmSync(nativeFixtureRoot, { recursive: true, force: true }));
 
 /**
  * createFixture 创建隔离的 Skill 源目录和 Codex 目标目录。
@@ -29,7 +40,7 @@ function createFixture() {
 }
 
 /**
- * createPackageFixture 创建包含当前平台二进制和三项 Skill 的最小 npm 包夹具。
+ * createPackageFixture 创建包含可执行 CLI 和三项 Skill 的最小 npm 包夹具。
  * 入参：无。
  * 返回值：object，包含临时根目录 root、模拟包根 packageRoot 和用户目录 userHome。
  */
@@ -39,8 +50,8 @@ function createPackageFixture() {
   const userHome = join(root, "home");
   const binary = join(packageRoot, "bin", "linux-amd64", "everyline-cli");
   mkdirSync(join(packageRoot, "bin", "linux-amd64"), { recursive: true });
-  writeFileSync(binary, "fixture");
-  writeFileSync(join(packageRoot, "package.json"), '{"name":"everyline-cli","version":"9.8.7"}\n');
+  copyFileSync(nativeFixtureBinary, binary);
+  writeFileSync(join(packageRoot, "package.json"), '{"name":"everyline-cli","version":"9.8.7","bin":{"everyline-cli":"scripts/run.js"}}\n');
   for (const name of skillNames) {
     const source = join(packageRoot, "skills", name);
     mkdirSync(source, { recursive: true });
@@ -422,4 +433,132 @@ test("全局安装后置目标冲突时不留下部分 Skill 链接", (t) => {
   assert.equal(existsSync(join(workBuddySkillRoot, "everyline-cli")), false);
   assert.equal(existsSync(marker), true);
   assert.equal(existsSync(join(workBuddySkillRoot, "everyline-review-config")), false);
+});
+
+/**
+ * 验证跨 Node/npm 来源安装直接迁移三项 Skill，保留授权状态且不创建可被扫描的备份。
+ * 入参：t（TestContext）为隔离目录清理及子场景上下文。
+ * 返回值：void，链接、升级标记或授权状态不符合预期时断言失败。
+ */
+test("跨 Node 环境安装迁移两个宿主的链接且保持安装状态", async (t) => {
+  for (const stateKind of ["legacy", "authorized", "pending"]) {
+    await t.test(stateKind, (t) => {
+      const previous = createPackageFixture();
+      const current = createPackageFixture();
+      t.after(() => {
+        rmSync(previous.root, { recursive: true, force: true });
+        rmSync(current.root, { recursive: true, force: true });
+      });
+      const options = { packageRoot: previous.packageRoot, platform: "linux", architecture: "x64", environment: { npm_config_global: "true" }, userHome: previous.userHome };
+      const original = installPackage(options);
+      const state = JSON.parse(readFileSync(original.installStatePath, "utf8"));
+      if (stateKind === "legacy") {
+        rmSync(original.installStatePath);
+      } else if (stateKind === "authorized") {
+        Object.assign(state, { firstInstall: false, authorizationRequired: false, nextAction: "" });
+        writeFileSync(original.installStatePath, JSON.stringify(state));
+      }
+      const manifestPath = join(current.packageRoot, "package.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      manifest.version = "9.8.8";
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      options.packageRoot = current.packageRoot;
+      const migrated = installPackage(options);
+      assert.equal(migrated.updated, true);
+      assert.equal(migrated.firstInstall, stateKind === "pending");
+      assert.equal(migrated.authorizationRequired, stateKind === "pending");
+      for (const hostSkills of Object.values(migrated.skills)) {
+        for (const skill of hostSkills) {
+          assert.equal(skill.status, "updated");
+          assert.equal(realpathSync(skill.target), realpathSync(join(current.packageRoot, "skills", skill.name)));
+        }
+      }
+      for (const root of [join(previous.userHome, ".agents", "skills"), join(previous.userHome, ".workbuddy", "skills")]) {
+        assert.deepEqual(readdirSync(root).sort(), [...skillNames].sort());
+      }
+      const repeated = installPackage(options);
+      assert.equal(repeated.updated, false);
+      assert.equal(repeated.authorizationRequired, migrated.authorizationRequired);
+      if (stateKind !== "legacy") {
+        assert.equal(JSON.parse(readFileSync(repeated.installStatePath, "utf8")).eventId, state.eventId);
+      }
+    });
+  }
+});
+
+/**
+ * 验证悬空旧链接只在 npm 包归属可确认时迁移；其他来源保持原样并提示外部备份。
+ * 入参：t（TestContext）为子场景及临时文件清理上下文。
+ * 返回值：void，错误接管非 EveryLine 链接或遗漏可恢复旧链接时断言失败。
+ */
+test("旧链接迁移校验包归属并兼容已移除的 Skill 文件", async (t) => {
+  for (const kind of ["owned-dangling", "foreign", "missing-manifest", "wrong-entry", "invalid-manifest", "null-manifest"]) {
+    await t.test(kind, (t) => {
+      const previous = createPackageFixture();
+      const current = createFixture();
+      t.after(() => {
+        rmSync(previous.root, { recursive: true, force: true });
+        rmSync(current.root, { recursive: true, force: true });
+      });
+      const oldSource = join(previous.packageRoot, "skills", "everyline-cli");
+      const manifestPath = join(previous.packageRoot, "package.json");
+      if (kind === "owned-dangling") rmSync(oldSource, { recursive: true });
+      if (kind === "foreign") writeFileSync(manifestPath, '{"name":"another-package","bin":{"everyline-cli":"scripts/run.js"}}');
+      if (kind === "missing-manifest") rmSync(manifestPath);
+      if (kind === "wrong-entry") writeFileSync(manifestPath, '{"name":"everyline-cli","bin":{"everyline-cli":"custom.js"}}');
+      if (kind === "invalid-manifest") writeFileSync(manifestPath, '{');
+      if (kind === "null-manifest") writeFileSync(manifestPath, 'null');
+      mkdirSync(join(current.root, "codex", "skills"), { recursive: true });
+      symlinkSync(oldSource, current.target, "dir");
+      if (kind === "owned-dangling") {
+        assert.equal(registerCodexSkill(current.source, current.target), "updated");
+        assert.equal(realpathSync(current.target), realpathSync(current.source));
+      } else {
+        assert.throws(() => registerCodexSkill(current.source, current.target), /Skill 扫描目录之外/);
+        assert.equal(realpathSync(current.target), realpathSync(oldSource));
+      }
+    });
+  }
+});
+
+/**
+ * 验证跨来源迁移中途创建链接失败时，已更新的链接及失败项都恢复原来源。
+ * 入参：t（TestContext）为临时文件清理上下文；子进程仅注入一次文件创建失败。
+ * 返回值：void，失败后残留新链接、丢失旧链接或产生重复 Skill 时断言失败。
+ */
+test("跨来源迁移失败回滚两个宿主的旧链接", (t) => {
+  const previous = createPackageFixture();
+  const current = createPackageFixture();
+  t.after(() => {
+    rmSync(previous.root, { recursive: true, force: true });
+    rmSync(current.root, { recursive: true, force: true });
+  });
+  const options = { packageRoot: previous.packageRoot, platform: "linux", architecture: "x64", environment: { npm_config_global: "true" }, userHome: previous.userHome };
+  const original = installPackage(options);
+  const originalState = readFileSync(original.installStatePath, "utf8");
+  options.packageRoot = current.packageRoot;
+  // 新进程在加载安装器前注入故障，不影响其他测试中已加载的 fs 函数。
+  execFileSync(process.execPath, ["-e", `
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const original = fs.symlinkSync;
+let calls = 0;
+let failed = false;
+fs.symlinkSync = (...args) => {
+  if (++calls === 4) { failed = true; throw new Error('fixture link failure'); }
+  return original(...args);
+};
+const { installPackage } = require(process.argv[1]);
+assert.throws(() => installPackage(JSON.parse(process.argv[2])), /fixture link failure/);
+assert.equal(failed, true);
+`, join(__dirname, "../../scripts/install.js"), JSON.stringify(options)]);
+  for (const hostSkills of Object.values(original.skills)) {
+    for (const skill of hostSkills) {
+      assert.equal(realpathSync(skill.target), realpathSync(join(previous.packageRoot, "skills", skill.name)));
+    }
+  }
+  for (const root of [join(previous.userHome, ".agents", "skills"), join(previous.userHome, ".workbuddy", "skills")]) {
+    assert.deepEqual(readdirSync(root).sort(), [...skillNames].sort());
+  }
+  assert.equal(readFileSync(original.installStatePath, "utf8"), originalState);
 });

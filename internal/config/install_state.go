@@ -23,13 +23,14 @@ type InstallState struct {
 	InstalledVersion      string `json:"installedVersion,omitempty"`
 	FirstInstall          bool   `json:"firstInstall"`
 	AuthorizationRequired bool   `json:"authorizationRequired"`
-	NextAction            string `json:"nextAction,omitempty"`
+	NextAction            string `json:"nextAction"`
 }
 
 // InstallStateStore 定义首次安装授权状态的最小持久化能力。
 type InstallStateStore interface {
 	Load() (InstallState, error)
 	Save(InstallState) error
+	RecordInstallation(string, string, bool) (InstallState, bool, error)
 	CompleteAuthorization(...string) error
 }
 
@@ -64,6 +65,47 @@ func (store *FileInstallStateStore) Save(state InstallState) error {
 	return filelock.With(store.path+".lock", func() error {
 		return store.saveUnlocked(state)
 	})
+}
+
+/*
+RecordInstallation 在授权完成使用的同一把锁内登记安装，升级时只更新版本并保留最新授权状态。
+入参：version string 为 npm 包版本；eventID string 为本次候选安装事件；previouslyInstalled bool 表示已确认存在旧 Skill 登记。
+返回值：InstallState 为持久化状态；bool 表示升级或旧版迁移；error 为参数、加锁或文件操作失败。
+*/
+func (store *FileInstallStateStore) RecordInstallation(version, eventID string, previouslyInstalled bool) (InstallState, bool, error) {
+	if version == "" || eventID == "" {
+		return InstallState{}, false, fmt.Errorf("登记安装需要版本和事件 ID")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var state InstallState
+	var updated bool
+	err := filelock.With(store.path+".lock", func() error {
+		// 必须在获取锁后重读，避免安装器的旧快照覆盖刚完成的授权。
+		var err error
+		state, err = store.loadUnlocked()
+		if errors.Is(err, ErrInstallStateNotFound) {
+			state = InstallState{
+				Schema: InstallStateSchema, EventID: eventID, InstalledVersion: version,
+				FirstInstall: !previouslyInstalled, AuthorizationRequired: !previouslyInstalled,
+			}
+			if state.AuthorizationRequired {
+				state.NextAction = "authorize"
+			}
+			updated = previouslyInstalled
+			return store.saveUnlocked(state)
+		}
+		if err != nil {
+			return err
+		}
+		updated = version != state.InstalledVersion
+		if !updated {
+			return nil
+		}
+		state.InstalledVersion = version
+		return store.saveUnlocked(state)
+	})
+	return state, updated, err
 }
 
 /*

@@ -115,6 +115,9 @@ func TestDoubaoLocalDeviceAuthorizationUsesFixedSession(t *testing.T) {
 			if result["verification_uri_complete"] != verificationURL || (index == 1 && result["reused"] != true) {
 				t.Fatalf("Device 链接或事务未保留: %s", stdout.String())
 			}
+			if result["verification_link_text"] != "点击授权" {
+				t.Fatalf("豆包首次及复用授权必须返回统一入口文案: %s", stdout.String())
+			}
 		case "complete":
 			if result["status"] != "succeeded" {
 				t.Fatalf("Device 授权未完成: %s", stdout.String())
@@ -235,6 +238,9 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"verification_uri_complete": "https://auth.example.com/device?user_code=ABCD&tenant=test"`) {
 		t.Fatalf("stdout=%s，完整授权 URL 未原样输出", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), `"verification_link_text": "点击授权"`) {
+		t.Fatalf("Device 授权缺少统一入口文案: %s", stdout.String())
+	}
 	if strings.Contains(stdout.String(), "private-device-code") {
 		t.Fatalf("stdout 泄露 device code: %s", stdout.String())
 	}
@@ -256,6 +262,9 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 	var output deviceAuthOutput
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil || output.Status != "succeeded" {
 		t.Fatalf("output=%#v err=%v", output, err)
+	}
+	if strings.Contains(stdout.String(), "verification_link_text") {
+		t.Fatalf("已完成授权不应继续提示点击授权: %s", stdout.String())
 	}
 	stored, err := deviceStore.Load("test-user")
 	if err != nil || stored.Pending != nil || stored.Token == nil || stored.Token.RefreshToken != "private-refresh-token" {
@@ -507,7 +516,7 @@ func TestAuthDeviceExpiredTransactionCanRestart(t *testing.T) {
 			}
 			// 覆盖恰好到期的边界；到期查询不得再次向 token endpoint 兑换旧 code。
 			now = now.Add(10 * time.Minute)
-			if result := run("init", false); result.Status != "expired" || !result.Reused {
+			if result := run("init", false); result.Status != "expired" || !result.Reused || result.VerificationLinkText != "" {
 				t.Fatalf("到期后 init 状态=%+v", result)
 			}
 			if scenario.check {
@@ -530,13 +539,22 @@ func TestAuthDeviceExpiredTransactionCanRestart(t *testing.T) {
 }
 
 /*
-TestAuthDeviceRetriesFirstInstallState 验证 token 保存后安装状态写入失败，可跨运行时恢复本地提交。
+TestAuthDeviceRetriesFirstInstallState 验证 token 保存后安装状态写入失败，可跨运行时恢复，并在 token 过期后重新授权。
 入参：t *testing.T 为测试上下文。
 返回值：无；重试再次请求授权、兑换 token 或留下首次安装门禁时通过 t.Fatal 报告。
 */
 func TestAuthDeviceRetriesFirstInstallState(t *testing.T) {
-	for _, retryAction := range []string{"complete", "init"} {
-		t.Run(retryAction, func(t *testing.T) {
+	for _, scenario := range []struct {
+		name, retryAction string
+		expired, restart  bool
+	}{
+		{"complete_valid", "complete", false, false},
+		{"init_valid", "init", false, true},
+		{"complete_expired", "complete", true, false},
+		{"init_expired", "init", true, false},
+		{"restart_expired", "init", true, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
 			t.Setenv("SKILL_SESSION_WORKSPACE", "")
 			t.Setenv("CODEBUDDY_SESSION_ID", "")
 			t.Setenv("SESSION_ID", "first-install-recovery-session")
@@ -574,10 +592,12 @@ func TestAuthDeviceRetriesFirstInstallState(t *testing.T) {
 				}
 			}))
 			defer server.Close()
+			currentTime := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
 			newRuntime := func() (*Runtime, *bytes.Buffer) {
 				stdout := &bytes.Buffer{}
 				runtime := NewRuntime(configDir, strings.NewReader(""), stdout, &bytes.Buffer{})
 				runtime.HTTP = server.Client()
+				runtime.Now = func() time.Time { return currentTime }
 				return runtime, stdout
 			}
 			runtime, _ := newRuntime()
@@ -602,13 +622,41 @@ func TestAuthDeviceRetriesFirstInstallState(t *testing.T) {
 				t.Fatal(err)
 			}
 			// 新运行时必须从加密文件恢复完成证明，不依赖前一条命令的内存状态。
+			if scenario.expired {
+				currentTime = currentTime.Add(2 * time.Hour)
+			}
 			runtime, stdout := newRuntime()
-			args := []string{"auth", retryAction, "--profile", profile.Name, "--as", "user"}
-			if retryAction == "init" {
+			args := []string{"auth", scenario.retryAction, "--profile", profile.Name, "--as", "user"}
+			if scenario.restart {
 				args = append(args, "--restart")
 			}
-			if err := Execute(context.Background(), runtime, args); err != nil {
-				t.Fatal(err)
+			retryErr := Execute(context.Background(), runtime, args)
+			if scenario.expired {
+				if scenario.retryAction == "complete" {
+					if !errors.Is(retryErr, auth.ErrUserAuthentication) || !strings.Contains(retryErr.Error(), "auth init --restart") {
+						t.Fatalf("过期凭证应提示重新授权: output=%s err=%v", stdout.String(), retryErr)
+					}
+				} else {
+					var result deviceAuthOutput
+					if err := json.Unmarshal(stdout.Bytes(), &result); retryErr != nil || err != nil || result.Status != "pending" || result.VerificationURIComplete == "" {
+						t.Fatalf("过期后应创建新事务: result=%+v err=%v decode=%v", result, retryErr, err)
+					}
+				}
+				state, err := runtime.InstallState.Load()
+				if err != nil || !state.AuthorizationRequired || !state.FirstInstall {
+					t.Fatalf("过期凭证不应解除门禁: state=%+v err=%v", state, err)
+				}
+				wantDeviceCalls := int32(1)
+				if scenario.retryAction == "init" {
+					wantDeviceCalls = 2
+				}
+				if deviceCalls.Load() != wantDeviceCalls || tokenCalls.Load() != 1 {
+					t.Fatalf("过期恢复请求数错误: device=%d token=%d", deviceCalls.Load(), tokenCalls.Load())
+				}
+				return
+			}
+			if retryErr != nil {
+				t.Fatal(retryErr)
 			}
 			var result deviceAuthOutput
 			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result.Status != "succeeded" {

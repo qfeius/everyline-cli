@@ -6,6 +6,8 @@ EveryLine 命令行工具，支持合同审查工作流、审查清单和审查�
 
 ## 安装
 
+npm 全局安装会同步登记 Codex 和 WorkBuddy 的三项 Skill。切换 Node/npm 安装目录时，安装器会校验旧链接所属的 EveryLine 包并更新链接，保留已有授权状态；迁移中途失败会尝试恢复原链接。用户自建目录或其他来源的同名 Skill 会保留并提示冲突。需要手动备份时，请放在 Skill 扫描目录之外，避免仅添加 `.bak` 后缀后仍被作为同名 Skill 加载。
+
 ### 本地构建
 
 构建要求：Go 1.24 或更高版本、Node.js 18 或更高版本。进入 everyline-cli 源码目录后执行：
@@ -53,7 +55,7 @@ everyline-cli auth login \
 
 CLI 会先读取 OAuth metadata 的 `registration_endpoint` 并动态注册浏览器 public client，再打开浏览器完成用户登录，通过本机 loopback 回调接收授权结果并缓存 user token。每次显式 `auth login --as user` 都使用本次注册返回的 client ID，历史 Profile 中的旧值不会继续参与登录。auth login 不使用 --env；环境在 config add 时指定。
 
-user Token 过期且未刷新成功后，通过新的授权链接手动登录：Codex 重新执行 `auth login --profile <profile> --as user --no-open-browser`；豆包/WorkBuddy 在原会话中执行 `auth init --profile <profile> --as user --output json`，展示本次返回的完整授权链接，用户完成后执行一次 `auth complete`。以 `auth status` 的 `authenticated=true` 确认恢复，再继续原业务操作。
+user Token 过期且未刷新成功后，通过新的授权链接手动登录：Codex 重新执行 `auth login --profile <profile> --as user --no-open-browser --timeout 3m`；豆包/WorkBuddy 在原会话中执行 `auth init --profile <profile> --as user --output json`，展示本次返回的完整授权链接，用户完成后执行一次 `auth complete`。以 `auth status` 的 `authenticated=true` 确认恢复，再继续原业务操作。
 
 豆包（含本地电脑）和 WorkBuddy 统一使用 Device Grant；dev/test Profile 已内置独立 Device client。执行下面的命令前先按后文准备并固定对应宿主的会话变量：
 

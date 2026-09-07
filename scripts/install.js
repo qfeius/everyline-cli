@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { randomUUID } = require("node:crypto");
+const { execFileSync } = require("node:child_process");
 const {
   chmodSync,
   existsSync,
@@ -9,14 +10,11 @@ const {
   readlinkSync,
   readFileSync,
   realpathSync,
-  renameSync,
-  rmSync,
   symlinkSync,
   unlinkSync,
-  writeFileSync,
 } = require("node:fs");
 const { homedir } = require("node:os");
-const { dirname, join, resolve } = require("node:path");
+const { basename, dirname, join, resolve } = require("node:path");
 const { resolvePlatformTarget } = require("./platform");
 
 // skillNames 是同一份 npm 包向 Codex、WorkBuddy 和豆包发布的三项职责分离 Skill。
@@ -48,9 +46,29 @@ function shouldInstallWorkBuddySkills(environment) {
 }
 
 /**
+ * isEverylineSkillSource 根据包内路径和 npm manifest 确认旧链接属于 EveryLine，避免接管用户同名 Skill。
+ * 入参：source（string）为旧链接解析后的来源路径。
+ * 返回值：boolean，只有三项正式 Skill 且所属包声明正确的 CLI 入口时为 true；读取权限等异常向外抛出。
+ */
+function isEverylineSkillSource(source) {
+  if (!skillNames.includes(basename(source)) || basename(dirname(source)) !== "skills") {
+    return false;
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(join(dirname(dirname(source)), "package.json"), "utf8"));
+    return manifest?.name === "everyline-cli" && manifest.bin?.["everyline-cli"] === "scripts/run.js";
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR" || error instanceof SyntaxError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
  * inspectAgentSkillRegistration 只读校验 Skill 来源和目标，并生成后续登记计划。
  * 入参：source（string）为包内 Skill 路径；target（string）为宿主目标路径；hostName（string）为宿主名；metadata（object）为需透传的名称与分组。
- * 返回值：object，包含规范化来源、目标、预期状态以及调用方元数据。
+ * 返回值：object，包含规范化来源、目标、预期状态；跨安装来源更新时保留原链接供失败回滚。
  */
 function inspectAgentSkillRegistration(source, target, hostName = "Agent", metadata = {}) {
   const resolvedSource = resolve(source);
@@ -70,21 +88,34 @@ function inspectAgentSkillRegistration(source, target, hostName = "Agent", metad
 
   if (targetState) {
     if (targetState.isSymbolicLink()) {
+      const previousLink = readlinkSync(target);
+      let previousSource = resolve(dirname(target), previousLink);
+      try {
+        previousSource = realpathSync(target);
+      } catch (error) {
+        // 旧包可能已移除 Skill 文件；只有仍可验证的 manifest 才允许迁移悬空链接。
+        if (error.code !== "ENOENT" && error.code !== "ENOTDIR") {
+          throw error;
+        }
+      }
       // realpath 同时兼容 POSIX 符号链接和 Windows 目录联接的路径表示差异。
-      if (realpathSync(target) === realpathSync(resolvedSource)) {
+      if (previousSource === realpathSync(resolvedSource)) {
         return { ...metadata, source: resolvedSource, target, hostName, status: "existing" };
       }
+      if (basename(previousSource) === basename(resolvedSource) && isEverylineSkillSource(previousSource)) {
+        return { ...metadata, source: resolvedSource, target, hostName, status: "updated", previousLink };
+      }
     }
-    throw new Error(`${hostName} Skill 目标已存在，请先确认并移走原目录: ${target}`);
+    throw new Error(`${hostName} Skill 目标已存在且未确认属于 EveryLine；请将需保留的内容移到 Skill 扫描目录之外再重试，不要仅在原目录内添加 .bak 后缀: ${target}`);
   }
 
   return { ...metadata, source: resolvedSource, target, hostName, status: "created" };
 }
 
 /**
- * registerAgentSkillPlans 先预检全部目标，再一次性登记并在异常时回滚本轮新建链接。
+ * registerAgentSkillPlans 先预检全部目标，再登记或迁移链接；异常时撤回新链接并恢复旧链接。
  * 入参：plans（Array<object>）为来源、目标、宿主和元数据列表；platform（string）为 Node 平台名。
- * 返回值：Array<object>，每项保留计划元数据并带有 created/existing 状态。
+ * 返回值：Array<object>，每项保留计划元数据并带有 created/existing/updated 状态。
  */
 function registerAgentSkillPlans(plans, platform = process.platform) {
   // 全量预检发生在任何写入前，常见的同名目录冲突不会留下半套登记结果。
@@ -94,24 +125,48 @@ function registerAgentSkillPlans(plans, platform = process.platform) {
     plan.hostName,
     plan,
   ));
-  const created = [];
+  const changed = [];
   try {
     for (const registration of inspected) {
       if (registration.status === "existing") {
         continue;
       }
       mkdirSync(dirname(registration.target), { recursive: true });
+      if (registration.status === "updated") {
+        // 写入前再次核对旧链接，避免预检之后出现的用户目录或其他来源被覆盖。
+        if (!lstatSync(registration.target).isSymbolicLink() || readlinkSync(registration.target) !== registration.previousLink) {
+          throw new Error(`Skill 目标在安装期间发生变化，请重试: ${registration.target}`);
+        }
+        unlinkSync(registration.target);
+        // 在新链接创建前记入回滚列表，即使 symlink 失败也能恢复原链接。
+        changed.push(registration);
+      }
       symlinkSync(registration.source, registration.target, platform === "win32" ? "junction" : "dir");
-      created.push(registration);
+      if (registration.status === "created") {
+        changed.push(registration);
+      }
     }
     return inspected;
   } catch (error) {
-    // 只删除本轮创建且仍指向同一来源的链接，保留并发出现的用户目录或其他来源。
-    for (const registration of created.reverse()) {
+    // 只撤回本轮仍指向新来源的链接；旧目标保留在内存中，不在扫描目录里创建 .bak 副本。
+    for (const registration of changed.reverse()) {
       try {
-        const targetState = lstatSync(registration.target);
-        if (targetState.isSymbolicLink() && realpathSync(registration.target) === realpathSync(registration.source)) {
-          rmSync(registration.target, { force: true });
+        let targetState;
+        try {
+          targetState = lstatSync(registration.target);
+        } catch (error) {
+          if (error.code !== "ENOENT") {
+            throw error;
+          }
+        }
+        if (targetState) {
+          if (!targetState.isSymbolicLink() || realpathSync(registration.target) !== realpathSync(registration.source)) {
+            continue;
+          }
+          unlinkSync(registration.target);
+        }
+        if (registration.status === "updated") {
+          symlinkSync(registration.previousLink, registration.target, platform === "win32" ? "junction" : "dir");
         }
       } catch {
         // 回滚采用尽力而为策略，原始安装错误仍作为主错误返回。
@@ -124,7 +179,7 @@ function registerAgentSkillPlans(plans, platform = process.platform) {
 /**
  * registerAgentSkill 将 npm 包内单项 Skill 以目录链接登记到指定 Agent 宿主目录。
  * 入参：source（string）为包内 Skill 绝对路径；target（string）为宿主 Skill 目标路径；platform（string）为 Node 平台名；hostName（string）为错误提示中的宿主名。
- * 返回值："created" | "existing"，分别表示新建链接或已存在同源链接。
+ * 返回值："created" | "existing" | "updated"，分别表示新建、已存在同源链接或跨安装来源更新。
  */
 function registerAgentSkill(source, target, platform = process.platform, hostName = "Agent") {
   const [registration] = registerAgentSkillPlans([{ source, target, hostName }], platform);
@@ -149,7 +204,7 @@ function buildSkillSetPlans(packageRoot, skillRoot, hostName, hostKey = "") {
 /**
  * registerCodexSkill 保留既有单项登记接口，兼容安装器调用方和发布测试。
  * 入参：source（string）为包内 Skill 绝对路径；target（string）为 Codex Skill 目标路径；platform（string）为 Node 平台名。
- * 返回值："created" | "existing"，含义与 registerAgentSkill 一致。
+ * 返回值："created" | "existing" | "updated"，含义与 registerAgentSkill 一致。
  */
 function registerCodexSkill(source, target, platform = process.platform) {
   return registerAgentSkill(source, target, platform, "Codex");
@@ -158,7 +213,7 @@ function registerCodexSkill(source, target, platform = process.platform) {
 /**
  * registerSkillSet 将职责分离的三项 EveryLine Skill 登记到一个宿主根目录。
  * 入参：packageRoot（string）为 npm 包根目录；skillRoot（string）为宿主 Skill 根目录；platform（string）为 Node 平台名；hostName（string）为宿主名。
- * 返回值：Array<object>，每项包含 name、target 和 created/existing 状态。
+ * 返回值：Array<object>，每项包含 name、target 和 created/existing/updated 状态。
  */
 function registerSkillSet(packageRoot, skillRoot, platform, hostName) {
   return registerAgentSkillPlans(buildSkillSetPlans(packageRoot, skillRoot, hostName), platform)
@@ -226,62 +281,29 @@ function loadInstallState(statePath) {
 }
 
 /**
- * saveInstallState 原子写入不含凭证的首次安装状态，并收紧目录与文件权限。
- * 入参：statePath（string）为目标路径；state（object）为完整状态；platform（string）为 Node 平台名。
- * 返回值：无；文件操作失败时抛出 Error。
+ * ensureFirstInstallState 通过包内原生 CLI 登记安装，和授权完成流程共用文件锁，避免覆盖最新状态。
+ * 入参：packageRoot（string）为包根；environment（NodeJS.ProcessEnv）为环境；userHome（string）为用户目录；platform（string）为平台；registrations（Array<object>）为 Skill 登记结果；hadDeprecatedRegistrations（boolean，可选）为已确认的旧链接；nativeBinary（string，可选）为本次安装的平台二进制。
+ * 返回值：object，包含状态路径和原生 CLI 在锁内计算的安装及更新状态；登记失败时抛出 Error。
  */
-function saveInstallState(statePath, state, platform) {
-  const stateDirectory = dirname(statePath);
-  mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
-  if (platform !== "win32") {
-    chmodSync(stateDirectory, 0o700);
-  }
-  const temporaryPath = `${statePath}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-    if (platform !== "win32") {
-      chmodSync(temporaryPath, 0o600);
-    }
-    renameSync(temporaryPath, statePath);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
-}
-
-/**
- * ensureFirstInstallState 为全新安装建立授权门禁，将无状态的已有安装迁移为更新，并用统一包版本识别后续升级。
- * 入参：packageRoot（string）为包根；environment（NodeJS.ProcessEnv）为环境；userHome（string）为用户目录；platform（string）为平台；registrations（Array<object>）为 Skill 登记结果；hadDeprecatedRegistrations（boolean，可选）表示本轮清理时已确认存在本包旧链接。
- * 返回值：object，包含状态路径及当前 firstInstall/authorizationRequired/nextAction/updated。
- */
-function ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations, hadDeprecatedRegistrations = false) {
+function ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations, hadDeprecatedRegistrations = false, nativeBinary) {
   const statePath = resolveInstallStatePath(environment, userHome);
   const packageData = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
   const installedVersion = String(packageData.version || "");
-  const existing = loadInstallState(statePath);
-  if (existing) {
-    // 只有统一包版本变化才视为更新；同版本重装不会重复触发更新提示。
-    const updated = installedVersion !== "" && installedVersion !== String(existing.installedVersion || "");
-    if (updated) {
-      existing.installedVersion = installedVersion;
-      saveInstallState(statePath, existing, platform);
-    }
-    return { path: statePath, ...existing, updated };
-  }
   // existing 来自写入前的同源预检；旧链接的清理结果同样证明此前已安装，单项 created 不代表首次安装。
-  const previouslyInstalled = hadDeprecatedRegistrations || registrations.some((registration) => registration.status === "existing");
-  if (!previouslyInstalled && !registrations.some((registration) => registration.status === "created")) {
+  const previouslyInstalled = hadDeprecatedRegistrations || registrations.some((registration) => registration.status === "existing" || registration.status === "updated");
+  if (!existsSync(statePath) && !previouslyInstalled && !registrations.some((registration) => registration.status === "created")) {
     return { path: statePath, firstInstall: false, authorizationRequired: false, nextAction: "", updated: false };
   }
-  const state = {
-    schema: installStateSchema,
-    eventId: randomUUID(),
-    installedVersion,
-    firstInstall: !previouslyInstalled,
-    authorizationRequired: !previouslyInstalled,
-    nextAction: previouslyInstalled ? "" : "authorize",
-  };
-  saveInstallState(statePath, state, platform);
-  return { path: statePath, ...state, updated: previouslyInstalled };
+  const binary = nativeBinary || join(packageRoot, "bin", resolvePlatformTarget(platform, process.arch), platform === "win32" ? "everyline-cli.exe" : "everyline-cli");
+  // 直接运行包内二进制，不依赖 PATH 中可能仍为旧版的 CLI；绝对配置目录保证父子进程写入同一文件。
+  const output = execFileSync(binary, [
+    "_record-install", "--installed-version", installedVersion, "--event-id", randomUUID(),
+    `--previously-installed=${previouslyInstalled}`,
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, ...environment, EVERYLINE_CONFIG_DIR: dirname(statePath) },
+  });
+  return { path: statePath, ...JSON.parse(output) };
 }
 
 /**
@@ -347,7 +369,7 @@ function installPackage(options = {}) {
     .map(({ name, target, status }) => ({ name, target, status }));
   const codexSkills = hostSkills("codex");
   const workBuddySkills = hostSkills("workBuddy");
-  const installState = ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations, hadDeprecatedRegistrations);
+  const installState = ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations, hadDeprecatedRegistrations, binary);
   return {
     binary,
     skillTarget: codexSkills[0].target,

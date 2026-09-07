@@ -24,9 +24,11 @@ type rootOptions struct {
 	NoColor  bool
 }
 
-// NewRootCommand 创建完整 Cobra 命令树，并注入运行时依赖。
-// 入参：runtime *Runtime 为存储、HTTP、时钟和 I/O 依赖。
-// 返回值：*cobra.Command，可被应用层执行或测试。
+/*
+NewRootCommand 创建完整 Cobra 命令树，包括 npm 安装器的隐藏状态登记入口。
+入参：runtime *Runtime 为存储、HTTP、时钟和 I/O 依赖。
+返回值：*cobra.Command，可被应用层执行或测试。
+*/
 func NewRootCommand(runtime *Runtime) *cobra.Command {
 	// 帮助命令按业务流程展示，而不是按名称排序；各命令组显式维护自己的顺序。
 	cobra.EnableCommandSorting = false
@@ -96,7 +98,7 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	versionCommand.GroupID = "cli"
 	updateCommand := newUpdateCommand(runtime, options)
 	updateCommand.GroupID = "cli"
-	command.AddCommand(versionCommand, updateCommand)
+	command.AddCommand(versionCommand, updateCommand, newRecordInstallCommand(runtime))
 	return command
 }
 

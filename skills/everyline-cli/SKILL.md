@@ -48,7 +48,11 @@ everyline-cli auth --help
 
 ## 更新完成引导
 
-执行 `updateCommand` 或 npm 统一更新命令后，只有新版本和三项 Skill 都校验成功，或安装器返回 `event=updated` 时，才按以下顺序展示更新结果：
+执行 `updateCommand` 或 npm 统一更新命令后，只有 CLI 版本与当前宿主实际加载的三项 Skill 都校验成功，才按以下顺序展示更新结果。安装器返回 `event=updated` 只证明本次安装发生更新，不代表豆包已导入新版 Skill：
+
+- Codex、WorkBuddy 使用 npm 登记的目录链接时，确认当前任务读取的三项 Skill 指向本次安装包；界面导入的副本需要单独更新。
+- 豆包的 ZIP 是独立导入副本，更新 CLI 不会更新豆包已导入的 Skill。读取当前任务实际加载的三项 `SKILL.md`，与本次发布包中的对应文件逐一比对；仅检查 npm 包内的 Skill 或 CLI 版本不算完成豆包更新。
+- 豆包仍加载旧副本或实际加载内容尚未核实时，明确说明 CLI 已更新、豆包 Skill 待更新或待验证，提供本次发布的三个独立 `*-skill.zip`，引导用户在技能管理中更新对应技能并新建任务启用。外层完整发布 ZIP 和 `.tgz` 不作为豆包 Skill 导入包，不把旧会话记忆当作新版加载结果。
 
 1. 原样展示：`EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。`
 2. 复用更新前已经固定的 Profile 和身份执行一次 `auth status --profile <profile> --as <identity> --output json`；尚未固定时先按下文规则确定，再检查状态。不得根据安装命令退出码、token 文件存在或历史有效期推断授权状态。
@@ -109,6 +113,7 @@ EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、
 ### 点击授权入口
 
 - user 授权只生成一笔授权事务。取得 CLI 返回的完整授权 URL 后，优先使用宿主原生链接按钮或 URL action，按钮文字固定为 `点击授权`，目标为 CLI 返回的完整 URL；宿主没有该组件时固定输出 Markdown `[点击授权](<FULL_AUTHORIZATION_URL>)`。
+- 豆包与 WorkBuddy 的 `auth init` 返回 `status=pending` 时，以 `verification_link_text` 作为按钮或 Markdown 链接文字，该字段固定为 `点击授权`；旧版 CLI 缺少该字段时也使用 `点击授权`。不根据历史对话、旧卡片标题或 URL 页面标题另取文案，回复正文中的链接文字必须逐字一致。
 - `<FULL_AUTHORIZATION_URL>` 必须用本次 CLI 返回值逐字替换，保留从 `https://` 到最后一个 query 参数的全部字符，不省略、解码、重拼或删除参数。只隐藏展示文字，不改动链接目标。
 - 链接生成后由用户主动点击跳转。Agent 不代替用户打开页面，不为生成另一种展示形式重启授权，也不在按钮或 Markdown 链接之外重复输出同一个裸 URL。
 - app 授权没有浏览器授权链接；用户选择 app 后按下方 app ID 与隐藏输入 app secret 的流程执行，不生成虚假的“点击授权”按钮。
@@ -135,12 +140,12 @@ everyline-cli auth status --profile <profile> --as user --output json
 读取 `auth login --help`，执行：
 
 ```bash
-everyline-cli auth login --profile <profile> --as user --no-open-browser
+everyline-cli auth login --profile <profile> --as user --no-open-browser --timeout 3m
 ```
 
 该命令会先读取当前 authorization server metadata 的 `registration_endpoint`，通过该端点动态注册浏览器 public client，再使用返回的 `client_id` 发起 OAuth/PKCE；即使 Profile 中留有旧 `oauth_client_id`，本次显式登录也会用新返回值替换它。Agent 不单独调用注册接口，不猜测注册路径，也不复用或改写输出中的 client ID。浏览器 client 与 `oauth_device_client_id` 分开保存，Codex 登录不覆盖 Device client。
 
-Agent 保持该命令在同一个运行会话中等待 loopback callback，从 CLI 输出取得完整授权 URL，并按“点击授权入口”展示 `[点击授权](<FULL_AUTHORIZATION_URL>)`。用户主动点击并在浏览器完成授权；Agent 不调用系统浏览器打开命令。保持同一次登录会话，不为切换展示方式重启登录。
+Agent 保持该命令在同一个运行会话中等待 loopback callback，从 CLI 输出取得完整授权 URL，并按“点击授权入口”展示 `[点击授权](<FULL_AUTHORIZATION_URL>)`。用户主动点击并在浏览器完成授权；Agent 不调用系统浏览器打开命令。工具执行应保留后台会话，或提供至少三分钟的进程存活时间；取得链接后及时展示，工具短暂返回不代表 CLI 已退出。保持同一次登录会话，不为切换展示方式重启登录。
 
 ### 豆包与 WorkBuddy Device Grant
 
@@ -233,7 +238,7 @@ export PATH=<WORKBUDDY_NODE_BIN>:$PATH && everyline-cli auth login --profile <pr
 - 状态：只展示身份、授权状态、必要到期状态和下一步，不展示凭据来源、存储路径或敏感错误上下文。
 - 退出：只有用户明确要求时执行对应身份的 `auth logout`；先读取帮助，执行后回读状态。
 - 未授权或凭据过期：原身份已经由用户在本次流程中明确选择时继续该身份；否则先完成 user/app 单选再重新授权，成功后只重试原业务操作一次。
-- user Token 明确过期且未刷新成功时，保留当前 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录。Codex 执行一次 `auth login --profile <profile> --as user --no-open-browser` 并保持该进程等待回调；豆包/WorkBuddy 执行一次 `auth init --profile <profile> --as user --output json`，按本 Skill 的授权入口规则展示新返回的完整 URL，待用户在新消息中确认完成后执行一次 `auth complete`。
+- user Token 明确过期且未刷新成功时，保留当前 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录。Codex 执行一次 `auth login --profile <profile> --as user --no-open-browser --timeout 3m`，按上节方式保留进程并及时展示链接；豆包/WorkBuddy 执行一次 `auth init --profile <profile> --as user --output json`，按本 Skill 的授权入口规则展示新返回的完整 URL，待用户在新消息中确认完成后执行一次 `auth complete`。
 - 用户已明确要求“过期后重新生成授权链接手动登录”时直接按该策略恢复，不重复确认重新授权意愿。`auth init` 已有待完成事务时复用原链接；只有该事务明确为 `expired`、`denied` 或 `invalid_grant` 时才执行一次 `auth init --restart`，不因状态复查反复生成链接。新链接使用 CLI 的本次输出，不复用历史 `user_code` 或 OAuth URL。
 - 手动重新授权后执行 `auth status --profile <profile> --as user --output json`，确认 `authenticated=true` 后只恢复原业务步骤一次；授权期间暂停业务操作。仅刷新失败而 Token 尚未到期时沿用 CLI 返回的有效凭证，不提前要求用户重新登录。
 - 身份不匹配：展示当前身份，由用户决定是否切换。

@@ -1396,6 +1396,75 @@ func TestAuthLoginHonorsRootTimeout(t *testing.T) {
 	}
 }
 
+// loginDeadlineTransport 为登录测试检查实际 HTTP 请求所携带的上下文。
+type loginDeadlineTransport func(*http.Request) (*http.Response, error)
+
+/*
+RoundTrip 将请求交给测试回调，避免为超时预算验证等待真实的三分钟。
+入参：request *http.Request 为 CLI 发出的请求。
+返回值：*http.Response 为模拟响应；error 为回调返回的请求错误。
+*/
+func (transport loginDeadlineTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
+/*
+TestUserLoginWaitingBudget 验证浏览器登录默认有三分钟预算，显式 --timeout 仍生效且不改变动态注册预算。
+入参：t *testing.T 为测试上下文。
+返回值：无；登录与注册实际请求的 deadline 不符合预期时测试失败。
+*/
+func TestUserLoginWaitingBudget(t *testing.T) {
+	for _, scenario := range []struct {
+		name                            string
+		flags                           []string
+		loginBudget, registrationBudget time.Duration
+	}{
+		{"default", nil, 3 * time.Minute, 30 * time.Second},
+		{"explicit", []string{"--timeout", "2m"}, 2 * time.Minute, 2 * time.Minute},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			runtime, _, _ := testRuntime(t)
+			stop := errors.New("已检查登录预算")
+			metadataCalls := 0
+			runtime.HTTP = &http.Client{Transport: loginDeadlineTransport(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Path == "/metadata" {
+					metadataCalls++
+				}
+				budget := scenario.registrationBudget
+				if metadataCalls == 2 {
+					budget = scenario.loginBudget
+				}
+				deadline, ok := request.Context().Deadline()
+				remaining := time.Until(deadline)
+				if !ok || remaining > budget || remaining < budget-time.Second {
+					t.Errorf("path=%s remaining=%s，期望预算 %s", request.URL.Path, remaining, budget)
+				}
+				// LoginUserOAuth 的 metadata 与 callback 共用此上下文；检查后立即结束，不占用回调端口。
+				if metadataCalls == 2 {
+					return nil, stop
+				}
+				body := `{"client_id":"fixture-client"}`
+				if request.URL.Path == "/metadata" {
+					body = `{"registration_endpoint":"https://auth.example.com/register","authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"https://auth.example.com/token"}`
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+			})}
+			profile := config.Profile{
+				Name: "test-user", BaseURL: "https://api.example.com", TokenURL: "https://auth.example.com/token",
+				OAuthMetadataURL: "https://auth.example.com/metadata", OAuthBusinessType: "contract-review",
+				OAuthRedirectURL: "http://127.0.0.1:8000/login", DefaultIdentity: config.IdentityUser,
+			}
+			if err := runtime.Profiles.Add(profile); err != nil {
+				t.Fatal(err)
+			}
+			args := append([]string{"auth", "login", "--profile", profile.Name, "--as", "user", "--no-open-browser"}, scenario.flags...)
+			if err := Execute(context.Background(), runtime, args); !errors.Is(err, stop) || metadataCalls != 2 {
+				t.Fatalf("metadataCalls=%d err=%v", metadataCalls, err)
+			}
+		})
+	}
+}
+
 // TestReviewStartDryRun 验证严格 JSON 在无 Profile 时也能完成 dry-run，且不会调用远端。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。

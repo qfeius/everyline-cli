@@ -42,6 +42,8 @@ auth logout [--as app|user]
 
 app 身份的 status 只输出 `appSecretConfigured` 布尔值，不输出 secret 内容；`auth logout` 只删除 token 缓存，不删除已显式保存的 app secret。
 
+`auth init` 返回 `status=pending` 且有完整授权 URL 时，同时返回 `verification_link_text: "点击授权"`。豆包与 WorkBuddy 使用该字段作为按钮或 Markdown 链接文字，以 `verification_uri_complete` 为原样保留全部 query 的链接目标。新建及复用待授权事务的文案一致；已授权、过期、拒绝、兑换中或结果不确定时不返回该展示字段。
+
 ## 审查
 
 命令选择：

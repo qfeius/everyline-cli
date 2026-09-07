@@ -258,6 +258,8 @@ $everyline-cli 使用当前 prod-user Profile 和 user 身份检查 CLI 版本�
 
 user 流程取得 CLI 返回的完整授权 URL 后，优先生成宿主原生链接按钮，按钮文字固定为“点击授权”；没有链接按钮时显示 `[点击授权](<FULL_AUTHORIZATION_URL>)`。链接目标逐字保留 CLI 返回值及全部 query 参数，由用户主动点击，Agent 不自动打开浏览器，也不为改变展示方式创建第二笔授权事务。app 流程没有此链接，继续使用下方隐藏输入 app secret 的方式。
 
+豆包与 WorkBuddy 在 `auth init` 返回 `status=pending` 时，使用 CLI 返回的 `verification_link_text`（固定为“点击授权”）作为链接文字；旧版 CLI 缺少字段时仍使用“点击授权”，不沿用历史会话、旧卡片或网页标题。已授权或终态结果不携带该展示字段。
+
 ### user 身份：推荐用于人工交互验证
 
 默认 test Profile 可由 Agent 自动创建；手工等价命令为：
@@ -545,6 +547,8 @@ npm install -g --allow-scripts=everyline-cli --prefix $EverylineNpmPrefix everyl
 ```
 
 macOS/Linux 使用符号链接、Windows 使用目录联接时，Codex 与 WorkBuddy 的三项 Skill 都指向新 npm 包中的同名目录。豆包更新时重新运行 `make skill-assets`，再分别上传三个新 ZIP。
+
+豆包已导入的 Skill 是独立副本，更新 CLI 或收到安装器 `event=updated` 不代表该副本已更新。应将当前任务实际加载的三项 `SKILL.md` 与本次发布包逐一比对；内容不同或尚未核实时，分别报告 CLI 更新结果与豆包 Skill 待更新/待验证状态。用三个独立 `*-skill.zip` 更新对应技能，再新建任务启用；外层完整发布 ZIP 和 npm `.tgz` 不用于 Skill 导入。只查看 npm 包内文件或 CLI 版本不算验证豆包加载成功。
 
 ### 只从某一个宿主移除 Skill
 

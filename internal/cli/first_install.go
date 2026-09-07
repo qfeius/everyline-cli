@@ -8,6 +8,8 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/build"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
+
+	"github.com/spf13/cobra"
 )
 
 // 首次安装说明能力并提供授权帮助，用户要求登录后再选择授权身份。
@@ -23,6 +25,38 @@ type firstInstallEvent struct {
 	AuthorizationRequired bool   `json:"authorizationRequired"`
 	NextAction            string `json:"nextAction"`
 	Message               string `json:"message"`
+}
+
+/*
+newRecordInstallCommand 为 npm 安装器提供隐藏的本地状态登记入口，复用 CLI 的跨进程锁。
+入参：runtime *Runtime 为安装状态仓库和标准输出。
+返回值：*cobra.Command，仅输出安装状态与 updated 标记，不进行授权或网络请求。
+*/
+func newRecordInstallCommand(runtime *Runtime) *cobra.Command {
+	var version, eventID string
+	var previouslyInstalled bool
+	command := &cobra.Command{
+		Use: "_record-install", Hidden: true, GroupID: "cli", Args: cobra.NoArgs,
+		// 安装器在锁内处理状态；不提前输出首次安装事件或检查业务门禁。
+		PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+		RunE: func(*cobra.Command, []string) error {
+			if runtime.InstallState == nil {
+				return fmt.Errorf("当前运行时缺少安装状态仓库")
+			}
+			state, updated, err := runtime.InstallState.RecordInstallation(version, eventID, previouslyInstalled)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(runtime.Output).Encode(struct {
+				config.InstallState
+				Updated bool `json:"updated"`
+			}{state, updated})
+		},
+	}
+	command.Flags().StringVar(&version, "installed-version", "", "npm 包版本")
+	command.Flags().StringVar(&eventID, "event-id", "", "候选安装事件 ID")
+	command.Flags().BoolVar(&previouslyInstalled, "previously-installed", false, "已存在旧 Skill 登记")
+	return command
 }
 
 // pendingFirstInstallAuthorization 读取首次安装授权门禁；旧版本没有状态文件时保持兼容。
