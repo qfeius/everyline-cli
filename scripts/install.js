@@ -23,10 +23,10 @@ const { resolvePlatformTarget } = require("./platform");
 const skillNames = ["everyline-cli", "everyline-review", "everyline-review-config"];
 const deprecatedSkillNames = ["everyline-shared"];
 const installStateSchema = "everyline.install-state.v1";
-// 安装提示按首次安装、更新完成及更新后的真实授权状态拆分，供人类输出和 Agent 事件复用。
-const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
+// 安装提示与 Agent 事件共用文案，首次授权先收集 user/app 选择，再进入对应登录方式。
+const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。";
 const updateMessage = "EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。";
-const authorizationRequiredMessage = "使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
+const authorizationRequiredMessage = "使用前需要先完成账号授权。";
 const authorizedMessage = "当前已存在生效授权，可直接调用cli能力。";
 
 /**
@@ -249,11 +249,11 @@ function saveInstallState(statePath, state, platform) {
 }
 
 /**
- * ensureFirstInstallState 在首次创建 Agent Skill 时建立授权门禁，并用统一包版本识别真实升级。
- * 入参：packageRoot（string）为包根；environment（NodeJS.ProcessEnv）为环境；userHome（string）为用户目录；platform（string）为平台；registrations（Array<object>）为 Skill 登记结果。
+ * ensureFirstInstallState 为全新安装建立授权门禁，将无状态的已有安装迁移为更新，并用统一包版本识别后续升级。
+ * 入参：packageRoot（string）为包根；environment（NodeJS.ProcessEnv）为环境；userHome（string）为用户目录；platform（string）为平台；registrations（Array<object>）为 Skill 登记结果；hadDeprecatedRegistrations（boolean，可选）表示本轮清理时已确认存在本包旧链接。
  * 返回值：object，包含状态路径及当前 firstInstall/authorizationRequired/nextAction/updated。
  */
-function ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations) {
+function ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations, hadDeprecatedRegistrations = false) {
   const statePath = resolveInstallStatePath(environment, userHome);
   const packageData = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
   const installedVersion = String(packageData.version || "");
@@ -267,19 +267,21 @@ function ensureFirstInstallState(packageRoot, environment, userHome, platform, r
     }
     return { path: statePath, ...existing, updated };
   }
-  if (!registrations.some((registration) => registration.status === "created")) {
+  // existing 来自写入前的同源预检；旧链接的清理结果同样证明此前已安装，单项 created 不代表首次安装。
+  const previouslyInstalled = hadDeprecatedRegistrations || registrations.some((registration) => registration.status === "existing");
+  if (!previouslyInstalled && !registrations.some((registration) => registration.status === "created")) {
     return { path: statePath, firstInstall: false, authorizationRequired: false, nextAction: "", updated: false };
   }
   const state = {
     schema: installStateSchema,
     eventId: randomUUID(),
     installedVersion,
-    firstInstall: true,
-    authorizationRequired: true,
-    nextAction: "authorize",
+    firstInstall: !previouslyInstalled,
+    authorizationRequired: !previouslyInstalled,
+    nextAction: previouslyInstalled ? "" : "authorize",
   };
   saveInstallState(statePath, state, platform);
-  return { path: statePath, ...state, updated: false };
+  return { path: statePath, ...state, updated: previouslyInstalled };
 }
 
 /**
@@ -331,16 +333,21 @@ function installPackage(options = {}) {
     installedSkillRoots.push(workBuddySkillRoot);
   }
   const registrations = registerAgentSkillPlans(plans, platform);
+  // 保留清理时校验过的同源旧链接证据，避免源目录已删除的旧安装被当成首次安装。
+  let hadDeprecatedRegistrations = false;
   // 新三项 Skill 全部登记成功后，再移除本包遗留的 everyline-shared 链接。
   for (const skillRoot of installedSkillRoots) {
-    removeDeprecatedSkillRegistrations(packageRoot, skillRoot);
+    const removed = removeDeprecatedSkillRegistrations(packageRoot, skillRoot);
+    if (removed.length > 0) {
+      hadDeprecatedRegistrations = true;
+    }
   }
   const hostSkills = (hostKey) => registrations
     .filter((registration) => registration.hostKey === hostKey)
     .map(({ name, target, status }) => ({ name, target, status }));
   const codexSkills = hostSkills("codex");
   const workBuddySkills = hostSkills("workBuddy");
-  const installState = ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations);
+  const installState = ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations, hadDeprecatedRegistrations);
   return {
     binary,
     skillTarget: codexSkills[0].target,

@@ -183,9 +183,11 @@ func TestVersionReportsLatestStateAndUpdateCommand(t *testing.T) {
 	}
 }
 
-// TestFirstInstallStatusRejectsExistingToken 验证首次安装期间旧 dev token 不再被报告为已授权。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；状态仍信任旧 token 或缺少机器可读下一步时通过 t.Fatal 报告。
+/*
+TestFirstInstallStatusRejectsExistingToken 验证首次安装拒绝旧 token，并通过事件引导用户先选择授权方式。
+入参：t *testing.T 为测试上下文。
+返回值：无；状态仍信任旧 token 或缺少正确的授权引导时通过 t.Fatal 报告。
+*/
 func TestFirstInstallStatusRejectsExistingToken(t *testing.T) {
 	runtime, stdout, stderr := testRuntime(t)
 	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultIdentity: config.IdentityUser, DefaultOutput: "json"}
@@ -208,7 +210,7 @@ func TestFirstInstallStatusRejectsExistingToken(t *testing.T) {
 			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
 		}
 	}
-	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) || !strings.Contains(stderr.String(), `"recommendedSkill":"everyline-cli"`) || !strings.Contains(stderr.String(), `"message":"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。"`) {
+	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) || !strings.Contains(stderr.String(), `"recommendedSkill":"everyline-cli"`) || !strings.Contains(stderr.String(), `"message":"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。"`) {
 		t.Fatalf("stderr=%s，缺少首次安装 NDJSON 事件", stderr.String())
 	}
 	stdout.Reset()

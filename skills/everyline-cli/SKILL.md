@@ -11,6 +11,8 @@ metadata:
 
 为 `everyline-review` 和 `everyline-review-config` 提供唯一的安装检查、Profile、身份和鉴权恢复流程。本 Skill 不发起审查，也不修改清单、规则或规则分组。
 
+发起授权登录的第一步是让客户选择 `user（个人账号授权）` 或 `app（应用授权）`，再匹配或创建 Profile、查询对应身份状态并登录。同一次授权中用户已明确选择身份时直接复用；首次安装、重新登录和业务流程转入授权均遵循此顺序。
+
 ## 路由边界
 
 | 用户目标 | 使用的 Skill |
@@ -23,6 +25,8 @@ metadata:
 用户已经明确审查或配置管理目标时直接进入对应业务 Skill，并由该业务 Skill 保持流程负责人身份；遇到配置或鉴权问题时，本 Skill 只处理相关接入步骤，成功后立即回到原业务步骤，不重复询问已经确认的输入。一次审查中选择已有清单仍属于 `everyline-review`。
 
 ## 执行前检查
+
+宿主按当前对话平台判断。豆包的“本地电脑”模式仍属于豆包，和 WorkBuddy 一样使用 Device Grant；macOS、Windows、本机 CLI、浏览器可访问 loopback 或环境变量缺失都不意味着应进入 Codex 本地 OAuth。用户身份确定后，先按下文固定 Device 会话，再执行身份相关的配置、状态查询和业务命令。
 
 每个新会话第一次调用时执行：
 
@@ -48,7 +52,7 @@ everyline-cli auth --help
 
 1. 原样展示：`EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。`
 2. 复用更新前已经固定的 Profile 和身份执行一次 `auth status --profile <profile> --as <identity> --output json`；尚未固定时先按下文规则确定，再检查状态。不得根据安装命令退出码、token 文件存在或历史有效期推断授权状态。
-3. `authenticated=false` 时原样展示：`使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。` 展示后等待用户确认，再按当前宿主发起授权。
+3. `authenticated=false` 时原样展示：`使用前需要先完成账号授权。` 用户尚未要求登录时等待用户确认；已要求登录时复用本次明确选择的身份，按当前宿主发起授权。
 4. `authenticated=true` 时原样展示：`当前已存在生效授权，可直接调用cli能力。`
 
 `auth status` 调用本身失败时报告真实错误，授权状态保持未知，不展示上述有效或失效分支。每次更新只展示一次更新完成文案和一个授权状态分支。
@@ -57,9 +61,9 @@ everyline-cli auth --help
 
 只在 Agent 本会话刚完成安装、用户明确表示首次使用，或 CLI 结构化输出明确要求首次配置时，原样展示下面这一段一次，不自行增删、改写或拆分：
 
-EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。
+EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。
 
-仅要求安装 CLI/Skill 不等价于要求立即发起授权；展示后等待用户确认。用户在同一请求中已经明确要求安装后继续授权时，展示文案后按当前宿主进入对应授权流程。用户已经表达业务目标时保留该目标，授权成功后直接恢复，不重复询问。
+仅要求安装 CLI/Skill 不等价于要求立即发起授权；展示后等待用户选择授权方式。用户在同一请求中已经明确要求安装后继续授权时，展示文案后先完成下方身份单选，再按当前宿主进入对应授权流程；已明确选择身份时直接复用。用户已经表达业务目标时保留该目标，授权成功后直接恢复，不重复询问。
 
 未登录、无历史任务或未找到默认身份不单独作为首次安装信号。
 
@@ -67,9 +71,9 @@ EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、
 
 当 `version` 返回 `firstInstall=true`、`authorizationRequired=true`，或 stderr 返回 `event=first_install` 时：
 
-1. 先确定 Profile 和 `user/app` 身份；可复用已有非敏感 Profile 配置，但不得把旧 token 的本地有效期当作本次授权完成。
+1. 先让用户选择 `user/app` 身份，再确定 Profile；可复用已有非敏感 Profile 配置，但不得把旧 token 的本地有效期当作本次授权完成。
 2. 调用 `auth status` 时应看到 `authenticated=false`、`source=first_install` 和机器可读的 `nextAction`；按当前宿主执行下方授权流程。
-3. Codex 本地 user 必须执行一次新的 `auth login`；豆包/WorkBuddy user 必须执行 `auth init --restart` 并在用户确认后执行一次 `auth complete`；app 必须执行一次新的 `auth login --as app`。WorkBuddy app 登录由用户在自己的终端按下方命令完成。
+3. Codex 本地 user 必须执行一次新的 `auth login`；豆包/WorkBuddy user 必须只执行一次 `auth init --restart` 并在用户确认后执行一次 `auth complete`；app 必须执行一次新的 `auth login --as app`。同一 `eventId` 的首次安装事件在授权完成前可能重放，重放时保留已经生成的 Device 事务和授权入口，不再次执行 `auth init`。WorkBuddy app 登录由用户在自己的终端按下方命令完成。
 4. 不先执行 `auth logout`，也不手工删除 `tokens.json` 或 Device 凭证；新授权成功后由 CLI 覆盖对应凭证并原子解除门禁。
 5. 授权成功后重新执行 `auth status` 和 `version --output json`。只有 `authenticated=true` 且 `authorizationRequired=false` 才恢复原业务步骤。
 
@@ -77,19 +81,19 @@ EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、
 
 ## Profile 与身份
 
-1. 用户在本次请求中明确指定 Profile 或环境时，以该选择为准；指定 Profile 先执行 `everyline-cli config show <profile> --output json` 校验。
-2. 用户未指定 Profile 和环境时，Codex、WorkBuddy、豆包 AgentKit/Skills Sandbox 与豆包普通工作任务统一默认 `test` 环境。执行 `config list --output json`，只复用连接地址属于 `test` 预设且身份兼容的 Profile；当前 Profile 是 dev、blue 或 prod 时不得继承它。
-3. test 环境没有可复用 Profile 时，先读取 `config add --help`：user 身份创建 `test-user`（`config add test-user --env test --default-identity user --default-output json`）；app 身份取得非敏感 app ID 后创建 `test-app`（`config add test-app --env test --default-identity app --app-id <app-id> --default-output json`）。本规则已获得默认 test 的配置授权，不追加环境确认；同名 Profile 已存在但并非 test 时不覆盖，向用户报告名称冲突并请其显式选择 Profile。
-4. 发起任何授权事务前必须先固定 `user/app` 身份。用户在本次请求中已经明确身份时直接使用；尚未明确时必须先让用户单选 `user（个人账号授权）` 或 `app（应用授权）`，收到选择前不执行身份相关的 `auth status`、`auth login`、`auth init` 或 app secret 输入。多个 test Profile 同时匹配时，user 按 `test-user`、app 按 `test-app` 优先；仍不唯一时展示真实候选项让用户选择。
+1. 发起任何授权事务前必须先固定 `user/app` 身份。用户在本次请求中或同一次授权交互中已经明确身份时直接使用；尚未明确时必须先让用户单选 `user（个人账号授权）` 或 `app（应用授权）`。收到选择前不创建身份相关 Profile、不索取 app ID 或 app secret，也不执行 `auth status`、`auth login`、`auth init` 或 `auth complete`。
+2. Profile 名称、`default_identity`、唯一候选、历史 token、CLI 默认身份及 `nextAction` 均不代表客户选择；即使帮助或结构化输出带有默认身份，也先完成单选。笼统回复“开始授权”“继续登录”或“好的”只表达登录意愿，不视为选择 user 或 app。
+3. 身份确定后，用户在本次请求中明确指定 Profile 或环境时，以该选择为准；指定 Profile 先执行 `everyline-cli config show <profile> --output json` 校验。用户未指定 Profile 和环境时，Codex、WorkBuddy、豆包 AgentKit/Skills Sandbox 与豆包普通工作任务统一默认 `test` 环境。执行 `config list --output json`，只复用连接地址属于 `test` 预设且身份兼容的 Profile；当前 Profile 是 dev、blue 或 prod 时不得继承它。多个 test Profile 同时匹配时，user 按 `test-user`、app 按 `test-app` 优先；仍不唯一时展示真实候选项让用户选择。
+4. test 环境没有可复用 Profile 时，先读取 `config add --help`：user 身份创建 `test-user`（`config add test-user --env test --default-identity user --default-output json`）；app 身份取得非敏感 app ID 后创建 `test-app`（`config add test-app --env test --default-identity app --app-id <app-id> --default-output json`）。本规则已获得默认 test 的配置授权，不追加环境确认；同名 Profile 已存在但并非 test 时不覆盖，向用户报告名称冲突并请其显式选择 Profile。
 5. 本次会话后续每条命令都显式携带 `--profile <profile> --as <identity>`，不依赖当前 Profile 或 Profile 默认身份。
 6. 宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant；三者默认环境始终是 test。
 7. 不因权限、资源可见性或一种身份授权失败而自动切换另一种身份，也不自动改到 dev、blue 或 prod。
 
 ### 宿主结构化选项卡
 
-- 所有 Agent 发起授权时，用户尚未指定 `user/app` 就必须先完成身份选择。WorkBuddy 固定调用 `AskUserQuestion` 并设置 `multiSelect=false`；Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）时使用互斥单选选项卡；豆包在宿主提供原生单选组件时使用该组件。用户已经明确身份时直接采用，不重复展示。
+- 所有 Agent 发起授权时，用户尚未指定 `user/app` 就必须先完成身份选择。问题固定为“请选择授权方式”，选项仅为 `user（个人账号授权）` 和 `app（应用授权）`。WorkBuddy 固定调用 `AskUserQuestion` 并设置 `multiSelect=false`；Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）时使用互斥单选选项卡，当前模式支持 `request_user_input_async` 时也可使用；豆包在宿主提供原生单选组件时使用该组件。用户已经明确身份时直接采用，不重复展示。
 - 宿主没有可用的原生单选组件时，固定展示：`1. user（个人账号授权）`、`2. app（应用授权）`，并要求用户回复 `1/2` 或 `user/app`。收到有效选择前结束当前轮，不得同时查询两种身份或提前发起任一授权事务。
-- 只有真实候选数量和单选语义符合当前组件限制时使用选项卡。当前模式没有该工具、候选超过容量或缺少可靠推荐依据时使用简短编号文字，不为展示选项卡切换协作模式，也不虚构推荐项。
+- 只有真实候选数量和单选语义符合当前组件限制时使用选项卡。当前模式没有该工具、候选超过容量或缺少可靠推荐依据时使用简短编号文字，不为展示选项卡切换协作模式，也不虚构推荐项。组件预选、空回复、取消或等待超时均不算客户选择；身份未确定时继续等待有效单选。
 - 选项卡只承载非敏感选择；app secret 仍只在用户直接操作的终端隐藏输入，不进入选项标题、说明、自由输入或对话。
 
 ### 授权登录详情入口
@@ -101,7 +105,7 @@ EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、
 
 ## user 授权
 
-先执行：
+豆包与 WorkBuddy 先按“固定 Device 会话”准备运行时，再执行；这里及后文的每条 CLI 命令都必须携带已固定的会话变量：
 
 ```bash
 everyline-cli auth status --profile <profile> --as user --output json
@@ -113,7 +117,7 @@ everyline-cli auth status --profile <profile> --as user --output json
 | --- | --- | --- |
 | Codex 本地任务 | `auth login` OAuth/PKCE | CLI 与浏览器共享本机 loopback |
 | 豆包 AgentKit / Skills Sandbox | `auth init` + `auth complete` Device Grant | `SKILL_SESSION_WORKSPACE` 和平台注入的 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` |
-| 豆包普通工作任务 | `auth init` + `auth complete` Device Grant | 稳定的 `SESSION_ID`，并始终从任务初始工作目录执行 |
+| 豆包普通工作任务（含“本地电脑”模式） | `auth init` + `auth complete` Device Grant | 首次 `auth status` 前固定 `SESSION_ID`，宿主缺失时只生成一次；每条命令显式传入并从同一初始工作目录执行 |
 | WorkBuddy | `auth init` + `auth complete` Device Grant | 同一授权事务内固定的 `CODEBUDDY_SESSION_ID` 和系统凭证库 |
 
 ### Codex 本地 OAuth
@@ -130,11 +134,26 @@ Agent 保持该命令在同一个运行会话中等待 loopback callback，从 C
 
 ### 豆包与 WorkBuddy Device Grant
 
-豆包沙箱与用户本机浏览器不共享网络命名空间，`127.0.0.1:8000` 指向沙箱自身。豆包和 WorkBuddy Device 运行时不得执行 `auth login --profile <profile> --as user`，也不得等待 loopback callback。
+豆包沙箱与用户本机浏览器不共享网络命名空间；用户浏览器中的 `127.0.0.1:8000` 指向用户本机。豆包和 WorkBuddy Device 运行时不得执行 `auth login --profile <profile> --as user`，也不得等待 loopback callback。豆包“本地电脑”模式同样遵循此规则，不因 CLI 与浏览器都在本机而切换到 OAuth/PKCE。
 
 固定流程为：CLI 执行 `auth init` → 将完整 HTTPS 授权链接生成为“授权登录详情”入口 → 用户主动点击并在任意浏览器批准 → 用户在新消息中确认“已授权” → CLI 执行一次 `auth complete` 查询账号服务并保存凭证。
 
-WorkBuddy 在第一次 `auth init` 前取得并冻结一个非敏感的 `CODEBUDDY_SESSION_ID`：优先记录宿主已有的稳定值；宿主未提供时只生成一次，并把该值保留为当前授权事务状态。`auth init`、`auth complete` 和随后的 `auth status` 都显式复用完全相同的值，不使用每次命令都会变化的通用 `SESSION_ID`。等价调用形式如下，其中两处 `<same-session-id>` 必须逐字相同：
+### 固定 Device 会话
+
+豆包普通工作任务（含“本地电脑”模式）在首次 `auth status` 前固定 `SESSION_ID` 和任务初始工作目录：优先复用宿主已有的稳定 `SESSION_ID`；宿主未提供时只生成一次 UUID，保存为当前任务上下文。不要每次命令都重新生成，也不要仅在一次 shell 中 `export` 后假定后续工具调用会继承。此后 `config`、`auth status`、`auth init`、`auth complete`、退出及所有 user 业务命令都显式传入同一 `SESSION_ID`，工具的工作目录始终设置为同一初始目录。业务 Skill 恢复执行时也必须携带这两个值。
+
+```bash
+# 各次工具调用的工作目录均为已记录的任务初始目录；占位符复用同一个已生成值。
+SESSION_ID=<same-session-id> everyline-cli auth status --profile <profile> --as user --output json
+SESSION_ID=<same-session-id> everyline-cli auth init --profile <profile> --as user --output json
+# 用户在新消息中确认已授权后：
+SESSION_ID=<same-session-id> everyline-cli auth complete --profile <profile> --as user --output json
+SESSION_ID=<same-session-id> everyline-cli auth status --profile <profile> --as user --output json
+```
+
+豆包 AgentKit / Skills Sandbox 已提供 `SKILL_SESSION_WORKSPACE` 时，保留平台工作区与注入密钥，不用生成的 `SESSION_ID` 替换该模式。运行时缺失提示应通过补齐并复用会话变量解决；豆包不得照抄缺少会话变量时返回的本地 `auth login` 建议。`source=cache` 的历史本机 OAuth 状态不作为豆包 Device 授权成功依据；准备好运行时后以 `source=device` 查询当前会话状态。
+
+WorkBuddy 在第一次 `auth init` 前取得并冻结一个非敏感的 `CODEBUDDY_SESSION_ID`：优先记录宿主已有的稳定值；宿主未提供时只生成一次，并把该值保留为当前授权事务状态。首次 `auth status` 之前也必须完成此准备，避免查询到本地 OAuth 缓存。`auth init`、`auth complete` 和随后的 `auth status` 都显式复用完全相同的值，不使用每次命令都会变化的通用 `SESSION_ID`。等价调用形式如下，其中两处 `<same-session-id>` 必须逐字相同：
 
 ```bash
 CODEBUDDY_SESSION_ID=<same-session-id> everyline-cli auth init --profile <profile> --as user --output json
@@ -142,6 +161,10 @@ CODEBUDDY_SESSION_ID=<same-session-id> everyline-cli auth complete --profile <pr
 ```
 
 如果 `auth complete` 返回“没有待完成的 Device 授权”，先恢复 `auth init` 使用的原 `CODEBUDDY_SESSION_ID` 并重试一次 `auth complete`；这次本地存储未命中的失败没有请求 token endpoint，不计作重复兑换。不得因此直接执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并且用户同意重新授权时，才开始新事务；原标识已经丢失时先如实说明事务状态丢失并等待用户决定。
+
+豆包遇到同样的本地事务未命中时，先恢复原 `SESSION_ID` 和初始工作目录，再重试一次 `auth complete`，遵循相同的新事务规则。
+
+### 发起与完成 Device 授权
 
 dev/test/prod 固定使用 `business_type=contract-review`、`scope=contract-review:full` 和对应开放平台 resource。Codex `auth login` 按上节规则动态注册浏览器 client，并始终走 OAuth Authorization Code + PKCE。豆包和 WorkBuddy 始终执行 `auth init`/`auth complete` Device Grant；dev/test 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，`auth init` 不动态注册 client，也不复用 Codex 浏览器 client。prod、blue 或自定义环境使用 Device Grant 时，Profile 必须配置平台确认的 `oauth_device_client_id`。两类 client 分开使用，Agent 不在两种授权方式之间复制 client ID。
 
@@ -158,6 +181,7 @@ everyline-cli auth init --profile <profile> --as user --output json
 ```
 
 - 将 `verification_uri_complete` 作为不可拆分的完整 HTTPS URL，按“授权登录详情入口”生成 `[授权登录详情](<verification_uri_complete>)`；展示文字可以隐藏 URL，但链接目标必须逐字一致，不省略、拆分、解码或重拼 query。
+- `auth init` 返回 `reused=true` 表示复用了已经存在的 Device 事务；同一会话已经展示过该链接时不再次生成按钮、链接或浏览器页面。首次安装事件重放、状态复查或工具重试都不得触发第二次 `auth init --restart`。
 - 展示链接后结束当前轮次。只有用户在新消息中明确表示已完成浏览器授权，才执行一次 `auth complete`。
 - `pending` 表示仍待用户完成；结束本轮，不持续轮询。
 - `succeeded` 后重新执行 `auth status`，再继续被中断的业务步骤一次。
@@ -169,7 +193,7 @@ Device code、access token、refresh token 和加密密钥不进入对话、日�
 
 ## app 授权
 
-先执行 `auth status --profile <profile> --as app --output json`。未授权时读取 `auth login --help`，只采用帮助中真实存在的安全入口：
+用户已选择 app 后，先按下方顺序固定 app ID 和 Profile，再执行 `auth status --profile <profile> --as app --output json`。未授权时读取 `auth login --help`，只采用帮助中真实存在的安全入口：
 
 - app 授权先取得并固定非敏感的 app ID，再进入 app secret 输入；两个连续阶段的顺序不得颠倒。当前消息和目标 Profile 都没有 app ID 时，只询问一次 app ID；该轮不同时请求 app secret。已有唯一 app ID 时直接复用，不重复询问。
 - 取得 app ID 后先创建或校验目标 Profile，再查询 app 授权状态。只有 `authenticated=false` 时才发起一次 `auth login --as app`；同一次登录事务只输入一次 app secret。登录命令结束后只执行一次 `auth status` 验证，不再次启动登录或要求第二次输入 secret。
@@ -198,7 +222,7 @@ export PATH=<WORKBUDDY_NODE_BIN>:$PATH && everyline-cli auth login --profile <pr
 
 - 状态：只展示身份、授权状态、必要到期状态和下一步，不展示凭据来源、存储路径或敏感错误上下文。
 - 退出：只有用户明确要求时执行对应身份的 `auth logout`；先读取帮助，执行后回读状态。
-- 未授权或凭据过期：对原身份重新授权，成功后只重试原业务操作一次。
+- 未授权或凭据过期：原身份已经由用户在本次流程中明确选择时继续该身份；否则先完成 user/app 单选再重新授权，成功后只重试原业务操作一次。
 - 身份不匹配：展示当前身份，由用户决定是否切换。
 - 权限不足：保留 CLI 返回的缺失范围和 request ID，不改换身份或绕过检查。
 - 网络或服务错误：保留真实错误码和 request ID，不包装为授权成功。

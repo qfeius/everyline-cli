@@ -38,9 +38,11 @@ func TestHelpExplainsReviewTaskResultIsLocalOrchestration(t *testing.T) {
 	}
 }
 
-// TestEverylineSkillReadinessMatchesLiveHelp 验证交互 Skill 的就绪门、调用上下文和 dry-run 顺序与当前 CLI 能力一致。
-// 入参：t *testing.T 为 Go 测试上下文。
-// 返回值：无；Skill 缺少真实帮助命令、显式 Profile/身份或 dry-run 门时通过测试失败报告差异。
+/*
+TestEverylineSkillReadinessMatchesLiveHelp 验证交互 Skill 的授权引导、调用上下文和 dry-run 顺序与当前 CLI 能力一致。
+入参：t *testing.T 为 Go 测试上下文。
+返回值：无；Skill 缺少先选身份的安装提示、真实帮助命令或 dry-run 门时通过测试失败报告差异。
+*/
 func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 	skillContent, err := os.ReadFile("../../skills/everyline-cli/SKILL.md")
 	if err != nil {
@@ -151,7 +153,7 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 		"`firstInstall=true` 且 `authorizationRequired=true`",
 		"旧 dev token 不作为本次安装已授权依据",
 		"`auth init --restart`",
-		"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。",
+		"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。",
 		"EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。",
 		"当前已存在生效授权，可直接调用cli能力。",
 		"app 授权先取得并固定非敏感的 app ID，再进入 app secret 输入",
@@ -210,6 +212,11 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"Codex 本地任务",
 		"豆包 AgentKit / Skills Sandbox",
 		"豆包普通工作任务",
+		"豆包的“本地电脑”模式仍属于豆包",
+		"在首次 `auth status` 前固定 `SESSION_ID` 和任务初始工作目录",
+		"SESSION_ID=<same-session-id> everyline-cli auth init",
+		"SESSION_ID=<same-session-id> everyline-cli auth complete",
+		"运行时缺失提示应通过补齐并复用会话变量解决",
 		"WorkBuddy",
 		"auth init --profile <profile> --as user --output json",
 		"auth complete",
@@ -858,7 +865,7 @@ func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 			args: []string{"auth", "login", "--help"},
 			expected: []string{
 				"everyline-cli auth login [flags]",
-				"豆包/WorkBuddy 沙箱使用 auth init/complete Device Grant",
+				"豆包/WorkBuddy（含本地电脑）使用 auth init/complete Device Grant",
 				"读取 OAuth metadata 的 registration_endpoint",
 				"--app-id string",
 				"--app-secret string",
@@ -879,6 +886,7 @@ func TestHelpRendersCommandSyntaxAndNotes(t *testing.T) {
 				"独立 Device client",
 				"不动态注册",
 				"不复用 Codex 浏览器 client",
+				"豆包本地电脑同样使用 Device Grant",
 			},
 		},
 	}

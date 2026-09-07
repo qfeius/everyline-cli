@@ -26,8 +26,8 @@ everyline-cli version
 
 | 使用场景 | 推荐身份 | 授权方式 |
 |---|---|---|
-| Codex、人工用户、本地交互 | user | 浏览器 OAuth 授权 |
-| 豆包、WorkBuddy 远端沙箱 | user | `auth init` / `auth complete` Device Grant |
+| Codex、人工终端交互 | user | 浏览器 OAuth 授权 |
+| 豆包（含本地电脑）、WorkBuddy | user | `auth init` / `auth complete` Device Grant |
 | CI、定时任务、无浏览器 Agent | app | app-id + app secret |
 
 user 身份不需要 app-id；app 身份必须配置 app-id。建议为不同身份创建不同 Profile，并在每次调用时显式指定 --profile 和 --as。
@@ -53,7 +53,7 @@ everyline-cli auth login \
 
 CLI 会先读取 OAuth metadata 的 `registration_endpoint` 并动态注册浏览器 public client，再打开浏览器完成用户登录，通过本机 loopback 回调接收授权结果并缓存 user token。每次显式 `auth login --as user` 都使用本次注册返回的 client ID，历史 Profile 中的旧值不会继续参与登录。auth login 不使用 --env；环境在 config add 时指定。
 
-豆包或 WorkBuddy 沙箱统一使用 Device Grant；dev/test Profile 已内置独立 Device client：
+豆包（含本地电脑）和 WorkBuddy 统一使用 Device Grant；dev/test Profile 已内置独立 Device client。执行下面的命令前先按后文准备并固定对应宿主的会话变量：
 
 ~~~bash
 everyline-cli config add test-user --env test --default-identity user
@@ -65,6 +65,8 @@ everyline-cli auth complete --profile test-user --as user --output json
 `auth init` 不监听 `127.0.0.1`，不动态注册 client，也不复用 Codex 浏览器 client。dev/test 预设使用独立 Device client `zscli_c77221e810ce3977`；prod 或自定义环境使用 Device Grant 时，通过 `--oauth-device-client-id` 配置平台确认的 client。dev/test/prod 均不内置浏览器 client ID；Codex 本地每次显式 user 登录会调用 metadata 声明的 `registration_endpoint`，保存返回值后启动 OAuth Authorization Code + PKCE，且不覆盖 Device client。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
 
 WorkBuddy 必须在第一次 `auth init` 前固定一个 `CODEBUDDY_SESSION_ID`，并在 `auth init`、用户回复“已授权”后的 `auth complete` 以及后续 `auth status` 中复用同一值。`auth complete` 本地提示没有待完成事务时，先用原值重试 `auth complete`；只有服务端状态明确为 `denied`、`expired` 或 `invalid_grant` 后才开始新的授权事务，避免让用户重复打开授权链接。
+
+豆包普通工作任务（含“本地电脑”模式）在首次 `auth status` 前固定 `SESSION_ID` 和初始工作目录；宿主未提供标识时由 Agent 只生成一次 UUID，后续每条 CLI 命令都显式添加 `SESSION_ID=<same-session-id>`，并使用同一工作目录。豆包本地模式不使用 `auth login --as user`。Device 会话缺少凭证时返回未授权，不继承本机旧 OAuth token；找不到待完成事务时先恢复原标识和工作目录。
 
 检查授权状态：
 

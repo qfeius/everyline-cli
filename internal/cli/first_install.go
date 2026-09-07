@@ -9,7 +9,8 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 )
 
-const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。"
+// 首次安装先提示客户选择授权身份，避免 Agent 在选择前生成 user 授权链接。
+const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。"
 
 // firstInstallEvent 是首次安装期间写入 stderr 的稳定 NDJSON 事件。
 type firstInstallEvent struct {

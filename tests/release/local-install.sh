@@ -73,6 +73,54 @@ global_output=$(EVERYLINE_CONFIG_DIR="$global_config_dir" "$global_prefix/bin/ev
 printf '%s' "$global_output" | grep -F '"firstInstall": true' >/dev/null
 printf '%s' "$global_output" | grep -F '"authorizationRequired": true' >/dev/null
 
+# 回退隔离夹具为旧安装器留下的布局：没有状态文件，只有旧入口及两项业务 Skill，保留 app/user 凭证。
+node - "$global_config_dir" "$codex_skills_dir" "$workbuddy_skills_dir" "$global_package_root/everyline-cli" <<'NODE'
+const { join } = require("node:path");
+const { unlinkSync, symlinkSync, writeFileSync } = require("node:fs");
+const [configDirectory, codexRoot, workBuddyRoot, packageRoot] = process.argv.slice(2);
+unlinkSync(join(configDirectory, "install-state.json"));
+for (const skillRoot of [codexRoot, workBuddyRoot]) {
+  unlinkSync(join(skillRoot, "everyline-cli"));
+  symlinkSync(join(packageRoot, "skills", "everyline-shared"), join(skillRoot, "everyline-shared"), "dir");
+}
+writeFileSync(join(configDirectory, "config.json"), JSON.stringify({
+  current_profile: "migration-test",
+  profiles: {
+    "migration-test": {
+      name: "migration-test", base_url: "https://api.example.com", token_url: "https://api.example.com/token",
+      app_id: "fixture-app", default_identity: "user", default_output: "json",
+    },
+  },
+}));
+writeFileSync(join(configDirectory, "tokens.json"), JSON.stringify({
+  "migration-test": { access_token: "fixture-app-token", expires_at: new Date(Date.now() + 3600000).toISOString() },
+  "migration-test::user": { access_token: "fixture-user-token", expires_at: new Date(Date.now() + 3600000).toISOString() },
+}));
+NODE
+# 执行真实 postinstall，并由原生 CLI 读取其迁移状态，覆盖 Node 与 Go 的共享状态协议。
+npm_config_global=true EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" node "$global_package_root/everyline-cli/scripts/install.js" > "$temporary_dir/upgrade.txt"
+EVERYLINE_CONFIG_DIR="$global_config_dir" "$global_prefix/bin/everyline-cli" version --output json > "$temporary_dir/upgrade-version.json"
+for identity in app user; do
+  EVERYLINE_CONFIG_DIR="$global_config_dir" "$global_prefix/bin/everyline-cli" auth status --profile migration-test --as "$identity" --output json > "$temporary_dir/upgrade-$identity.json"
+done
+node - "$temporary_dir" <<'NODE'
+const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
+const directory = process.argv[2];
+const event = JSON.parse(readFileSync(join(directory, "upgrade.txt"), "utf8").trim().split("\n").at(-1));
+assert.equal(event.event, "updated");
+assert.equal(event.nextAction, "auth_status");
+const version = JSON.parse(readFileSync(join(directory, "upgrade-version.json"), "utf8"));
+assert.equal(version.firstInstall, false);
+assert.equal(version.authorizationRequired, false);
+for (const identity of ["app", "user"]) {
+  const status = JSON.parse(readFileSync(join(directory, `upgrade-${identity}.json`), "utf8"));
+  assert.equal(status.authenticated, true);
+  assert.equal(status.source, "cache");
+}
+NODE
+
 # 可选的期望版本同时约束 manifest 和 ldflags，防止两个发布版本源漂移。
 if [ -n "${EXPECTED_VERSION:-}" ]; then
   test "$package_version" = "$EXPECTED_VERSION"

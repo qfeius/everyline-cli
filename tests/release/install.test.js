@@ -82,6 +82,11 @@ test("Codex Skill 登记保留用户已有的同名目录", (t) => {
   assert.equal(existsSync(marker), true);
 });
 
+/**
+ * 验证全局安装登记三项 Skill，并在文本和事件中提示客户先选择 user/app 授权。
+ * 入参：t（TestContext），用于登记临时安装目录的清理操作。
+ * 返回值：void，登记结果或授权提示不符合预期时断言失败。
+ */
 test("全局安装同步登记 Codex 与 WorkBuddy 的三项 Skill", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
@@ -113,7 +118,7 @@ test("全局安装同步登记 Codex 与 WorkBuddy 的三项 Skill", (t) => {
   assert.match(state.eventId, /^[0-9a-f-]+$/);
 
   const output = formatInstallOutput(result);
-  const expectedMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
+  const expectedMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。";
   const outputLines = output.trim().split("\n");
   assert.equal(outputLines[0], expectedMessage);
   assert.equal(JSON.parse(outputLines.at(-1)).message, expectedMessage);
@@ -149,6 +154,68 @@ test("升级安装以 everyline-cli 替换本包遗留的 everyline-shared 链�
     assert.throws(() => lstatSync(join(skillRoot, "everyline-shared")), /ENOENT/);
     assert.equal(lstatSync(join(skillRoot, "everyline-cli")).isSymbolicLink(), true);
   }
+  assert.equal(result.firstInstall, false);
+  assert.equal(result.authorizationRequired, false);
+  assert.equal(result.updated, true);
+});
+
+test("无状态的旧安装迁移为更新，保留凭证且同版本重装不重复迁移", async (t) => {
+  const legacySkills = ["everyline-shared", "everyline-review", "everyline-review-config"];
+  const cases = [
+    { name: "两个宿主均有旧版登记", hosts: [".agents", ".workbuddy"], names: legacySkills },
+    { name: "仅 Codex 有旧版登记", hosts: [".agents"], names: legacySkills },
+    { name: "仅 WorkBuddy 有旧版登记", hosts: [".workbuddy"], names: legacySkills },
+    { name: "旧入口已移除但审查 Skill 仍在", hosts: [".agents"], names: ["everyline-review", "everyline-review-config"] },
+    { name: "三项当前 Skill 均已存在", hosts: [".agents", ".workbuddy"], names: skillNames },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, (t) => {
+      const fixture = createPackageFixture();
+      t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+      // 旧包没有安装状态；已删除的 everyline-shared 源目录留下悬空链接。
+      for (const host of scenario.hosts) {
+        const skillRoot = join(fixture.userHome, host, "skills");
+        mkdirSync(skillRoot, { recursive: true });
+        for (const name of scenario.names) {
+          symlinkSync(join(fixture.packageRoot, "skills", name), join(skillRoot, name), "dir");
+        }
+      }
+      const configDirectory = join(fixture.userHome, ".everyline-cli");
+      const tokenPath = join(configDirectory, "tokens.json");
+      const tokenContent = '{"dev::user":{"access_token":"existing-user-token"}}\n';
+      mkdirSync(configDirectory, { recursive: true });
+      writeFileSync(tokenPath, tokenContent);
+      const options = {
+        packageRoot: fixture.packageRoot,
+        platform: "linux",
+        architecture: "x64",
+        environment: { npm_config_global: "true" },
+        userHome: fixture.userHome,
+      };
+
+      const result = installPackage(options);
+
+      assert.equal(result.updated, true);
+      assert.equal(result.firstInstall, false);
+      assert.equal(result.authorizationRequired, false);
+      assert.equal(result.nextAction, "");
+      assert.equal(readFileSync(tokenPath, "utf8"), tokenContent);
+      const state = JSON.parse(readFileSync(result.installStatePath, "utf8"));
+      assert.equal(state.installedVersion, "9.8.7");
+      assert.equal(state.firstInstall, false);
+      assert.equal(state.authorizationRequired, false);
+      assert.equal(state.nextAction, "");
+      const event = JSON.parse(formatInstallOutput(result).trim().split("\n").at(-1));
+      assert.equal(event.event, "updated");
+      assert.equal(event.authCheckRequired, true);
+      assert.equal(event.nextAction, "auth_status");
+
+      const repeated = installPackage(options);
+      assert.equal(repeated.updated, false);
+      assert.equal(repeated.authorizationRequired, false);
+      assert.equal(JSON.parse(readFileSync(repeated.installStatePath, "utf8")).eventId, state.eventId);
+    });
+  }
 });
 
 test("升级安装保留用户自建的 everyline-shared 目录", (t) => {
@@ -160,7 +227,7 @@ test("升级安装保留用户自建的 everyline-shared 目录", (t) => {
   mkdirSync(userSkill, { recursive: true });
   writeFileSync(marker, "preserve");
 
-  installPackage({
+  const result = installPackage({
     packageRoot: fixture.packageRoot,
     platform: "linux",
     architecture: "x64",
@@ -173,6 +240,30 @@ test("升级安装保留用户自建的 everyline-shared 目录", (t) => {
   });
 
   assert.equal(readFileSync(marker, "utf8"), "preserve");
+  assert.equal(result.firstInstall, true);
+  assert.equal(result.authorizationRequired, true);
+});
+
+test("其他来源的旧 Skill 链接不作为本包升级依据", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const skillRoot = join(fixture.userHome, ".agents", "skills");
+  mkdirSync(skillRoot, { recursive: true });
+  const target = join(skillRoot, "everyline-shared");
+  symlinkSync(join(fixture.root, "another-package", "skills", "everyline-shared"), target, "dir");
+
+  const result = installPackage({
+    packageRoot: fixture.packageRoot,
+    platform: "linux",
+    architecture: "x64",
+    environment: { npm_config_global: "true" },
+    userHome: fixture.userHome,
+  });
+
+  assert.equal(lstatSync(target).isSymbolicLink(), true);
+  assert.equal(result.updated, false);
+  assert.equal(result.firstInstall, true);
+  assert.equal(result.authorizationRequired, true);
 });
 
 test("首次安装保留旧 token 但仍要求完成一次新授权", (t) => {
@@ -240,6 +331,37 @@ test("重复安装不会重新打开已经完成的首次授权门禁", (t) => {
   assert.equal(JSON.parse(readFileSync(second.installStatePath, "utf8")).eventId, completed.eventId);
 });
 
+test("已有待授权状态不被旧版登记迁移解除", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const options = {
+    packageRoot: fixture.packageRoot,
+    platform: "linux",
+    architecture: "x64",
+    environment: { npm_config_global: "true" },
+    userHome: fixture.userHome,
+  };
+  const first = installPackage(options);
+  const pending = readFileSync(first.installStatePath, "utf8");
+  symlinkSync(
+    join(fixture.packageRoot, "skills", "everyline-shared"),
+    join(fixture.userHome, ".agents", "skills", "everyline-shared"),
+    "dir",
+  );
+
+  const repeated = installPackage(options);
+
+  assert.equal(repeated.updated, false);
+  assert.equal(repeated.firstInstall, true);
+  assert.equal(repeated.authorizationRequired, true);
+  assert.equal(readFileSync(repeated.installStatePath, "utf8"), pending);
+});
+
+/**
+ * 验证升级事件要求检查真实授权状态，未授权提示不预先指定浏览器登录方式。
+ * 入参：t（TestContext），用于登记临时安装目录的清理操作。
+ * 返回值：void，事件动作或状态分支文案不符合预期时断言失败。
+ */
 test("升级安装要求 Agent 按真实授权状态选择提示文案", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
@@ -268,7 +390,7 @@ test("升级安装要求 Agent 按真实授权状态选择提示文案", (t) => 
   assert.equal(event.event, "updated");
   assert.equal(event.authCheckRequired, true);
   assert.equal(event.nextAction, "auth_status");
-  assert.equal(event.authorizationRequiredMessage, "使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。");
+  assert.equal(event.authorizationRequiredMessage, "使用前需要先完成账号授权。");
   assert.equal(event.authorizedMessage, "当前已存在生效授权，可直接调用cli能力。");
 });
 

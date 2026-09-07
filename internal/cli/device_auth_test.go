@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +18,116 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 )
+
+// TestDoubaoLocalDeviceAuthorizationUsesFixedSession 验证豆包本地电脑补齐固定会话后全程使用 Device Grant。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；本地 OAuth 缓存被复用、发生浏览器登录或跨命令丢失 Device 事务时通过测试失败报告。
+func TestDoubaoLocalDeviceAuthorizationUsesFixedSession(t *testing.T) {
+	t.Setenv("SKILL_SESSION_WORKSPACE", "")
+	t.Setenv("CODEBUDDY_SESSION_ID", "")
+	t.Setenv("SESSION_ID", "")
+	t.Chdir(t.TempDir())
+	configDir := t.TempDir()
+	if runtime := NewRuntime(configDir, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}); runtime.DeviceCredentials != nil {
+		t.Fatal("未提供宿主变量时应保持普通本地运行时")
+	}
+	// Skill 在豆包本地模式只生成一次标识，并在后续每个独立 CLI 进程中显式注入。
+	t.Setenv("SESSION_ID", "fixed-doubao-local-session")
+	verificationURL := "https://test-myaccount.qtech.cn/device?user_code=fixture-code&tenant=test"
+	var deviceCalls, tokenCalls, unexpectedCalls atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/metadata":
+			_ = json.NewEncoder(writer).Encode(map[string]string{
+				"device_authorization_endpoint": server.URL + "/device", "token_endpoint": server.URL + "/token",
+				"registration_endpoint": server.URL + "/register", "authorization_endpoint": server.URL + "/authorize",
+			})
+		case "/device":
+			deviceCalls.Add(1)
+			if err := request.ParseForm(); err != nil || request.PostForm.Get("client_id") != "device-client" || request.PostForm.Has("redirect_uri") {
+				t.Errorf("Device 初始化参数错误: %v", request.PostForm)
+			}
+			_ = json.NewEncoder(writer).Encode(auth.DeviceAuthorizationResponse{
+				DeviceCode: "fixture-device-code", VerificationURIComplete: verificationURL, ExpiresIn: 600,
+			})
+		case "/token":
+			tokenCalls.Add(1)
+			if err := request.ParseForm(); err != nil || request.PostForm.Get("grant_type") != auth.DeviceGrantType || request.PostForm.Get("device_code") != "fixture-device-code" || request.PostForm.Get("client_id") != "device-client" {
+				t.Errorf("Device 兑换参数错误: %v", request.PostForm)
+			}
+			_, _ = writer.Write([]byte(`{"access_token":"fixture-device-access","token_type":"Bearer","refresh_token":"fixture-device-refresh","expires_in":3600}`))
+		default:
+			unexpectedCalls.Add(1)
+			http.Error(writer, "unexpected browser OAuth request", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	newRuntime := func() (*Runtime, *bytes.Buffer) {
+		stdout := &bytes.Buffer{}
+		runtime := NewRuntime(configDir, strings.NewReader(""), stdout, &bytes.Buffer{})
+		runtime.HTTP = server.Client()
+		runtime.OpenBrowser = func(string) error {
+			t.Error("豆包本地模式不应打开 OAuth 浏览器")
+			return nil
+		}
+		if runtime.DeviceCredentials == nil || runtime.DeviceCredentialError != nil {
+			t.Fatalf("固定 SESSION_ID 后未识别 Device 运行时: %v", runtime.DeviceCredentialError)
+		}
+		return runtime, stdout
+	}
+	profile := config.Profile{
+		Name: "test-user", BaseURL: server.URL, TokenURL: server.URL + "/token", OAuthMetadataURL: server.URL + "/metadata",
+		OAuthBusinessType: "contract-review", OAuthClientID: "browser-client", OAuthDeviceClientID: "device-client",
+		OAuthRedirectURL: "http://127.0.0.1:8000/login", OAuthScopes: []string{"contract-review:full"},
+		DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	runtime, stdout := newRuntime()
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	legacyStore := auth.NewFileTokenStore(filepath.Join(configDir, "tokens.json"))
+	if err := legacyStore.SaveForIdentity(profile.Name, config.IdentityUser, auth.Token{AccessToken: "legacy-browser-token", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--profile", profile.Name, "--as", "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"source": "device"`) || !strings.Contains(stdout.String(), `"authenticated": false`) {
+		t.Fatalf("Device 会话不应继承本地 OAuth 授权: %s", stdout.String())
+	}
+	if err := Execute(context.Background(), runtime, []string{"auth", "login", "--profile", profile.Name, "--as", "user"}); !errors.Is(err, auth.ErrUserAuthentication) || !strings.Contains(err.Error(), "auth init") {
+		t.Fatalf("豆包本地登录未指向 Device Grant: %v", err)
+	}
+	// 每个命令重新创建真实运行时，验证事务经加密文件跨进程恢复，不依赖内存 store。
+	for index, command := range []string{"init", "init", "complete", "status"} {
+		runtime, stdout = newRuntime()
+		if err := Execute(context.Background(), runtime, []string{"auth", command, "--profile", profile.Name, "--as", "user"}); err != nil {
+			t.Fatalf("%s: %v", command, err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		switch command {
+		case "init":
+			if result["verification_uri_complete"] != verificationURL || (index == 1 && result["reused"] != true) {
+				t.Fatalf("Device 链接或事务未保留: %s", stdout.String())
+			}
+		case "complete":
+			if result["status"] != "succeeded" {
+				t.Fatalf("Device 授权未完成: %s", stdout.String())
+			}
+		case "status":
+			if result["authenticated"] != true || result["source"] != "device" {
+				t.Fatalf("未读取 Device 授权结果: %s", stdout.String())
+			}
+		}
+	}
+	if deviceCalls.Load() != 1 || tokenCalls.Load() != 1 || unexpectedCalls.Load() != 0 {
+		t.Fatalf("device=%d token=%d unexpected=%d", deviceCalls.Load(), tokenCalls.Load(), unexpectedCalls.Load())
+	}
+}
 
 // memoryDeviceCredentialStore 为 CLI Device 授权测试提供线程安全内存存储。
 type memoryDeviceCredentialStore struct {
@@ -151,6 +263,136 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 	installState, err := runtime.InstallState.Load()
 	if err != nil || installState.FirstInstall || installState.AuthorizationRequired {
 		t.Fatalf("installState=%#v err=%v，成功授权后应解除门禁", installState, err)
+	}
+}
+
+// TestAuthDeviceInitReusesFirstInstallTransaction 验证同一首次安装事件重放 --restart 时只创建一笔 Device 授权。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；重复请求授权端点、链接变化或事件未绑定时通过 t.Fatal 报告。
+func TestAuthDeviceInitReusesFirstInstallTransaction(t *testing.T) {
+	now := time.Date(2026, 9, 7, 11, 0, 0, 0, time.UTC)
+	var deviceCalls atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/metadata":
+			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","device_authorization_endpoint":"` + server.URL + `/device"}`))
+		case "/device":
+			deviceCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"device_code":"one-device-code","user_code":"ABCD","verification_uri":"https://auth.example.com/device","verification_uri_complete":"https://auth.example.com/device?user_code=ABCD","expires_in":600}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	runtime.Now = func() time.Time { return now }
+	runtime.DeviceCredentials = &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{}}
+	requireFirstInstallAuthorization(t, runtime)
+	profile := config.Profile{
+		Name: "test-user", BaseURL: "https://test-open.qtech.cn", TokenURL: "https://test-open.qtech.cn/token",
+		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review", OAuthDeviceClientID: "device-client",
+		OAuthScopes: []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	arguments := []string{"auth", "init", "--restart", "--profile", profile.Name, "--as", "user"}
+	if err := Execute(context.Background(), runtime, arguments); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	if err := Execute(context.Background(), runtime, arguments); err != nil {
+		t.Fatal(err)
+	}
+	if deviceCalls.Load() != 1 {
+		t.Fatalf("deviceCalls=%d，同一首次安装事件只应创建一笔授权", deviceCalls.Load())
+	}
+	if !strings.Contains(stdout.String(), `"reused": true`) || !strings.Contains(stdout.String(), `"verification_uri_complete": "https://auth.example.com/device?user_code=ABCD"`) {
+		t.Fatalf("stdout=%s，重放时应返回同一授权入口并标记 reused", stdout.String())
+	}
+	credential, err := runtime.DeviceCredentials.Load(profile.Name)
+	if err != nil || credential.Pending == nil || credential.Pending.FirstInstallEventID != "first-install-test" {
+		t.Fatalf("credential=%#v err=%v，Device 事务未绑定首次安装事件", credential, err)
+	}
+}
+
+// TestAuthDeviceInitSerializesConcurrentCalls 验证同一 Profile 的并发初始化共享一笔 Device 授权。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；并发请求绕过锁、创建多笔事务或未返回复用标记时通过 t.Fatal 报告。
+func TestAuthDeviceInitSerializesConcurrentCalls(t *testing.T) {
+	now := time.Date(2026, 9, 7, 11, 30, 0, 0, time.UTC)
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	var startedOnce sync.Once
+	var deviceCalls atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/metadata":
+			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","device_authorization_endpoint":"` + server.URL + `/device"}`))
+		case "/device":
+			deviceCalls.Add(1)
+			startedOnce.Do(func() { close(requestStarted) })
+			<-releaseRequest
+			_, _ = writer.Write([]byte(`{"device_code":"shared-device-code","user_code":"EFGH","verification_uri":"https://auth.example.com/device","verification_uri_complete":"https://auth.example.com/device?user_code=EFGH","expires_in":600}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	profile := config.Profile{
+		Name: "test-user", BaseURL: "https://test-open.qtech.cn", TokenURL: "https://test-open.qtech.cn/token",
+		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review", OAuthDeviceClientID: "device-client",
+		OAuthScopes: []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	deviceStore := &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{}}
+	type initResult struct {
+		output string
+		err    error
+	}
+	runInit := func() <-chan initResult {
+		result := make(chan initResult, 1)
+		runtime, stdout, _ := testRuntime(t)
+		runtime.HTTP = server.Client()
+		runtime.Now = func() time.Time { return now }
+		runtime.DeviceCredentials = deviceStore
+		if err := runtime.Profiles.Add(profile); err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			err := Execute(context.Background(), runtime, []string{"auth", "init", "--profile", profile.Name, "--as", "user"})
+			result <- initResult{output: stdout.String(), err: err}
+		}()
+		return result
+	}
+
+	firstResult := runInit()
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("首个 Device 初始化请求未按时发出")
+	}
+	secondResult := runInit()
+	select {
+	case result := <-secondResult:
+		t.Fatalf("第二个 init 在首个事务保存前返回: output=%s err=%v", result.output, result.err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if deviceCalls.Load() != 1 {
+		t.Fatalf("deviceCalls=%d，并发初始化不应创建第二笔授权", deviceCalls.Load())
+	}
+	close(releaseRequest)
+	first := <-firstResult
+	second := <-secondResult
+	if first.err != nil || second.err != nil {
+		t.Fatalf("firstErr=%v secondErr=%v", first.err, second.err)
+	}
+	if deviceCalls.Load() != 1 || !strings.Contains(second.output, `"reused": true`) {
+		t.Fatalf("deviceCalls=%d secondOutput=%s，并发调用应复用首笔授权", deviceCalls.Load(), second.output)
 	}
 }
 

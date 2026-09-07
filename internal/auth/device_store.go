@@ -56,6 +56,7 @@ type DevicePendingTransaction struct {
 	RevocationEndpoint      string              `json:"revocation_endpoint,omitempty"`
 	ClientID                string              `json:"client_id"`
 	ExpiresAt               time.Time           `json:"expires_at"`
+	FirstInstallEventID     string              `json:"first_install_event_id,omitempty"`
 }
 
 // DeviceCredential 把沙箱需要恢复的 Profile、授权事务和 user token 一起保存。

@@ -303,3 +303,44 @@ func TestProviderDeviceMissingCredentialsUsesDeviceGrantHint(t *testing.T) {
 		t.Fatalf("沙箱鉴权提示未固定使用 Device Grant: %v", err)
 	}
 }
+
+// TestDeviceRuntimeDoesNotUseBrowserCredentials 验证 Device 凭证缺失时读取、刷新和失效都保持会话隔离。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；复用或删除本地 OAuth 凭证、错误提示退到 auth login 时通过测试失败报告。
+func TestDeviceRuntimeDoesNotUseBrowserCredentials(t *testing.T) {
+	for _, emptyCredential := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty_credential=%t", emptyCredential), func(t *testing.T) {
+			store := &encryptedDeviceStore{dir: t.TempDir(), key: make([]byte, 32)}
+			if emptyCredential {
+				if err := store.Save("test-user", DeviceCredential{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			legacyStore := NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
+			legacyToken := Token{AccessToken: "browser-token", ExpiresAt: time.Now().Add(time.Hour)}
+			if err := legacyStore.SaveForIdentity("test-user", config.IdentityUser, legacyToken); err != nil {
+				t.Fatal(err)
+			}
+			provider := NewProvider(legacyStore, http.DefaultClient, time.Now).WithDeviceCredentials(store)
+			profile := config.Profile{Name: "test-user"}
+			for _, operation := range []string{"read", "refresh"} {
+				var token Token
+				var err error
+				if operation == "read" {
+					token, err = provider.TokenForIdentity(context.Background(), profile, config.IdentityUser)
+				} else {
+					token, err = provider.RefreshForIdentity(context.Background(), profile, config.IdentityUser, "rejected-device-token")
+				}
+				if !errors.Is(err, ErrUserAuthentication) || token.AccessToken != "" || !strings.Contains(err.Error(), "auth init") {
+					t.Errorf("%s 未保持 Device 会话隔离: token=%q err=%v", operation, token.AccessToken, err)
+				}
+			}
+			if err := provider.InvalidateForIdentity(profile.Name, config.IdentityUser, legacyToken.AccessToken); err != nil {
+				t.Fatal(err)
+			}
+			if token, err := legacyStore.LoadForIdentity(profile.Name, config.IdentityUser); err != nil || token.AccessToken != legacyToken.AccessToken {
+				t.Fatalf("Device 凭证失效影响了本地 OAuth 缓存: %v", err)
+			}
+		})
+	}
+}

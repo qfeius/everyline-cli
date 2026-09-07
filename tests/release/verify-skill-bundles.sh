@@ -14,8 +14,12 @@ test ! -e "$output_dir/everyline-shared-skill.zip"
 # 三端共用的授权、沙箱附件和签名链接约束必须进入豆包最终制品。
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'auth init --profile <profile> --as user --output json' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '不得执行 `auth login --profile <profile> --as user`' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '豆包的“本地电脑”模式仍属于豆包' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'SESSION_ID=<same-session-id> everyline-cli auth init' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'SESSION_ID=<same-session-id> everyline-cli auth complete' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '`firstInstall=true` 且 `authorizationRequired=true`' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'auth init --restart --profile <profile> --as user --output json' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '`auth init` 返回 `reused=true`' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '统一默认 `test` 环境' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '当前 Profile 是 dev、blue 或 prod 时不得继承它' >/dev/null
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '发起任何授权事务前必须先固定 `user/app` 身份' >/dev/null

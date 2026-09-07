@@ -16,7 +16,10 @@
 flowchart TD
     A[用户表达 EveryLine 意图] --> B[检查 CLI 路径、版本和实时帮助]
     B -->|能力缺失| Z[说明缺口并停止相关操作]
-    B --> C[固定 Profile 和 user 或 app 身份]
+    B --> U{用户已明确选择 user 或 app}
+    U -->|是| C[按已选身份匹配或创建 Profile]
+    U -->|否| V[单选 user 个人账号授权或 app 应用授权]
+    V -->|收到有效选择| C
     C --> D[使用显式 Profile 和身份查询授权状态]
     D -->|未授权| E[完成 OAuth 或 app 授权]
     D -->|已授权| F{识别业务意图}
@@ -42,12 +45,12 @@ flowchart TD
 以下规则适用于所有场景：
 
 - 已经从用户消息或可靠 CLI 结果取得的信息不重复询问。
-- 会话开始时固定一个 Profile 和身份，所有授权与业务命令显式传递同一 `--profile/--as`。
-- 身份、主体、清单、规则或分组匹配唯一时直接采用；无匹配或多项匹配时展示真实候选项。
+- 先由用户明确选择身份，再匹配或创建 Profile；所有授权与业务命令显式传递同一 `--profile/--as`。
+- 主体、清单、规则或分组匹配唯一时直接采用；无匹配或多项匹配时展示真实候选项。
 - 用户看到名称、类型、风险等级和编号；内部 ID 只来自本次 CLI 查询。
 - WorkBuddy 的清单、立场方和强度均调用 `AskUserQuestion`；清单设置 `multiSelect=true` 并按统一候选快照分页，立场方和强度设置为单选。
 - Codex 当前回合提供原生结构化选项工具时，用选项卡收集符合组件容量的互斥单选；Codex 清单和豆包交互使用同一冻结快照的编号文字协议，不为展示选项卡切换协作模式。
-- 发起授权前，用户未明确身份时必须先选择 `user/app`：WorkBuddy 使用 `AskUserQuestion` 且 `multiSelect=false`，Codex 使用当前可用的 `request_user_input`，豆包优先使用原生单选组件；无组件时三端统一回退到 `1. user`、`2. app` 的稳定编号协议。
+- 发起授权前，用户未明确身份时必须先选择 `user/app`：WorkBuddy 使用 `AskUserQuestion` 且 `multiSelect=false`，Codex 使用当前可用的 `request_user_input`，豆包优先使用原生单选组件；无组件时三端统一回退到 `1. user`、`2. app` 的稳定编号协议。同次授权已有用户明确选择时直接复用；Profile 名称、默认身份、唯一候选、历史 token 和 CLI `nextAction` 都不替代该选择。
 - user 授权地址统一展示为文字固定的“授权登录详情”链接按钮或 Markdown 链接，完整 URL 只作为逐字不变的链接目标，由用户主动点击；app 授权不生成该入口。
 - 合同审查先用独立交互完成清单选择，再用下一次独立交互选择立场方；同一宿主选择卡片不得混合两类问题。
 - 默认解析 `--output json` 的 stdout；stderr 只作为进度和诊断信息。
@@ -72,23 +75,23 @@ flowchart TD
 | READY-06 | 受限 | 旧版 `reviewStrength` 只接受 `0/1/2` | 不维护数字映射，不上传合同 | 停止合同审查；只读能力仍可继续 |
 | READY-07 | 受限 | CLI 未说明清单与内置规则包可组合 | 不假设组合语义，不上传合同 | 停止合同审查 |
 | READY-08 | 受限 | `review task result --help` 未提供等待最终结果能力 | 不自行模拟任务状态机 | 停止合同审查 |
-| READY-09 | 已支持 | `firstInstall=true` 且 `authorizationRequired=true` | 进入强制新授权流程，不接受旧 dev token，不调用业务 API | 新授权成功并返回 `authorizationRequired=false` |
-| READY-10 | 已支持 | CLI 与三项 Skill 更新成功 | 展示统一更新完成文案，并对已固定的 Profile/身份执行一次 `auth status` | 进入唯一一个授权状态分支 |
-| READY-11 | 已支持 | 更新后 `authenticated=false` | 提示需要账号授权并等待用户确认 | 用户确认后按宿主进入授权流程 |
+| READY-09 | 已支持 | `firstInstall=true` 且 `authorizationRequired=true` | 展示首次安装引导，先让用户选择身份再匹配 Profile 并进入强制新授权流程；不接受旧 dev token，不调用业务 API | 新授权成功并返回 `authorizationRequired=false` |
+| READY-10 | 已支持 | CLI 与三项 Skill 更新成功 | 展示统一更新完成文案，复用同次授权已选身份；尚未选择时先单选，再对匹配的 Profile/身份执行一次 `auth status` | 进入唯一一个授权状态分支 |
+| READY-11 | 已支持 | 更新后 `authenticated=false` | 展示“使用前需要先完成账号授权。”；已有继续授权请求时直接继续，否则等待用户确认 | 使用已选身份按宿主进入授权流程 |
 | READY-12 | 已支持 | 更新后 `authenticated=true` | 提示当前授权生效且可直接调用 CLI | 当前请求结束或进入下一项业务 |
 
 ## 5. 身份与授权交互
 
 | ID | 状态 | 用户示例或条件 | Skill 处理 | 结束条件 |
 | --- | --- | --- | --- | --- |
-| PROFILE-01 | 已支持 | 用户明确提供 Profile | 使用 `config show <profile> --output json` 校验、读取并固定该 Profile | 后续命令显式传递 Profile |
-| PROFILE-02 | 已支持 | 用户未提供 Profile 和环境 | Codex、WorkBuddy、豆包统一选择 test 环境；复用身份兼容的 test Profile，没有时创建 `test-user` 或取得 app ID 后创建 `test-app` | 固定 test Profile，不继承 dev/blue/prod 当前 Profile |
+| PROFILE-01 | 已支持 | 用户明确提供 Profile | 先明确 user/app 选择，再使用 `config show <profile> --output json` 校验、读取并固定该 Profile；Profile 名称和默认身份不代替选择 | 后续命令显式传递 Profile |
+| PROFILE-02 | 已支持 | 用户未提供 Profile 和环境 | 先明确 user/app 选择，Codex、WorkBuddy、豆包统一选择 test 环境；复用身份兼容的 test Profile，没有时创建 `test-user` 或取得 app ID 后创建 `test-app` | 固定 test Profile，不继承 dev/blue/prod 当前 Profile |
 | PROFILE-02A | 已支持 | 用户本轮明确指定 Profile 或环境 | 校验并采用用户选择 | 显式选择覆盖默认 test |
 | PROFILE-02B | 已支持 | 默认名称已被其他环境占用 | 不覆盖同名 Profile，展示冲突并请求显式 Profile | 防止静默改写环境配置 |
 | PROFILE-03 | 受限 | 用户显式指定的 Profile 缺失或与显式环境不一致 | 不猜测或覆盖该 Profile | 用户修正后重新调用 |
 | AUTH-01 | 已支持 | `使用 user 身份审查` | 直接选择 user，不再询问身份 | 查询 user 授权状态 |
 | AUTH-02 | 已支持 | `使用 app 身份查询清单` | 直接选择 app，不再询问身份 | 查询 app 授权状态 |
-| AUTH-03 | 已支持 | 用户发起授权但未说明身份 | 在任何身份相关 `auth status/login/init` 前只询问一次使用 user 还是 app，收到答案前不发起授权 | 用户明确身份后继续 |
+| AUTH-03 | 已支持 | 用户发起授权但未说明身份 | 先单选 user 或 app，收到答案后才匹配或创建 Profile、查询状态及发起授权 | 用户明确身份后继续 |
 | AUTH-04 | 已支持 | 非首次安装门禁且 `auth status` 返回 `authenticated=true` | 视为已授权 | 进入业务流程 |
 | AUTH-05 | 已支持 | Codex user 未授权 | 执行一次带 `--no-open-browser` 的 OAuth 登录，保持同一 CLI 会话，并生成“授权登录详情”入口 | 用户主动点击并完成授权后重新查询状态 |
 | AUTH-06 | 已支持 | user 流程取得完整授权 URL | 原生链接按钮可用时以“授权登录详情”为按钮文字，否则显示 `[授权登录详情](<FULL_AUTHORIZATION_URL>)`；链接目标逐字保留全部 query | 等待当前授权事务完成 |
@@ -110,6 +113,11 @@ flowchart TD
 | AUTH-22 | 已支持 | WorkBuddy 发起授权且用户未指定身份 | 调用 `AskUserQuestion`，设置 `multiSelect=false`，选项为 user/app | 用户单选后才查询对应身份状态 |
 | AUTH-23 | 已支持 | 豆包发起授权且用户未指定身份 | 优先使用原生单选组件；组件不可用时展示稳定编号 `1. user`、`2. app` | 用户回复有效编号或身份后继续 |
 | AUTH-24 | 已支持 | user 授权入口已生成 | 用户自己点击“授权登录详情”；Agent 不自动打开浏览器，不在展示切换时重启授权 | 保持唯一授权事务 |
+| AUTH-25 | 已支持 | 仅有一个 `test-user` Profile，默认身份为 user，且存在历史 token | 仍先让用户单选 user/app；不从 Profile 或 token 推断选择 | 用户选择后才匹配 Profile 和查询状态 |
+| AUTH-26 | 已支持 | 用户只说“开始授权”或“继续授权”，同次授权尚未选择身份 | 将其作为继续授权意图，仍先单选 user/app；已有明确选择时复用 | 身份明确后按对应流程继续 |
+| AUTH-27 | 已支持 | 豆包并发调用 `auth init`，或同一首次安装 `eventId` 重放 `auth init --restart` | CLI 通过 Profile 级锁只创建一笔 Device 事务；重放返回原授权入口及 `reused=true`，Skill 不重复展示 | 用户只打开一个授权页面 |
+| AUTH-28 | 已支持 | 豆包“本地电脑”模式没有宿主会话变量 | 首次 `auth status` 前只生成一次 `SESSION_ID` 并固定初始目录；所有授权和业务命令显式复用，执行 `auth init` / `auth complete` | 与 WorkBuddy 一样展示 `/device` 链接，不进入 loopback OAuth |
+| AUTH-29 | 已支持 | 豆包本地存在同名 Profile 的旧 OAuth token，但当前 Device 会话未授权 | 状态返回 `authenticated=false/source=device`；业务取 token 和刷新引导到 `auth init`，Device 失效操作保留浏览器缓存 | 当前 Device 会话独立完成授权 |
 
 当前 Skill 只自动创建缺失的默认 test Profile；其他环境的 Profile 仍由用户显式管理。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
 

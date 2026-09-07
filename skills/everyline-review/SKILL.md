@@ -25,7 +25,7 @@ metadata:
 
 1. 执行 `command -v everyline-cli` 和 `everyline-cli version --output json`；按 `everyline-cli` 公共 Skill 记录 `updateRequired`，先让当前审查完成上传、发起、终态轮询和结果获取，再执行延迟更新。
 2. 固定本次 `<profile>` 与 `<identity>`，并按 `everyline-cli` 公共 Skill 查询 `auth status`；恢复后只重试中断步骤一次。
-3. 本流程每条命令显式携带 `--profile <profile> --as <identity>`，不因资源不可见自动切换身份。
+3. 本流程每条命令显式携带 `--profile <profile> --as <identity>`，并复用公共 Skill 已固定的 Device 会话上下文：豆包普通工作任务（含本地电脑）每次注入同一 `SESSION_ID` 并使用同一初始工作目录，WorkBuddy 每次注入同一 `CODEBUDDY_SESSION_ID`，AgentKit 保留平台工作区与注入密钥。不因资源不可见自动切换身份。
 
 ## 目标版本就绪门
 
