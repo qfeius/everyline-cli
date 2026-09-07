@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -126,6 +127,131 @@ func TestStartOAuthCallbackServerPropagatesOAuthError(t *testing.T) {
 	defer cancel()
 	if _, err := callback.Wait(ctx, "expected-state"); err == nil || !strings.Contains(err.Error(), "access_denied") {
 		t.Fatalf("err=%v", err)
+	}
+	if err := <-requestErrors; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOAuthCallbackResponse 验证浏览器回调页区分授权成功、用户拒绝和协议错误。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；页面状态、提示或终端结果不符合回调内容时报告失败。
+func TestOAuthCallbackResponse(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      url.Values
+		wantStatus int
+		wantBody   string
+		wantError  string
+	}{
+		{
+			name:       "denied without state",
+			query:      url.Values{"error": {"access_denied"}, "error_description": {"用户拒绝授权"}},
+			wantStatus: http.StatusForbidden, wantBody: "用户已拒绝授权", wantError: "access_denied（用户拒绝授权）",
+		},
+		{
+			name:       "denied with state",
+			query:      url.Values{"error": {"access_denied"}, "state": {"expected-state"}},
+			wantStatus: http.StatusForbidden, wantBody: "用户已拒绝授权", wantError: "access_denied",
+		},
+		{
+			name:       "provider error",
+			query:      url.Values{"error": {"server_error"}, "error_description": {"服务暂时不可用"}},
+			wantStatus: http.StatusBadRequest, wantBody: "OAuth 授权失败", wantError: "server_error（服务暂时不可用）",
+		},
+		{
+			name: "missing code", query: url.Values{"state": {"expected-state"}},
+			wantStatus: http.StatusBadRequest, wantBody: "缺少 code 或 state", wantError: "缺少 code 或 state",
+		},
+		{
+			name: "missing state", query: url.Values{"code": {"authorization-code"}},
+			wantStatus: http.StatusBadRequest, wantBody: "缺少 code 或 state", wantError: "缺少 code 或 state",
+		},
+		{
+			name: "success", query: url.Values{"code": {"authorization-code"}, "state": {"expected-state"}},
+			wantStatus: http.StatusOK, wantBody: oauthCallbackMessage,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			callback, callbackURL := newTestOAuthCallback(t)
+			defer callback.Close()
+			// 使用真实 loopback 请求覆盖截图中的 /login 路径及缺少 state 的拒绝回调。
+			response, err := (&http.Client{Timeout: time.Second}).Get(callbackURL + "?" + test.query.Encode())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != test.wantStatus || !strings.Contains(string(body), test.wantBody) {
+				t.Fatalf("status=%d body=%s", response.StatusCode, body)
+			}
+			if response.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+				t.Fatalf("content type=%s", response.Header.Get("Content-Type"))
+			}
+			if test.wantError != "" && strings.Contains(string(body), oauthCallbackMessage) {
+				t.Fatalf("失败回调显示了授权成功提示: %s", body)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			code, err := callback.Wait(ctx, "expected-state")
+			if test.wantError == "" {
+				if err != nil || code != "authorization-code" {
+					t.Fatalf("code=%q err=%v", code, err)
+				}
+			} else if code != "" || err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("code=%q err=%v", code, err)
+			}
+		})
+	}
+}
+
+// TestOAuthCallbackCloseWaitsForResponse 验证登录结束关闭服务时仍完整发送浏览器响应。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；关闭操作提前中断 HTTP 响应时报告失败。
+func TestOAuthCallbackCloseWaitsForResponse(t *testing.T) {
+	callback := &loopbackOAuthCallback{results: make(chan oauthCallbackResult, 1)}
+	// 暂停 handler 的返回以确定性复现：CLI 已收到拒绝结果，HTTP 响应尚未发送完毕。
+	finishHandler := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		callback.handle(writer, request)
+		<-finishHandler
+	}))
+	defer server.Close()
+	callback.server = server.Config
+	requestErrors := make(chan error, 1)
+	go func() {
+		response, err := (&http.Client{Timeout: 2 * time.Second}).Get(server.URL + "?error=access_denied")
+		if err == nil {
+			defer response.Body.Close()
+			var body []byte
+			body, err = io.ReadAll(response.Body)
+			if err == nil && !strings.Contains(string(body), "用户已拒绝授权") {
+				err = fmt.Errorf("unexpected callback body: %s", body)
+			}
+		}
+		requestErrors <- err
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, waitErr := callback.Wait(ctx, "expected-state")
+	closed := make(chan struct{})
+	go func() {
+		callback.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Error("callback server closed before its response handler finished")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(finishHandler)
+	<-closed
+	if waitErr == nil || !strings.Contains(waitErr.Error(), "access_denied") {
+		t.Fatalf("err=%v", waitErr)
 	}
 	if err := <-requestErrors; err != nil {
 		t.Fatal(err)

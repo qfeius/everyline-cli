@@ -53,6 +53,8 @@ everyline-cli auth login \
 
 CLI 会先读取 OAuth metadata 的 `registration_endpoint` 并动态注册浏览器 public client，再打开浏览器完成用户登录，通过本机 loopback 回调接收授权结果并缓存 user token。每次显式 `auth login --as user` 都使用本次注册返回的 client ID，历史 Profile 中的旧值不会继续参与登录。auth login 不使用 --env；环境在 config add 时指定。
 
+user Token 过期且未刷新成功后，通过新的授权链接手动登录：Codex 重新执行 `auth login --profile <profile> --as user --no-open-browser`；豆包/WorkBuddy 在原会话中执行 `auth init --profile <profile> --as user --output json`，展示本次返回的完整授权链接，用户完成后执行一次 `auth complete`。以 `auth status` 的 `authenticated=true` 确认恢复，再继续原业务操作。
+
 豆包（含本地电脑）和 WorkBuddy 统一使用 Device Grant；dev/test Profile 已内置独立 Device client。执行下面的命令前先按后文准备并固定对应宿主的会话变量：
 
 ~~~bash
@@ -118,6 +120,8 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 仓库和 npm 发布包包含三项职责分离的交互式 Skill：`everyline-cli` 负责首次配置、身份和授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单、规则和规则分组。三项 Skill 共用当前 CLI 的实时帮助和结构化输出约束；原 `everyline-shared` 已合并到 `everyline-cli`。
 
 全局安装 npm 包时，`postinstall` 会把三项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills` 和 WorkBuddy 的 `$HOME/.workbuddy/skills`，并在首次安装建立授权门禁：旧 token 保留，但必须完成一次新的 user/app 授权后才能调用审查、清单或规则业务命令。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包通过 `make skill-assets` 生成的三个独立 ZIP 从界面导入。Skill 不修改或替代 CLI 接口。
+
+首次安装使用 `npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@latest`，让安装器提示可见。Codex、WorkBuddy 和豆包均需在确认 CLI 与 Skill 就绪后，由 Agent 在回复正文展示统一安装完成文案；豆包静态 ZIP 导入在导入后首次运行时完成这一检查和提示。
 
 在 Codex、WorkBuddy 或豆包电脑版安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)；评审全部对话分支，请参阅 [EveryLine CLI Skill 全量交互场景](docs/everyline-cli-skill-interaction-scenarios.md)。
 

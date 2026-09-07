@@ -72,7 +72,7 @@ func ensureBrowserOAuthClient(ctx context.Context, runtime *Runtime, profile con
 }
 
 /*
-newAuthDeviceInitCommand 创建或复用 Device 授权事务，并恢复首次安装已兑换成功但尚未提交的本地状态。
+newAuthDeviceInitCommand 复用有效凭证或 Device 授权事务，为过期凭证生成新链接，并恢复首次安装未提交的本地状态。
 入参：runtime *Runtime 为 HTTP、Profile 和安全凭证存储；root *rootOptions 为公共 flags。
 返回值：*cobra.Command，可输出完整浏览器授权 URL、过期时间或已完成状态。
 */
@@ -141,7 +141,8 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 						return nil
 					}
 				}
-				if !forceRestart && loadErr == nil && existing.Token != nil && existing.Token.AccessToken != "" {
+				// 只有仍有效的 token 才表示已登录；到期后继续创建新事务，让用户从新链接手动授权。
+				if !forceRestart && loadErr == nil && existing.Token != nil && existing.Token.ValidAt(runtimeNow(runtime), 0) {
 					result = deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(existing.Token.ExpiresAt)}
 					return nil
 				}
@@ -216,6 +217,7 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 		"豆包本地电脑同样使用 Device Grant；首次 auth status 前固定 SESSION_ID 和初始工作目录，后续每条命令显式复用。",
 		"把 verification_uri_complete 作为一个完整链接原样展示给用户，不拆分、不改写 query。",
 		"并发初始化和同一首次安装事件重放会复用已有事务，并在结构化输出中标记 reused=true。",
+		"user token 过期后重新执行 auth init 会生成新授权链接；尚未过期的 token 和已有待完成事务继续复用。",
 		"用户完成浏览器授权后执行 auth complete；每次 complete 只检查一次。",
 	)
 	return command

@@ -129,9 +129,11 @@ func (provider *Provider) Token(ctx context.Context, profile config.Profile) (To
 	return provider.TokenForIdentity(ctx, profile, config.IdentityApp)
 }
 
-// TokenForIdentity 按 user/app 身份读取凭证；Device user 始终使用当前会话存储，其余身份保留原缓存流程。
-// 入参：ctx context.Context 控制远端请求；profile config.Profile 指定环境；identity config.IdentityKind 为业务身份。
-// 返回值：Token 为可用访问凭证；error 在凭证缺失或刷新失败时非 nil。
+/*
+TokenForIdentity 按 user/app 身份读取凭证；user 凭证到期且未刷新成功时提供原运行时的手动授权入口。
+入参：ctx context.Context 控制远端请求；profile config.Profile 指定环境；identity config.IdentityKind 为业务身份。
+返回值：Token 为可用访问凭证；error 为凭证缺失、过期或刷新失败，并保留原始错误。
+*/
 func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.Profile, identity config.IdentityKind) (Token, error) {
 	parsedIdentity, err := config.ParseIdentityKind(string(identity))
 	if err != nil {
@@ -152,6 +154,10 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 				// 提前刷新失败时仍允许使用尚未真正过期的旧 token，避免临时网络波动强制登出。
 				if credential.Token.ValidAt(provider.now(), 0) {
 					return *credential.Token, nil
+				}
+				// 凭证已实际到期，保留刷新失败原因并引导同一 Device 会话重新生成手动授权入口。
+				if !errors.Is(refreshErr, ErrUserSessionExpired) {
+					return Token{}, fmt.Errorf("%w；刷新失败: %w", provider.UserSessionExpiredError(profile.Name), refreshErr)
 				}
 				return Token{}, refreshErr
 			}
@@ -179,10 +185,17 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 					if cached.ValidAt(provider.now(), 0) {
 						return cached, nil
 					}
+					// 动态客户端刷新能力缺失或服务异常时，过期凭证都可通过新的浏览器授权恢复。
+					if cached.ExpiredAt(provider.now()) && !errors.Is(refreshErr, ErrUserSessionExpired) {
+						return Token{}, fmt.Errorf("%w；刷新失败: %w", provider.UserSessionExpiredError(profile.Name), refreshErr)
+					}
 					return Token{}, refreshErr
 				}
 				if cached.ValidAt(provider.now(), 0) {
 					return cached, nil
+				}
+				if cached.ExpiredAt(provider.now()) {
+					return Token{}, provider.UserSessionExpiredError(profile.Name)
 				}
 			}
 		}

@@ -51,7 +51,7 @@ flowchart TD
 - WorkBuddy 的清单、立场方和强度均调用 `AskUserQuestion`；清单设置 `multiSelect=true` 并按统一候选快照分页，立场方和强度设置为单选。
 - Codex 当前回合提供原生结构化选项工具时，用选项卡收集符合组件容量的互斥单选；Codex 清单和豆包交互使用同一冻结快照的编号文字协议，不为展示选项卡切换协作模式。
 - 发起授权前，用户未明确身份时必须先选择 `user/app`：WorkBuddy 使用 `AskUserQuestion` 且 `multiSelect=false`，Codex 使用当前可用的 `request_user_input`，豆包优先使用原生单选组件；无组件时三端统一回退到 `1. user`、`2. app` 的稳定编号协议。同次授权已有用户明确选择时直接复用；Profile 名称、默认身份、唯一候选、历史 token 和 CLI `nextAction` 都不替代该选择。
-- user 授权地址统一展示为文字固定的“授权登录详情”链接按钮或 Markdown 链接，完整 URL 只作为逐字不变的链接目标，由用户主动点击；app 授权不生成该入口。
+- user 授权地址统一展示为文字固定的“点击授权”链接按钮或 Markdown 链接，完整 URL 只作为逐字不变的链接目标，由用户主动点击；app 授权不生成该入口。
 - 合同审查先用独立交互完成清单选择，再用下一次独立交互选择立场方；同一宿主选择卡片不得混合两类问题。
 - 默认解析 `--output json` 的 stdout；stderr 只作为进度和诊断信息。
 - 合同正文、access token、app secret、授权码、回调参数和完整内部请求不输出到对话；CLI 返回的签名 `reviewDetailUrl` 必须完整原样展示，不提取或单独输出其中的 token。
@@ -69,16 +69,19 @@ flowchart TD
 | ENTRY-03 | 已支持 | `帮我操作普通智书 contract-cli` | 根据 Skill 边界不接管 | 交由其他能力处理 |
 | READY-01 | 已支持 | 新会话首次调用 | 执行 `command -v`、`version --output json` 和根帮助；解析首次安装授权字段 | 命令和版本可读取 |
 | READY-02 | 已支持 | CLI 已安装 | 使用现有版本，不主动升级 | 继续读取目标命令帮助 |
-| READY-03 | 已支持 | 安装或导入 Skill 时 CLI 未安装 | 优先安装用户指定版本或 `.tgz`，否则执行 `npm install -g everyline-cli` | 安装成功后重新检查 |
-| READY-04 | 受限 | 宿主只完成静态 Skill 导入 | 第一次本地运行 Skill 时补做 CLI 安装；安装失败则返回 npm 原因 | CLI 可用后继续检查 |
+| READY-03 | 已支持 | 已要求安装 CLI/Skill，CLI 未安装 | 优先安装用户指定版本或 `.tgz`，否则执行 `npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@latest` | 安装校验后在回复正文展示统一文案 |
+| READY-04 | 受限 | 宿主只完成静态 Skill 导入 | 首次运行时验证 CLI；用户已要求安装时补做 CLI 安装，安装失败报告真实原因 | CLI 和 Skill 就绪后在回复正文展示统一文案 |
 | READY-05 | 受限 | 目标命令或参数在实时帮助中缺失 | 列出缺口，不模拟或猜测接口 | 停止该业务操作 |
 | READY-06 | 受限 | 旧版 `reviewStrength` 只接受 `0/1/2` | 不维护数字映射，不上传合同 | 停止合同审查；只读能力仍可继续 |
 | READY-07 | 受限 | CLI 未说明清单与内置规则包可组合 | 不假设组合语义，不上传合同 | 停止合同审查 |
 | READY-08 | 受限 | `review task result --help` 未提供等待最终结果能力 | 不自行模拟任务状态机 | 停止合同审查 |
 | READY-09 | 已支持 | `firstInstall=true` 且 `authorizationRequired=true` | 展示首次安装引导，先让用户选择身份再匹配 Profile 并进入强制新授权流程；不接受旧 dev token，不调用业务 API | 新授权成功并返回 `authorizationRequired=false` |
 | READY-10 | 已支持 | CLI 与三项 Skill 更新成功 | 展示统一更新完成文案，复用同次授权已选身份；尚未选择时先单选，再对匹配的 Profile/身份执行一次 `auth status` | 进入唯一一个授权状态分支 |
-| READY-11 | 已支持 | 更新后 `authenticated=false` | 展示“使用前需要先完成账号授权。”；已有继续授权请求时直接继续，否则等待用户确认 | 使用已选身份按宿主进入授权流程 |
+| READY-11 | 已支持 | 更新后 `authenticated=false` | 展示“使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。”；已有继续授权请求时直接继续，否则等待用户确认 | 使用已选身份按宿主进入授权流程 |
 | READY-12 | 已支持 | 更新后 `authenticated=true` | 提示当前授权生效且可直接调用 CLI | 当前请求结束或进入下一项业务 |
+| READY-13 | 已支持 | Codex/WorkBuddy 首次 npm 安装成功，但日志未显示安装器文案 | 检查 `version --output json` 和三项 Skill，按本次安装事实在最终回复正文补齐统一文案 | 用户看到能力介绍及打开授权页面或生成授权链接的提示 |
+| READY-14 | 已支持 | 豆包/WorkBuddy 界面首次导入，`version` 未提供首次安装字段或字段为 false | 依据宿主明确的首次导入上下文或用户首次使用说明，确认 CLI 可用后展示统一文案 | 提示展示一次，等待用户选择身份 |
+| READY-15 | 已支持 | 同次对话从公共 Skill 进入审查或配置 Skill | 复用公共 Skill 的提示展示记录和已选身份 | 不重复介绍，不丢失原业务目标 |
 
 ## 5. 身份与授权交互
 
@@ -93,8 +96,8 @@ flowchart TD
 | AUTH-02 | 已支持 | `使用 app 身份查询清单` | 直接选择 app，不再询问身份 | 查询 app 授权状态 |
 | AUTH-03 | 已支持 | 用户发起授权但未说明身份 | 先单选 user 或 app，收到答案后才匹配或创建 Profile、查询状态及发起授权 | 用户明确身份后继续 |
 | AUTH-04 | 已支持 | 非首次安装门禁且 `auth status` 返回 `authenticated=true` | 视为已授权 | 进入业务流程 |
-| AUTH-05 | 已支持 | Codex user 未授权 | 执行一次带 `--no-open-browser` 的 OAuth 登录，保持同一 CLI 会话，并生成“授权登录详情”入口 | 用户主动点击并完成授权后重新查询状态 |
-| AUTH-06 | 已支持 | user 流程取得完整授权 URL | 原生链接按钮可用时以“授权登录详情”为按钮文字，否则显示 `[授权登录详情](<FULL_AUTHORIZATION_URL>)`；链接目标逐字保留全部 query | 等待当前授权事务完成 |
+| AUTH-05 | 已支持 | Codex user 未授权 | 执行一次带 `--no-open-browser` 的 OAuth 登录，保持同一 CLI 会话，并生成“点击授权”入口 | 用户主动点击并完成授权后重新查询状态 |
+| AUTH-06 | 已支持 | user 流程取得完整授权 URL | 原生链接按钮可用时以“点击授权”为按钮文字，否则显示 `[点击授权](<FULL_AUTHORIZATION_URL>)`；链接目标逐字保留全部 query | 等待当前授权事务完成 |
 | AUTH-07 | 受限 | user 取消、失败或授权失效 | 返回 CLI 真实原因 | 停止业务调用 |
 | AUTH-08 | 已支持 | app 需要 secret | 只通过 stdin 或等价安全凭证源提供 | 登录后重新查询状态 |
 | AUTH-09 | 受限 | app 或 user 授权失败 | 不自动切换到另一身份 | 返回真实失败并停止 |
@@ -112,7 +115,7 @@ flowchart TD
 | AUTH-21 | 已支持 | WorkBuddy `auth complete` 本地未找到待完成事务 | 恢复首次 `auth init` 使用的 `CODEBUDDY_SESSION_ID` 并重试 `auth complete`，不直接 `auth init --restart` | 原事务完成；只有 `denied/expired/invalid_grant` 才经用户同意新建事务 |
 | AUTH-22 | 已支持 | WorkBuddy 发起授权且用户未指定身份 | 调用 `AskUserQuestion`，设置 `multiSelect=false`，选项为 user/app | 用户单选后才查询对应身份状态 |
 | AUTH-23 | 已支持 | 豆包发起授权且用户未指定身份 | 优先使用原生单选组件；组件不可用时展示稳定编号 `1. user`、`2. app` | 用户回复有效编号或身份后继续 |
-| AUTH-24 | 已支持 | user 授权入口已生成 | 用户自己点击“授权登录详情”；Agent 不自动打开浏览器，不在展示切换时重启授权 | 保持唯一授权事务 |
+| AUTH-24 | 已支持 | user 授权入口已生成 | 用户自己点击“点击授权”；Agent 不自动打开浏览器，不在展示切换时重启授权 | 保持唯一授权事务 |
 | AUTH-25 | 已支持 | 仅有一个 `test-user` Profile，默认身份为 user，且存在历史 token | 仍先让用户单选 user/app；不从 Profile 或 token 推断选择 | 用户选择后才匹配 Profile 和查询状态 |
 | AUTH-26 | 已支持 | 用户只说“开始授权”或“继续授权”，同次授权尚未选择身份 | 将其作为继续授权意图，仍先单选 user/app；已有明确选择时复用 | 身份明确后按对应流程继续 |
 | AUTH-27 | 已支持 | 豆包并发调用 `auth init`，或同一首次安装 `eventId` 重放 `auth init --restart` | CLI 通过 Profile 级锁只创建一笔 Device 事务；重放返回原授权入口及 `reused=true`，Skill 不重复展示 | 用户只打开一个授权页面 |

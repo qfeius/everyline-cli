@@ -267,6 +267,102 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 	}
 }
 
+/*
+TestAuthDeviceInitRenewsExpiredUserToken 验证过期凭证会生成一笔新授权，手动完成后恢复登录，有效凭证继续复用。
+入参：t *testing.T 为测试上下文。
+返回值：无；过期状态误报成功、重复创建事务、提前兑换或未恢复登录时通过测试失败报告。
+*/
+func TestAuthDeviceInitRenewsExpiredUserToken(t *testing.T) {
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	for _, scenario := range []struct {
+		name      string
+		expiresAt time.Time
+		renew     bool
+	}{
+		{name: "expired", expiresAt: now.Add(-time.Minute), renew: true},
+		{name: "expires_now", expiresAt: now, renew: true},
+		{name: "still_valid", expiresAt: now.Add(time.Minute)},
+		{name: "unknown_expiry"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var deviceCalls, tokenCalls atomic.Int32
+			verificationURL := "https://auth.example.com/device?user_code=NEW-CODE&tenant=test"
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/metadata":
+					_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","device_authorization_endpoint":"` + server.URL + `/device"}`))
+				case "/device":
+					deviceCalls.Add(1)
+					_, _ = writer.Write([]byte(`{"device_code":"private-new-device-code","user_code":"NEW-CODE","verification_uri":"https://auth.example.com/device","verification_uri_complete":"` + verificationURL + `","expires_in":600}`))
+				case "/token":
+					tokenCalls.Add(1)
+					if err := request.ParseForm(); err != nil || request.Form.Get("grant_type") != auth.DeviceGrantType || request.Form.Get("device_code") != "private-new-device-code" {
+						http.Error(writer, "unexpected token exchange", http.StatusBadRequest)
+						return
+					}
+					_, _ = writer.Write([]byte(`{"access_token":"private-new-user-token","token_type":"Bearer","expires_in":3600}`))
+				default:
+					t.Errorf("unexpected request: %s", request.URL.Path)
+					http.NotFound(writer, request)
+				}
+			}))
+			t.Cleanup(server.Close)
+			runtime, stdout, _ := testRuntime(t)
+			runtime.HTTP = server.Client()
+			runtime.Now = func() time.Time { return now }
+			profile := config.Profile{
+				Name: "test-user", BaseURL: "https://test-open.qtech.cn", TokenURL: "https://test-open.qtech.cn/token",
+				OAuthMetadataURL: server.URL + "/metadata", OAuthDeviceClientID: "device-client",
+				OAuthBusinessType: "contract-review", OAuthScopes: []string{"contract-review:full"},
+				DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+			}
+			if err := runtime.Profiles.Add(profile); err != nil {
+				t.Fatal(err)
+			}
+			deviceStore := &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{
+				profile.Name: {Token: &auth.Token{AccessToken: "private-old-user-token", ExpiresAt: scenario.expiresAt}},
+			}}
+			runtime.DeviceCredentials = deviceStore
+			// 连续 init 模拟 Agent 重试；待用户完成前只允许一笔授权且不请求 token endpoint。
+			for attempt := 0; attempt < 2; attempt++ {
+				stdout.Reset()
+				if err := Execute(context.Background(), runtime, []string{"auth", "init", "--profile", profile.Name, "--as", "user"}); err != nil {
+					t.Fatal(err)
+				}
+				var result deviceAuthOutput
+				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if scenario.renew {
+					if result.Status != "pending" || result.VerificationURIComplete != verificationURL || result.Reused != (attempt == 1) || deviceCalls.Load() != 1 {
+						t.Fatalf("重新授权结果=%#v，授权请求数=%d", result, deviceCalls.Load())
+					}
+				} else if result.Status != "succeeded" || result.VerificationURIComplete != "" || deviceCalls.Load() != 0 {
+					t.Fatalf("有效凭证未复用: result=%#v，授权请求数=%d", result, deviceCalls.Load())
+				}
+			}
+			if tokenCalls.Load() != 0 {
+				t.Fatal("用户完成授权前已兑换 token")
+			}
+			if !scenario.renew {
+				return
+			}
+			stdout.Reset()
+			if err := Execute(context.Background(), runtime, []string{"auth", "complete", "--profile", profile.Name, "--as", "user"}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stdout.String(), `"status": "succeeded"`) || strings.Contains(stdout.String(), "private-") || tokenCalls.Load() != 1 {
+				t.Fatalf("手动授权完成结果=%s，兑换请求数=%d", stdout.String(), tokenCalls.Load())
+			}
+			stdout.Reset()
+			if err := Execute(context.Background(), runtime, []string{"auth", "status", "--profile", profile.Name, "--as", "user"}); err != nil || !strings.Contains(stdout.String(), `"authenticated": true`) {
+				t.Fatalf("重新授权未恢复登录: stdout=%s err=%v", stdout.String(), err)
+			}
+		})
+	}
+}
+
 // TestAuthDeviceInitReusesFirstInstallTransaction 验证同一首次安装事件重放 --restart 时只创建一笔 Device 授权。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；重复请求授权端点、链接变化或事件未绑定时通过 t.Fatal 报告。

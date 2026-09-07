@@ -41,24 +41,24 @@ CLI 和 Skill 应来自同一个发布版本。每次 Skill 发布（包括纯�
 - 全新安装 Agent Skill 时，安装器会在 `$HOME/.everyline-cli/install-state.json` 写入不含凭证的授权门禁。旧 token 保留，但在完成一次新授权前不会被当作已登录，`review/checklist/rule` 也不会发起远端请求。
 - 旧版本升级时，若状态文件尚不存在，但检测到指向本包的 `everyline-shared` 旧链接或已有 Skill 登记，则补建非首次安装状态并输出 `event=updated`，由 `auth status` 检查现有授权，不强制重新授权。已有状态文件中的待授权门禁继续保留。
 
-新版 npm 可能要求显式批准依赖包的安装脚本，因此推荐使用以下命令。该批准只针对 `everyline-cli`，用于执行包内的 CLI 校验和 Skill 登记。
+新版 npm 可能要求显式批准依赖包的安装脚本，因此推荐使用以下命令。该批准只针对 `everyline-cli`，用于执行包内的 CLI 校验和 Skill 登记。`--foreground-scripts` 使安装完成文案和安装事件可见，避免 npm 在后台运行 `postinstall` 时隐藏成功输出。
 
 ### 从 npm 仓库安装
 
 ```bash
-npm install -g --allow-scripts=everyline-cli everyline-cli@RELEASE_VERSION
+npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@RELEASE_VERSION
 ```
 
 ### 从待发布的 tgz 安装
 
 ```bash
-npm install -g --allow-scripts=everyline-cli /absolute/path/everyline-cli-RELEASE_VERSION.tgz
+npm install -g --foreground-scripts --allow-scripts=everyline-cli /absolute/path/everyline-cli-RELEASE_VERSION.tgz
 ```
 
 Windows PowerShell 同样可以使用：
 
 ```powershell
-npm install -g --allow-scripts=everyline-cli C:\absolute\path\everyline-cli-RELEASE_VERSION.tgz
+npm install -g --foreground-scripts --allow-scripts=everyline-cli C:\absolute\path\everyline-cli-RELEASE_VERSION.tgz
 ```
 
 检查安装结果：
@@ -89,9 +89,11 @@ npm 包内的三项 Skill 位于：
 <npm-global-root>/everyline-cli/skills/everyline-review-config/
 ```
 
-全局 npm 安装会自动登记 Codex 和 WorkBuddy。豆包仍从界面导入独立 ZIP；安装过程不创建 Profile、不直接发起远端授权或业务请求，而是建立首次安装门禁，等待用户先选择身份，再由 Agent 匹配或创建 Profile 并执行对应的新授权流程。首次安装统一提示：
+全局 npm 安装会自动登记 Codex 和 WorkBuddy，并建立首次安装门禁。豆包从界面导入独立 ZIP，静态导入不执行 npm 安装脚本。三个宿主都在确认 CLI 可执行、三项 Skill 可读取或启用后，由 Agent 在回复正文展示首次安装提示；终端日志或 JSON 事件不代替面向用户的回复。安装过程不创建 Profile、不直接发起远端授权或业务请求，展示后等待用户确认开始授权，再选择身份、匹配或创建 Profile 并执行对应授权流程。
 
-EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。
+Codex 和 WorkBuddy 在本次安装任务完成时展示；豆包在导入后首次运行 Skill 并确认当前任务中 CLI 可用时展示。豆包、WorkBuddy 界面导入或手工安装路径，按已确认的首次导入/安装上下文触发，不依赖全局 npm 状态文件；普通新会话不重复介绍，安装失败不展示完成文案。首次安装统一提示：
+
+EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。
 
 以下命令默认使用 npm 的标准全局目录。CLI 若通过 `npm install -g --prefix "$HOME/.local"` 安装，先在当前终端设置：
 
@@ -202,6 +204,7 @@ dist/everyline-review-config-skill.zip
 2. 依次上传三个 ZIP，确认解析名称分别为 `everyline-cli`、`everyline-review`、`everyline-review-config`。
 3. 启用三项 Skill 并新建任务验证；ZIP 应作为 Skill 导入，不作为普通聊天附件总结。
 4. 远端沙箱准备对应 Linux CLI，并按 `everyline-cli` 公共 Skill 提供 Device Grant 的会话变量；合同通过附件字节流、沙箱内路径或完整 URL 交付。
+5. 首次验证时发送「刚首次导入 EveryLine 的三项 Skill，请验证 CLI 和 Skill 已就绪并展示安装完成提示，先不要发起授权」。CLI 尚未安装时在同一请求中补充安装要求；确认 CLI 可执行后，豆包应在回复正文展示上述统一文案，即使 `version` 没有首次安装字段。
 
 豆包的 Skill 功能和入口仍在快速更新；本手册以客户端存在“上传技能”为前提。当前客户端只有“对话新建技能”时，应等待或启用本地 Skill 上传入口，避免把 `SKILL.md` 正文复制成缺少 references 的不完整技能。
 
@@ -253,7 +256,7 @@ $everyline-cli 使用当前 prod-user Profile 和 user 身份检查 CLI 版本�
 
 身份明确后，用户本轮没有指定 Profile 或环境时，Codex、WorkBuddy 和豆包统一默认 test：user 复用或创建 `test-user`，app 复用 `test-app`，缺少时在取得非敏感 app ID 后创建。当前 dev、blue、prod Profile 不会被默认继承；用户本轮显式指定的 Profile 或环境优先。宿主差异只影响 user 的授权协议：Codex 本地使用 OAuth/PKCE，豆包和 WorkBuddy 使用 Device Grant。
 
-user 流程取得 CLI 返回的完整授权 URL 后，优先生成宿主原生链接按钮，按钮文字固定为“授权登录详情”；没有链接按钮时显示 `[授权登录详情](<FULL_AUTHORIZATION_URL>)`。链接目标逐字保留 CLI 返回值及全部 query 参数，由用户主动点击，Agent 不自动打开浏览器，也不为改变展示方式创建第二笔授权事务。app 流程没有此链接，继续使用下方隐藏输入 app secret 的方式。
+user 流程取得 CLI 返回的完整授权 URL 后，优先生成宿主原生链接按钮，按钮文字固定为“点击授权”；没有链接按钮时显示 `[点击授权](<FULL_AUTHORIZATION_URL>)`。链接目标逐字保留 CLI 返回值及全部 query 参数，由用户主动点击，Agent 不自动打开浏览器，也不为改变展示方式创建第二笔授权事务。app 流程没有此链接，继续使用下方隐藏输入 app secret 的方式。
 
 ### user 身份：推荐用于人工交互验证
 
@@ -280,7 +283,7 @@ everyline-cli auth login \
 保持该 CLI 进程运行，从输出中取出完整授权地址并展示：
 
 ```text
-[授权登录详情](<FULL_AUTHORIZATION_URL>)
+[点击授权](<FULL_AUTHORIZATION_URL>)
 ```
 
 用户点击并完成浏览器授权后，由原 CLI 进程接收 callback；不要自动打开页面或重新执行 `auth login`。
@@ -302,7 +305,7 @@ everyline-cli auth status \
 everyline-cli auth init --profile test-user --as user --output json
 ```
 
-把 `verification_uri_complete` 从 `https://` 到最后一个 query 参数逐字保留为链接目标，并展示 `[授权登录详情](<verification_uri_complete>)`。用户主动点击并完成授权后只检查一次：
+把 `verification_uri_complete` 从 `https://` 到最后一个 query 参数逐字保留为链接目标，并展示 `[点击授权](<verification_uri_complete>)`。用户主动点击并完成授权后只检查一次：
 
 ```bash
 everyline-cli auth complete --profile test-user --as user --output json
@@ -311,6 +314,10 @@ everyline-cli auth complete --profile test-user --as user --output json
 WorkBuddy 在第一次 `auth init` 前固定一个非敏感的 `CODEBUDDY_SESSION_ID`，上面两条命令和随后的 `auth status` 都添加相同的 `CODEBUDDY_SESSION_ID=<same-session-id>` 前缀。若 `auth complete` 提示本地没有待完成事务，先恢复首次命令使用的原值并重试 `auth complete`；此时不要执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并经用户同意后，才创建新的授权事务。
 
 豆包的恢复流程相同：先恢复原 `SESSION_ID` 和初始工作目录，再检查已有事务。豆包本地电脑也不执行 `auth login --as user`，Device 状态查询、业务取 token 和刷新均只使用当前 Device 会话，不回退到本机旧 OAuth 缓存。
+
+user Token 过期且未刷新成功后，保持原 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录：Codex 重新执行上面的 `auth login --no-open-browser` 并保持进程等待回调；豆包/WorkBuddy 执行一次 `auth init`，过期 Token 会生成新的完整 Device 链接。若已有待完成事务则复用；只有该事务明确过期、拒绝或失效时才执行一次 `auth init --restart`。用户已要求过期后重新生成链接时直接执行该策略，不重复确认意愿，也不复用历史链接中的授权码。
+
+用户完成手动登录后，Device 流程执行一次 `auth complete`，再用 `auth status` 确认 `authenticated=true`，只恢复原业务步骤一次。尚未过期的 Token 仍可继续使用，不因提前刷新失败要求用户重新登录。
 
 只有 `status=succeeded` 才继续。dev/test/prod 环境预设提供 `contract-review` metadata、回调地址和 `contract-review:full` scope。Codex 每次显式 `auth login --as user` 会读取 metadata 的 `registration_endpoint`，动态注册浏览器 client 并执行 OAuth Authorization Code + PKCE。豆包/WorkBuddy 的 `auth init` 只走 Device Grant：dev/test 使用独立 Device client `zscli_c77221e810ce3977`，不动态注册也不复用浏览器 client；prod 或自定义环境需显式配置平台确认的 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
 
@@ -487,7 +494,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 解析 `version --output json`。`updateRequired=true` 时先记住 `updateCommand`，继续完成当前完整业务流程；CLI 同时会在 stderr 输出 `code=UPDATE_PENDING`、当前版本、最新版本、更新命令和 `updateAfter=current_business_workflow`。全部业务 API 结束并保留结果后原样执行一次更新命令，再次检查版本；下一条新业务重新加载新版 Skill。
 
-CLI 与三项 Skill 更新并校验成功后展示“EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。”，复用同次授权中用户已选的身份；尚未选择时先单选 user/app，再对匹配的 Profile 和身份执行一次 `auth status`。只有 `authenticated=true` 时追加“当前已存在生效授权，可直接调用cli能力。”；`authenticated=false` 时追加“使用前需要先完成账号授权。”，已有继续授权请求时直接按已选身份继续，否则等待用户确认。状态查询报错时保留未知状态并报告原始错误，不从 token 文件或安装成功推断授权有效。
+CLI 与三项 Skill 更新并校验成功后展示“EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。”，复用同次授权中用户已选的身份；尚未选择时先单选 user/app，再对匹配的 Profile 和身份执行一次 `auth status`。只有 `authenticated=true` 时追加“当前已存在生效授权，可直接调用cli能力；”；`authenticated=false` 时追加“使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。”，已有继续授权请求时直接按已选身份继续，否则等待用户确认。状态查询报错时保留未知状态并报告原始错误，不从 token 文件或安装成功推断授权有效。
 
 ### 提示尚未选择 Profile
 

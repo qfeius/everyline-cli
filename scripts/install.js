@@ -23,11 +23,11 @@ const { resolvePlatformTarget } = require("./platform");
 const skillNames = ["everyline-cli", "everyline-review", "everyline-review-config"];
 const deprecatedSkillNames = ["everyline-shared"];
 const installStateSchema = "everyline.install-state.v1";
-// 安装提示与 Agent 事件共用文案，首次授权先收集 user/app 选择，再进入对应登录方式。
-const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。";
+// 安装提示与 Agent 事件共用文案；先说明可协助授权，用户要求登录后再选择 user/app。
+const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
 const updateMessage = "EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。";
-const authorizationRequiredMessage = "使用前需要先完成账号授权。";
-const authorizedMessage = "当前已存在生效授权，可直接调用cli能力。";
+const authorizationRequiredMessage = "使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
+const authorizedMessage = "当前已存在生效授权，可直接调用cli能力；";
 
 /**
  * shouldInstallCodexSkill 判断本次 npm 生命周期是否应登记 Codex Skill。

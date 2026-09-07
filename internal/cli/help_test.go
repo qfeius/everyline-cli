@@ -41,7 +41,7 @@ func TestHelpExplainsReviewTaskResultIsLocalOrchestration(t *testing.T) {
 /*
 TestEverylineSkillReadinessMatchesLiveHelp 验证交互 Skill 的授权引导、调用上下文和 dry-run 顺序与当前 CLI 能力一致。
 入参：t *testing.T 为 Go 测试上下文。
-返回值：无；Skill 缺少先选身份的安装提示、真实帮助命令或 dry-run 门时通过测试失败报告差异。
+返回值：无；Skill 缺少指定的安装与授权提示、真实帮助命令或 dry-run 门时通过测试失败报告差异。
 */
 func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 	skillContent, err := os.ReadFile("../../skills/everyline-cli/SKILL.md")
@@ -142,9 +142,9 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 		"Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）",
 		"1. user（个人账号授权）",
 		"2. app（应用授权）",
-		"[授权登录详情](<FULL_AUTHORIZATION_URL>)",
+		"[点击授权](<FULL_AUTHORIZATION_URL>)",
 		"everyline-cli auth login --profile <profile> --as user --no-open-browser",
-		"[授权登录详情](<verification_uri_complete>)",
+		"[点击授权](<verification_uri_complete>)",
 		"用户主动点击跳转",
 		"不得要求用户在对话中提供、粘贴或转述 app secret",
 		"发起 app 授权不得先调用 user 的 `auth logout`",
@@ -153,9 +153,9 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 		"`firstInstall=true` 且 `authorizationRequired=true`",
 		"旧 dev token 不作为本次安装已授权依据",
 		"`auth init --restart`",
-		"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。",
+		"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。",
 		"EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。",
-		"当前已存在生效授权，可直接调用cli能力。",
+		"当前已存在生效授权，可直接调用cli能力；",
 		"app 授权先取得并固定非敏感的 app ID，再进入 app secret 输入",
 		"同一次登录事务只输入一次 app secret",
 		"不自动重跑 `auth login`",
@@ -206,9 +206,9 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"发起任何授权事务前必须先固定 `user/app` 身份",
 		"WorkBuddy 固定调用 `AskUserQuestion` 并设置 `multiSelect=false`",
 		"Codex 当前回合提供原生结构化选项工具（如 `request_user_input`）",
-		"[授权登录详情](<FULL_AUTHORIZATION_URL>)",
+		"[点击授权](<FULL_AUTHORIZATION_URL>)",
 		"everyline-cli auth login --profile <profile> --as user --no-open-browser",
-		"[授权登录详情](<verification_uri_complete>)",
+		"[点击授权](<verification_uri_complete>)",
 		"Codex 本地任务",
 		"豆包 AgentKit / Skills Sandbox",
 		"豆包普通工作任务",

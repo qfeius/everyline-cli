@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -184,7 +186,7 @@ func TestVersionReportsLatestStateAndUpdateCommand(t *testing.T) {
 }
 
 /*
-TestFirstInstallStatusRejectsExistingToken 验证首次安装拒绝旧 token，并通过事件引导用户先选择授权方式。
+TestFirstInstallStatusRejectsExistingToken 验证首次安装拒绝旧 token，并通过事件提供指定的安装与授权帮助文案。
 入参：t *testing.T 为测试上下文。
 返回值：无；状态仍信任旧 token 或缺少正确的授权引导时通过 t.Fatal 报告。
 */
@@ -210,7 +212,7 @@ func TestFirstInstallStatusRejectsExistingToken(t *testing.T) {
 			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
 		}
 	}
-	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) || !strings.Contains(stderr.String(), `"recommendedSkill":"everyline-cli"`) || !strings.Contains(stderr.String(), `"message":"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。"`) {
+	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) || !strings.Contains(stderr.String(), `"recommendedSkill":"everyline-cli"`) || !strings.Contains(stderr.String(), `"message":"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。"`) {
 		t.Fatalf("stderr=%s，缺少首次安装 NDJSON 事件", stderr.String())
 	}
 	stdout.Reset()
@@ -882,6 +884,134 @@ func TestAuthUserLoginFailurePreservesOAuthClientAndToken(t *testing.T) {
 	storedToken, tokenErr := identityStore.LoadForIdentity(profile.Name, config.IdentityUser)
 	if tokenErr != nil || storedToken.AccessToken != oldToken.AccessToken || storedToken.OAuthClientID != oldToken.OAuthClientID {
 		t.Fatalf("storedToken=%#v err=%v", storedToken, tokenErr)
+	}
+}
+
+/*
+TestAuthUserLoginDeniedPreservesOAuthClientAndToken 验证动态注册后拒绝授权会显示明确结果，并保留既有登录凭证。
+入参：t *testing.T 为测试上下文。
+返回值：无；回调响应、CLI 错误、token 兑换次数或原有凭证与预期不符时通过测试失败报告。
+*/
+func TestAuthUserLoginDeniedPreservesOAuthClientAndToken(t *testing.T) {
+	callbackListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackPort := callbackListener.Addr().(*net.TCPAddr).Port
+	_ = callbackListener.Close()
+
+	// 请求计数由 HTTP handler 写入，使用原子变量保证跨 goroutine 的检查可靠。
+	var registrationCalls, tokenCalls atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/register":
+			registrationCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"client_id":"new-oauth-client","token_endpoint_auth_method":"none"}`))
+		case "/metadata":
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","registration_endpoint":"` + server.URL + `/register","code_challenge_methods_supported":["S256"]}`))
+		case "/token":
+			tokenCalls.Add(1)
+			http.Error(writer, "unexpected token exchange", http.StatusBadRequest)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	// 浏览器独立读取完整响应，覆盖 CLI 收到拒绝后关闭回调服务的并发路径。
+	browserResults := make(chan struct {
+		status int
+		body   string
+		err    error
+	}, 1)
+	runtime.OpenBrowser = func(authorizationURL string) error {
+		parsed, err := url.Parse(authorizationURL)
+		if err != nil {
+			return err
+		}
+		redirectURL, err := url.Parse(parsed.Query().Get("redirect_uri"))
+		if err != nil {
+			return err
+		}
+		// 复现服务端拒绝分支只携带 error 和 error_description、没有 state 的回调。
+		redirectURL.RawQuery = url.Values{
+			"error": {"access_denied"}, "error_description": {"用户拒绝授权"},
+		}.Encode()
+		go func() {
+			result := struct {
+				status int
+				body   string
+				err    error
+			}{}
+			client := &http.Client{Timeout: 2 * time.Second}
+			response, err := client.Get(redirectURL.String())
+			if err != nil {
+				result.err = err
+			} else {
+				defer response.Body.Close()
+				body, readErr := io.ReadAll(response.Body)
+				result.status, result.body, result.err = response.StatusCode, string(body), readErr
+			}
+			browserResults <- result
+		}()
+		return nil
+	}
+	profile := config.Profile{
+		Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/tenant-token",
+		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review",
+		OAuthClientID: "old-oauth-client", OAuthDeviceClientID: "existing-device-client",
+		OAuthRedirectURL: fmt.Sprintf("http://127.0.0.1:%d/login", callbackPort),
+		OAuthScopes:      []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	identityStore := runtime.Tokens.(interface {
+		LoadForIdentity(string, config.IdentityKind) (auth.Token, error)
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	oldToken := auth.Token{
+		AccessToken: "old-access-token", RefreshToken: "old-refresh-token", OAuthClientID: profile.OAuthClientID,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if err := identityStore.SaveForIdentity(profile.Name, config.IdentityUser, oldToken); err != nil {
+		t.Fatal(err)
+	}
+
+	// 拒绝必须结束本次登录；上下文仅用于防止错误实现一直等待授权超时。
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err = Execute(ctx, runtime, []string{"auth", "login", "--profile", profile.Name, "--as", "user"})
+	if err == nil || !strings.Contains(err.Error(), "access_denied") || !strings.Contains(err.Error(), "用户拒绝授权") {
+		t.Errorf("err=%v", err)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("拒绝授权应立即结束登录: %v", ctx.Err())
+	}
+	select {
+	case result := <-browserResults:
+		if result.err != nil || result.status != http.StatusForbidden || !strings.Contains(result.body, "用户已拒绝授权") || strings.Contains(result.body, "授权已完成") {
+			t.Errorf("browser status=%d body=%q err=%v", result.status, result.body, result.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("浏览器未收到完整拒绝响应")
+	}
+	if registrationCalls.Load() != 1 || tokenCalls.Load() != 0 {
+		t.Errorf("registration calls=%d token calls=%d", registrationCalls.Load(), tokenCalls.Load())
+	}
+	if strings.Contains(stdout.String(), `"authenticated": true`) || strings.Contains(stdout.String(), `"authenticated":true`) {
+		t.Errorf("拒绝授权后输出了成功结果: %s", stdout.String())
+	}
+	storedProfile, profileErr := runtime.Profiles.Get(profile.Name)
+	if profileErr != nil || storedProfile.OAuthClientID != profile.OAuthClientID || storedProfile.OAuthDeviceClientID != profile.OAuthDeviceClientID {
+		t.Errorf("storedProfile=%#v err=%v", storedProfile, profileErr)
+	}
+	storedToken, tokenErr := identityStore.LoadForIdentity(profile.Name, config.IdentityUser)
+	if tokenErr != nil || storedToken.AccessToken != oldToken.AccessToken || storedToken.RefreshToken != oldToken.RefreshToken || storedToken.OAuthClientID != oldToken.OAuthClientID || !storedToken.ExpiresAt.Equal(oldToken.ExpiresAt) {
+		t.Errorf("storedToken=%#v err=%v", storedToken, tokenErr)
 	}
 }
 

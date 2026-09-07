@@ -83,7 +83,7 @@ test("Codex Skill 登记保留用户已有的同名目录", (t) => {
 });
 
 /**
- * 验证全局安装登记三项 Skill，并在文本和事件中提示客户先选择 user/app 授权。
+ * 验证全局安装登记三项 Skill，并在文本和事件中原样提供首次安装与授权帮助文案。
  * 入参：t（TestContext），用于登记临时安装目录的清理操作。
  * 返回值：void，登记结果或授权提示不符合预期时断言失败。
  */
@@ -118,7 +118,7 @@ test("全局安装同步登记 Codex 与 WorkBuddy 的三项 Skill", (t) => {
   assert.match(state.eventId, /^[0-9a-f-]+$/);
 
   const output = formatInstallOutput(result);
-  const expectedMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，请先选择 user（个人账号授权）或 app（应用授权）。";
+  const expectedMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
   const outputLines = output.trim().split("\n");
   assert.equal(outputLines[0], expectedMessage);
   assert.equal(JSON.parse(outputLines.at(-1)).message, expectedMessage);
@@ -358,7 +358,7 @@ test("已有待授权状态不被旧版登记迁移解除", (t) => {
 });
 
 /**
- * 验证升级事件要求检查真实授权状态，未授权提示不预先指定浏览器登录方式。
+ * 验证升级事件要求检查真实授权状态，并原样提供授权失效和有效时的提示文案。
  * 入参：t（TestContext），用于登记临时安装目录的清理操作。
  * 返回值：void，事件动作或状态分支文案不符合预期时断言失败。
  */
@@ -390,8 +390,8 @@ test("升级安装要求 Agent 按真实授权状态选择提示文案", (t) => 
   assert.equal(event.event, "updated");
   assert.equal(event.authCheckRequired, true);
   assert.equal(event.nextAction, "auth_status");
-  assert.equal(event.authorizationRequiredMessage, "使用前需要先完成账号授权。");
-  assert.equal(event.authorizedMessage, "当前已存在生效授权，可直接调用cli能力。");
+  assert.equal(event.authorizationRequiredMessage, "使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。");
+  assert.equal(event.authorizedMessage, "当前已存在生效授权，可直接调用cli能力；");
 });
 
 test("全局安装后置目标冲突时不留下部分 Skill 链接", (t) => {

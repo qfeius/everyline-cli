@@ -33,7 +33,7 @@ everyline-cli rule --help
 everyline-cli rule group --help
 ```
 
-先按 `everyline-cli` 公共 Skill 记录 `version` 的 `updateRequired`；完整完成当前查询或单次已确认写入及回读后，再执行延迟更新，不在写入链路中途替换 CLI。
+先按 `everyline-cli` 公共 Skill 的首次使用引导处理已确认的首次安装、导入上下文和授权门禁，在回复正文展示统一文案，同次对话已展示时复用。再记录 `version` 的 `updateRequired`；完整完成当前查询或单次已确认写入及回读后，再执行延迟更新，不在写入链路中途替换 CLI。
 
 每条 user 命令复用公共 Skill 已固定的 Device 会话上下文：豆包普通工作任务（含本地电脑）每次注入同一 `SESSION_ID` 并使用同一初始工作目录，WorkBuddy 每次注入同一 `CODEBUDDY_SESSION_ID`，AgentKit 保留平台工作区与注入密钥。
 
