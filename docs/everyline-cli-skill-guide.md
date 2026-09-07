@@ -10,7 +10,7 @@ Skill 的安装位置和验证入口由 Agent 宿主决定，不要跨宿主复�
 | --- | --- | --- |
 | Codex | 本地 Skill 目录 | `$HOME/.agents/skills/everyline-{shared,review,review-config}` |
 | WorkBuddy | 「专家·技能·连接器」或本地 Skill 目录 | `$HOME/.workbuddy/skills/everyline-{shared,review,review-config}` |
-| 豆包 | 「工作任务 → 技能·连接器·伙伴 → 上传技能」 | 分别导入三个 `*-skill.zip`，由豆包管理内部目录 |
+| 豆包 | 本地 npm 同步，或技能管理中的 ZIP 导入 | 本地使用已存在的 `workspace/.user_skills`；自定义目录用 `EVERYLINE_DOUBAO_SKILLS_DIR` 指定；云端仍分别导入三个 `*-skill.zip` |
 
 OpenAI 官方文档将 Skill 定义为包含 `SKILL.md` 及可选 references、scripts、assets 的目录。Codex 支持显式 `$skill-name` 调用和按 description 自动触发，并扫描用户级 `$HOME/.agents/skills`。详见 [OpenAI Build skills](https://learn.chatgpt.com/docs/build-skills)。WorkBuddy 使用自己的 `$HOME/.workbuddy/skills`，可参考 [WorkBuddy 技能系统说明](https://cloud.tencent.com/developer/article/2693324)；豆包电脑版当前通过界面上传本地 Skill，可参考 [豆包工作任务自定义 Skill 说明](https://www.beating.news/flash/362784)，最终入口以客户端实际展示为准。
 
@@ -28,7 +28,7 @@ Codex 本地任务直接使用宿主文件路径和 loopback OAuth。WorkBuddy �
 
 CLI 和 Skill 应来自同一个发布版本。每次 Skill 发布（包括纯文案调整）都提升 `package.json` 统一版本、发布同版本 npm 包并更新远端 manifest，让 `version.updateRequired` 可以触发强制更新门禁。
 
-## 2. 全局安装包默认同时安装 CLI、Codex Skills 和 WorkBuddy Skills
+## 2. 全局安装包同步 CLI、Codex、WorkBuddy 和豆包本地 Skills
 
 全局安装 `everyline-cli` npm 包时，`postinstall` 会校验原生 CLI，并把三项 Skill 分别链接到 `$HOME/.agents/skills` 和 `$HOME/.workbuddy/skills`：
 
@@ -89,9 +89,9 @@ npm 包内的三项 Skill 位于：
 <npm-global-root>/everyline-cli/skills/everyline-review-config/
 ```
 
-全局 npm 安装会自动登记 Codex 和 WorkBuddy，并建立首次安装门禁。豆包从界面导入独立 ZIP，静态导入不执行 npm 安装脚本。三个宿主都在确认 CLI 可执行、三项 Skill 可读取或启用后，由 Agent 在回复正文展示首次安装提示；终端日志或 JSON 事件不代替面向用户的回复。安装过程不创建 Profile、不直接发起远端授权或业务请求，展示后等待用户确认开始授权，再选择身份、匹配或创建 Profile 并执行对应授权流程。
+全局 npm 安装会自动登记 Codex、WorkBuddy，同步已发现或显式配置的豆包本地技能目录，并建立首次安装门禁。豆包云端独立 ZIP 的静态导入不执行 npm 安装脚本。三个宿主都在确认 CLI 可执行、三项 Skill 可读取或启用后，由 Agent 在回复正文展示首次安装提示；终端日志或 JSON 事件不代替面向用户的回复。安装过程不创建 Profile、不直接发起远端授权或业务请求，展示后等待用户确认开始授权，再选择身份、匹配或创建 Profile 并执行对应授权流程。
 
-Codex 和 WorkBuddy 在本次安装任务完成时展示；豆包在导入后首次运行 Skill 并确认当前任务中 CLI 可用时展示。豆包、WorkBuddy 界面导入或手工安装路径，按已确认的首次导入/安装上下文触发，不依赖全局 npm 状态文件；普通新会话不重复介绍，安装失败不展示完成文案。首次安装统一提示：
+全局 npm 安装路径在本次安装任务完成时展示；豆包 ZIP 导入路径在首次运行 Skill 并确认当前任务中 CLI 可用时展示。豆包、WorkBuddy 界面导入或手工安装路径，按已确认的首次导入/安装上下文触发，不依赖全局 npm 状态文件；普通新会话不重复介绍，安装失败不展示完成文案。首次安装统一提示：
 
 EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。
 
@@ -188,7 +188,15 @@ done
 
 ### 3.3 豆包电脑版
 
-豆包使用上传 Skill，不扫描 Codex 或 WorkBuddy 目录。仓库执行 `make skill-assets` 后生成：
+豆包工作支持本地普通技能文件夹。npm 全局安装时，macOS 自动发现已存在的 `~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills`，同步三项完整技能；安装器不替用户创建猜测的宿主路径。其他平台、不同用户配置或远端运行时，应使用当前豆包环境实际提供的目录：
+
+```bash
+EVERYLINE_DOUBAO_SKILLS_DIR="<豆包实际技能根目录的绝对路径>" npm install -g --foreground-scripts --allow-scripts=everyline-cli <发布包.tgz>
+```
+
+本地同步会比较内容而非只比较版本号，更新 `SKILL.md` 和全部 `references/`；旧目录保留在扫描目录外，出错时回滚本轮各宿主的变更。同名目录未声明对应 EveryLine 技能、含符号链接或特殊文件时，保留原目录并报告冲突。`EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL=1` 跳过豆包，`EVERYLINE_SKIP_SKILL_INSTALL=1` 跳过全部宿主。
+
+同步事件 `event=skills_updated / host=doubao / nextAction=reload_skills` 表示文件更新成功；Agent 应重新读取 `skills[].target` 下的三项 `SKILL.md`，或新建任务加载。历史对话不自动替换旧内容。云端导入副本尚未接入自动发布；该路径仍使用 ZIP。仓库执行 `make skill-assets` 后生成：
 
 ```text
 dist/everyline-cli-skill.zip
@@ -546,9 +554,9 @@ $EverylineNpmPrefix = Join-Path $HOME ".local"
 npm install -g --allow-scripts=everyline-cli --prefix $EverylineNpmPrefix everyline-cli@NEW_RELEASE_VERSION
 ```
 
-macOS/Linux 使用符号链接、Windows 使用目录联接时，Codex 与 WorkBuddy 的三项 Skill 都指向新 npm 包中的同名目录。豆包更新时重新运行 `make skill-assets`，再分别上传三个新 ZIP。
+macOS/Linux 使用符号链接、Windows 使用目录联接时，Codex 与 WorkBuddy 的三项 Skill 都指向新 npm 包中的同名目录。已发现或显式配置的豆包本地目录同步完整文件夹，三项技能的引用文件也会更新。云端导入版仍通过 `make skill-assets` 生成并上传三个新 ZIP。
 
-豆包已导入的 Skill 是独立副本，更新 CLI 或收到安装器 `event=updated` 不代表该副本已更新。应将当前任务实际加载的三项 `SKILL.md` 与本次发布包逐一比对；内容不同或尚未核实时，分别报告 CLI 更新结果与豆包 Skill 待更新/待验证状态。用三个独立 `*-skill.zip` 更新对应技能，再新建任务启用；外层完整发布 ZIP 和 npm `.tgz` 不用于 Skill 导入。只查看 npm 包内文件或 CLI 版本不算验证豆包加载成功。
+豆包更新后应区分“本地文件已同步”和“当前任务已重新加载”。以 `skills_updated` 事件的目标路径核对三项实际文件，再重新读取或新建任务；只查看 npm 包内文件或 CLI 版本不算验证加载成功。未发现豆包目录、云端导入版或内容尚未核实时，应报告仍待更新/验证，使用实际目录重装或通过三个独立 ZIP 更新，外层完整发布 ZIP 和 npm `.tgz` 不作为豆包 Skill 导入包。
 
 ### 只从某一个宿主移除 Skill
 

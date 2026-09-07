@@ -44,6 +44,7 @@ function requiredPackageFiles() {
     "docs/everyline-cli-skill-guide.md",
     "docs/everyline-cli-skill-interaction-scenarios.md",
     "scripts/install.js",
+    "scripts/doubao-skills.js",
     "scripts/package-version.js",
     "scripts/platform.js",
     "scripts/run.js",

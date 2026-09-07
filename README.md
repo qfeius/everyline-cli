@@ -8,6 +8,8 @@ EveryLine 命令行工具，支持合同审查工作流、审查清单和审查�
 
 npm 全局安装会同步登记 Codex 和 WorkBuddy 的三项 Skill。切换 Node/npm 安装目录时，安装器会校验旧链接所属的 EveryLine 包并更新链接，保留已有授权状态；迁移中途失败会尝试恢复原链接。用户自建目录或其他来源的同名 Skill 会保留并提示冲突。需要手动备份时，请放在 Skill 扫描目录之外，避免仅添加 `.bak` 后缀后仍被作为同名 Skill 加载。
 
+豆包工作本地技能也随 npm 全局安装同步。macOS 自动识别已存在的 `~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills`；其他平台或自定义工作区通过 `EVERYLINE_DOUBAO_SKILLS_DIR` 指定实际技能根目录。安装器比较三项技能的完整内容，同版本重新打包也会更新引用文件，旧副本留在扫描目录外，失败时回滚。同步后返回 `skills_updated / reload_skills`，Agent 应重新读取技能或新建任务；仅更新文件不会改写历史对话。`EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL=1` 可单独跳过豆包。
+
 ### 本地构建
 
 构建要求：Go 1.24 或更高版本、Node.js 18 或更高版本。进入 everyline-cli 源码目录后执行：
@@ -121,7 +123,7 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 仓库和 npm 发布包包含三项职责分离的交互式 Skill：`everyline-cli` 负责首次配置、身份和授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单、规则和规则分组。三项 Skill 共用当前 CLI 的实时帮助和结构化输出约束；原 `everyline-shared` 已合并到 `everyline-cli`。
 
-全局安装 npm 包时，`postinstall` 会把三项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills` 和 WorkBuddy 的 `$HOME/.workbuddy/skills`，并在首次安装建立授权门禁：旧 token 保留，但必须完成一次新的 user/app 授权后才能调用审查、清单或规则业务命令。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包通过 `make skill-assets` 生成的三个独立 ZIP 从界面导入。Skill 不修改或替代 CLI 接口。
+全局安装 npm 包时，`postinstall` 会把三项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills`、WorkBuddy 的 `$HOME/.workbuddy/skills`，并同步已发现或显式指定的豆包本地技能目录。首次安装建立授权门禁：旧 token 保留，但必须完成一次新的 user/app 授权后才能调用审查、清单或规则业务命令。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包云端导入路径仍使用 `make skill-assets` 生成的三个独立 ZIP。Skill 不修改或替代 CLI 接口。
 
 首次安装使用 `npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@latest`，让安装器提示可见。Codex、WorkBuddy 和豆包均需在确认 CLI 与 Skill 就绪后，由 Agent 在回复正文展示统一安装完成文案；豆包静态 ZIP 导入在导入后首次运行时完成这一检查和提示。
 
@@ -276,7 +278,7 @@ everyline-cli update \
 
 manifest 需要声明版本、当前平台的制品 URL 和 SHA-256。CLI 只有在新版本、平台匹配且摘要校验通过时才替换二进制；下载失败或校验失败会保留原文件。Windows 需要延后替换时返回 `updated=false, scheduled=true`，独立 helper 的最终结果写入 stderr。通过 npm/npx 薄包装启动时不会修改包内二进制，请使用 npm 更新包。
 
-Codex 与 WorkBuddy 的 CLI 和三项 Skill 来自同一个 npm 包，npm 更新成功后现有目录链接会直接使用新版 Skill。版本门禁以统一包版本为检测信号，因此每次 Skill 发布（包括纯文案调整）都必须提升 `package.json` 版本、发布同版本 npm 包并更新远端 manifest；只替换 ZIP 而不提升统一版本不会触发本地强制更新。豆包导入版仍按平台发布流程上传新 ZIP。
+CLI 和三项 Skill 来自同一个 npm 包。npm 更新成功后，Codex 与 WorkBuddy 的现有目录链接直接使用新版 Skill，已发现或显式配置的豆包本地技能目录同步完整内容。版本门禁以统一包版本为检测信号，因此每次 Skill 发布（包括纯文案调整）都必须提升 `package.json` 版本、发布同版本 npm 包并更新远端 manifest；只替换 ZIP 而不提升统一版本不会触发本地强制更新。主动重装 npm 包时，豆包同步仍会比较内容；豆包云端导入版按平台发布流程上传新 ZIP。
 
 manifest 示例：
 

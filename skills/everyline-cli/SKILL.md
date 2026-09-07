@@ -51,8 +51,9 @@ everyline-cli auth --help
 执行 `updateCommand` 或 npm 统一更新命令后，只有 CLI 版本与当前宿主实际加载的三项 Skill 都校验成功，才按以下顺序展示更新结果。安装器返回 `event=updated` 只证明本次安装发生更新，不代表豆包已导入新版 Skill：
 
 - Codex、WorkBuddy 使用 npm 登记的目录链接时，确认当前任务读取的三项 Skill 指向本次安装包；界面导入的副本需要单独更新。
-- 豆包的 ZIP 是独立导入副本，更新 CLI 不会更新豆包已导入的 Skill。读取当前任务实际加载的三项 `SKILL.md`，与本次发布包中的对应文件逐一比对；仅检查 npm 包内的 Skill 或 CLI 版本不算完成豆包更新。
-- 豆包仍加载旧副本或实际加载内容尚未核实时，明确说明 CLI 已更新、豆包 Skill 待更新或待验证，提供本次发布的三个独立 `*-skill.zip`，引导用户在技能管理中更新对应技能并新建任务启用。外层完整发布 ZIP 和 `.tgz` 不作为豆包 Skill 导入包，不把旧会话记忆当作新版加载结果。
+- 豆包本地技能随 npm 全局安装自动同步：macOS 自动识别已存在的 `~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills`；其他平台、自定义工作区或远端运行时，先确定实际技能目录，再通过 `EVERYLINE_DOUBAO_SKILLS_DIR=<absolute-skill-root>` 显式指定。安装器同步三项完整文件夹和引用文件，同版本包也比较内容并更新，旧副本保留在扫描目录外。`EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL=1` 仅跳过豆包，`EVERYLINE_SKIP_SKILL_INSTALL=1` 跳过全部宿主。
+- 安装器返回 `event=skills_updated`、`host=doubao`、`nextAction=reload_skills` 时，立即重新读取事件中 `skills[].target` 下的三项 `SKILL.md`，与包内来源核对，并在后续步骤按新版规则执行。文件已同步不等于当前会话已重新加载；宿主没有即时加载入口时结束更新轮次并提示新建任务。不要仅凭版本号或旧会话记忆报告已生效。
+- 未发现豆包本地目录时不创建猜测路径，也不把 CLI 安装成功当作豆包技能更新成功。云端 ZIP 导入副本尚未接入自动发布；仅该路径继续提供三个独立 `*-skill.zip`，通过技能管理更新并新建任务启用。外层完整发布 ZIP 和 `.tgz` 不作为豆包 Skill 导入包。
 
 1. 原样展示：`EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。`
 2. 复用更新前已经固定的 Profile 和身份执行一次 `auth status --profile <profile> --as <identity> --output json`；尚未固定时先按下文规则确定，再检查状态。不得根据安装命令退出码、token 文件存在或历史有效期推断授权状态。

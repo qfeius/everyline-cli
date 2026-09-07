@@ -47,8 +47,9 @@ grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_
 global_prefix="$temporary_dir/global"
 codex_skills_dir="$temporary_dir/codex-skills"
 workbuddy_skills_dir="$temporary_dir/workbuddy-skills"
+doubao_skills_dir="$temporary_dir/doubao-workspace/.user_skills"
 global_config_dir="$temporary_dir/global-config"
-EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
+EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" EVERYLINE_DOUBAO_SKILLS_DIR="$doubao_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
 global_package_root=$(npm root --global --prefix "$global_prefix")
 for skill_name in everyline-cli everyline-review everyline-review-config; do
   codex_skill_target="$codex_skills_dir/$skill_name"
@@ -57,6 +58,9 @@ for skill_name in everyline-cli everyline-review everyline-review-config; do
   test -f "$codex_skill_target/SKILL.md"
   test -L "$workbuddy_skill_target"
   test -f "$workbuddy_skill_target/SKILL.md"
+  # 豆包读取普通技能文件夹；比较整个目录，覆盖 references 随包更新。
+  test ! -L "$doubao_skills_dir/$skill_name"
+  diff -r "$global_package_root/everyline-cli/skills/$skill_name" "$doubao_skills_dir/$skill_name"
   node - "$codex_skill_target" "$workbuddy_skill_target" "$global_package_root/everyline-cli/skills/$skill_name" <<'NODE'
 const { realpathSync } = require("node:fs");
 
@@ -98,7 +102,7 @@ writeFileSync(join(configDirectory, "tokens.json"), JSON.stringify({
 }));
 NODE
 # 执行真实 postinstall，并由原生 CLI 读取其迁移状态，覆盖 Node 与 Go 的共享状态协议。
-npm_config_global=true EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" node "$global_package_root/everyline-cli/scripts/install.js" > "$temporary_dir/upgrade.txt"
+npm_config_global=true EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" EVERYLINE_DOUBAO_SKILLS_DIR="$doubao_skills_dir" node "$global_package_root/everyline-cli/scripts/install.js" > "$temporary_dir/upgrade.txt"
 EVERYLINE_CONFIG_DIR="$global_config_dir" "$global_prefix/bin/everyline-cli" version --output json > "$temporary_dir/upgrade-version.json"
 for identity in app user; do
   EVERYLINE_CONFIG_DIR="$global_config_dir" "$global_prefix/bin/everyline-cli" auth status --profile migration-test --as "$identity" --output json > "$temporary_dir/upgrade-$identity.json"

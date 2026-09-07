@@ -16,6 +16,7 @@ const {
 const { homedir } = require("node:os");
 const { basename, dirname, join, resolve } = require("node:path");
 const { resolvePlatformTarget } = require("./platform");
+const { buildDoubaoSkillPlans, inspectDoubaoSkillRegistration, installDoubaoSkill, finishDoubaoSkill } = require("./doubao-skills");
 
 // skillNames 是同一份 npm 包向 Codex、WorkBuddy 和豆包发布的三项职责分离 Skill。
 const skillNames = ["everyline-cli", "everyline-review", "everyline-review-config"];
@@ -48,10 +49,10 @@ function shouldInstallWorkBuddySkills(environment) {
 /**
  * isEverylineSkillSource 根据包内路径和 npm manifest 确认旧链接属于 EveryLine，避免接管用户同名 Skill。
  * 入参：source（string）为旧链接解析后的来源路径。
- * 返回值：boolean，只有三项正式 Skill 且所属包声明正确的 CLI 入口时为 true；读取权限等异常向外抛出。
+ * 返回值：boolean，仅当前或废弃的已知 Skill 且所属包声明正确的 CLI 入口时为 true；读取权限等异常向外抛出。
  */
 function isEverylineSkillSource(source) {
-  if (!skillNames.includes(basename(source)) || basename(dirname(source)) !== "skills") {
+  if ((!skillNames.includes(basename(source)) && !deprecatedSkillNames.includes(basename(source))) || basename(dirname(source)) !== "skills") {
     return false;
   }
   try {
@@ -113,22 +114,29 @@ function inspectAgentSkillRegistration(source, target, hostName = "Agent", metad
 }
 
 /**
- * registerAgentSkillPlans 先预检全部目标，再登记或迁移链接；异常时撤回新链接并恢复旧链接。
- * 入参：plans（Array<object>）为来源、目标、宿主和元数据列表；platform（string）为 Node 平台名。
+ * registerAgentSkillPlans 先预检全部宿主，再登记链接或同步豆包文件夹；异常时撤回本轮变更。
+ * 入参：plans（Array<object>）为来源、目标、宿主和元数据列表；platform（string）为 Node 平台名；beforeRegister（Function，可选）在全部预检通过后、写入链接前接收预检结果。
  * 返回值：Array<object>，每项保留计划元数据并带有 created/existing/updated 状态。
  */
-function registerAgentSkillPlans(plans, platform = process.platform) {
+function registerAgentSkillPlans(plans, platform = process.platform, beforeRegister) {
   // 全量预检发生在任何写入前，常见的同名目录冲突不会留下半套登记结果。
-  const inspected = plans.map((plan) => inspectAgentSkillRegistration(
+  const inspected = plans.map((plan) => plan.installMode === "directory" ? inspectDoubaoSkillRegistration(plan) : inspectAgentSkillRegistration(
     plan.source,
     plan.target,
     plan.hostName,
     plan,
   ));
+  // 首次安装意图必须先可靠落盘；预检冲突不会创建门禁，登记中断也不会丢失待授权状态。
+  beforeRegister?.(inspected);
   const changed = [];
   try {
     for (const registration of inspected) {
       if (registration.status === "existing") {
+        continue;
+      }
+      if (registration.installMode === "directory") {
+        changed.push(registration);
+        installDoubaoSkill(registration);
         continue;
       }
       mkdirSync(dirname(registration.target), { recursive: true });
@@ -146,11 +154,18 @@ function registerAgentSkillPlans(plans, platform = process.platform) {
         changed.push(registration);
       }
     }
+    for (const registration of changed) {
+      if (registration.installMode === "directory") finishDoubaoSkill(registration);
+    }
     return inspected;
   } catch (error) {
     // 只撤回本轮仍指向新来源的链接；旧目标保留在内存中，不在扫描目录里创建 .bak 副本。
     for (const registration of changed.reverse()) {
       try {
+        if (registration.installMode === "directory") {
+          finishDoubaoSkill(registration, true);
+          continue;
+        }
         let targetState;
         try {
           targetState = lstatSync(registration.target);
@@ -221,12 +236,12 @@ function registerSkillSet(packageRoot, skillRoot, platform, hostName) {
 }
 
 /**
- * removeDeprecatedSkillRegistrations 清理本包旧版本创建且仍指向同一包路径的 Skill 链接。
+ * inspectDeprecatedSkillRegistrations 只读识别本包同源或可验证旧包中的废弃 Skill 链接。
  * 入参：packageRoot（string）为 npm 包根目录；skillRoot（string）为宿主 Skill 根目录。
- * 返回值：string[]，为本次安全移除的旧 Skill 名称；用户目录或其他来源链接保持不变。
+ * 返回值：Array<object>，包含 name、target 和 previousLink，供旧安装识别及清理前核对；不包含用户目录或未确认来源。
  */
-function removeDeprecatedSkillRegistrations(packageRoot, skillRoot) {
-  const removed = [];
+function inspectDeprecatedSkillRegistrations(packageRoot, skillRoot) {
+  const registrations = [];
   for (const name of deprecatedSkillNames) {
     const target = join(skillRoot, name);
     let targetState;
@@ -242,16 +257,32 @@ function removeDeprecatedSkillRegistrations(packageRoot, skillRoot) {
       continue;
     }
 
-    // 旧链接的源目录在升级后可以已经不存在，因此直接比较链接文本，不依赖 realpath。
-    const linkedSource = resolve(dirname(target), readlinkSync(target));
+    // 同源升级允许源目录已删除；跨 Node 目录必须额外验证旧包 manifest，不接管未知来源。
+    const previousLink = readlinkSync(target);
+    const linkedSource = resolve(dirname(target), previousLink);
     const expectedSource = resolve(packageRoot, "skills", name);
-    if (linkedSource !== expectedSource) {
+    if (linkedSource !== expectedSource && (basename(linkedSource) !== name || !isEverylineSkillSource(linkedSource))) {
       continue;
     }
-    unlinkSync(target);
-    removed.push(name);
+    registrations.push({ name, target, previousLink });
   }
-  return removed;
+  return registrations;
+}
+
+/**
+ * removeDeprecatedSkillRegistrations 清理已确认属于 EveryLine 的废弃链接，包括其他 Node/npm 前缀。
+ * 入参：packageRoot（string）为本次包根目录；skillRoot（string）为宿主 Skill 根目录。
+ * 返回值：string[]，为已移除的旧 Skill 名称；目标发生变化时抛出错误并保留新目标。
+ */
+function removeDeprecatedSkillRegistrations(packageRoot, skillRoot) {
+  const registrations = inspectDeprecatedSkillRegistrations(packageRoot, skillRoot);
+  for (const { target, previousLink } of registrations) {
+    if (!lstatSync(target).isSymbolicLink() || readlinkSync(target) !== previousLink) {
+      throw new Error(`Skill 目标在安装期间发生变化，请重试: ${target}`);
+    }
+    unlinkSync(target);
+  }
+  return registrations.map(({ name }) => name);
 }
 
 /**
@@ -307,7 +338,7 @@ function ensureFirstInstallState(packageRoot, environment, userHome, platform, r
 }
 
 /**
- * installPackage 完成原生 CLI 校验，并在全局安装时同步登记 Codex 与 WorkBuddy Skills。
+ * installPackage 校验 CLI、保留首次安装意图，再同步 Codex、WorkBuddy 与可发现的豆包本地 Skills。
  * 入参：options（object，可选），可注入 packageRoot、platform、architecture、environment 和 userHome 供安装与测试使用。
  * 返回值：object，包含 binary、Skill 登记结果及机器可读的首次安装、授权和更新状态。
  */
@@ -333,7 +364,8 @@ function installPackage(options = {}) {
       binary,
       skillTarget: "",
       skillStatus: "",
-      skills: { codex: [], workBuddy: [] },
+      skills: { codex: [], workBuddy: [], doubao: [] },
+      doubaoSkillReloadRequired: false,
       firstInstall: false,
       authorizationRequired: false,
       nextAction: "",
@@ -354,9 +386,16 @@ function installPackage(options = {}) {
     ));
     installedSkillRoots.push(workBuddySkillRoot);
   }
-  const registrations = registerAgentSkillPlans(plans, platform);
-  // 保留清理时校验过的同源旧链接证据，避免源目录已删除的旧安装被当成首次安装。
-  let hadDeprecatedRegistrations = false;
+  plans.push(...buildDoubaoSkillPlans(packageRoot, skillNames, environment, platform, userHome));
+  // 清理前保留已验证的旧安装证据，跨 Node 前缀的 legacy 布局也属于升级。
+  let hadDeprecatedRegistrations = installedSkillRoots.some((skillRoot) => inspectDeprecatedSkillRegistrations(packageRoot, skillRoot).length > 0);
+  const registrations = registerAgentSkillPlans(plans, platform, (inspected) => {
+    const existingState = loadInstallState(resolveInstallStatePath(environment, userHome));
+    if (!existingState && !hadDeprecatedRegistrations && inspected.every(({ status }) => status === "created")) {
+      // 只预提交全新安装的待授权意图；失败或进程中断后，重试仍读取该门禁，旧安装的版本更新留到登记成功后。
+      ensureFirstInstallState(packageRoot, environment, userHome, platform, inspected, false, binary);
+    }
+  });
   // 新三项 Skill 全部登记成功后，再移除本包遗留的 everyline-shared 链接。
   for (const skillRoot of installedSkillRoots) {
     const removed = removeDeprecatedSkillRegistrations(packageRoot, skillRoot);
@@ -366,15 +405,17 @@ function installPackage(options = {}) {
   }
   const hostSkills = (hostKey) => registrations
     .filter((registration) => registration.hostKey === hostKey)
-    .map(({ name, target, status }) => ({ name, target, status }));
+    .map(({ name, target, status, backupPath }) => ({ name, target, status, ...(backupPath ? { backupPath } : {}) }));
   const codexSkills = hostSkills("codex");
   const workBuddySkills = hostSkills("workBuddy");
+  const doubaoSkills = hostSkills("doubao");
   const installState = ensureFirstInstallState(packageRoot, environment, userHome, platform, registrations, hadDeprecatedRegistrations, binary);
   return {
     binary,
     skillTarget: codexSkills[0].target,
     skillStatus: codexSkills[0].status,
-    skills: { codex: codexSkills, workBuddy: workBuddySkills },
+    skills: { codex: codexSkills, workBuddy: workBuddySkills, doubao: doubaoSkills },
+    doubaoSkillReloadRequired: doubaoSkills.some((skill) => skill.status !== "existing"),
     installStatePath: installState.path,
     firstInstall: installState.firstInstall === true,
     authorizationRequired: installState.authorizationRequired === true,
@@ -399,6 +440,13 @@ function formatInstallOutput(result) {
     for (const skill of skills) {
       lines.push(`${hostName}: ${skill.target} (${skill.status})`);
     }
+  }
+  if (result.doubaoSkillReloadRequired) {
+    lines.push("豆包本地 Skill 已同步；请重新读取三项 SKILL.md，或新建任务加载新版。历史对话不会自动重载。");
+    lines.push(JSON.stringify({
+      schema: "everyline.skill-event.v1", event: "skills_updated", host: "doubao",
+      reloadRequired: true, nextAction: "reload_skills", skills: result.skills.doubao,
+    }));
   }
   if (result.updated) {
     lines.push(JSON.stringify({

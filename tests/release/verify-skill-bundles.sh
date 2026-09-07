@@ -29,7 +29,8 @@ unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '[点击授权
 # 校验豆包导入包确实来自当前源码，包含 CLI 入口文案字段与宿主更新检查。
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | cmp - skills/everyline-cli/SKILL.md
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '`verification_link_text`' >/dev/null
-unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F '更新 CLI 不会更新豆包已导入的 Skill' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'EVERYLINE_DOUBAO_SKILLS_DIR' >/dev/null
+unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'nextAction=reload_skills' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F -- '--stdin --name <filename>' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F '0. 通用审查清单（系统内置）' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '只包含以下三项' >/dev/null

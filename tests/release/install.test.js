@@ -1,15 +1,16 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
+const { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
 const { execFileSync } = require("node:child_process");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { join, sep } = require("node:path");
 const test = require("node:test");
 const {
   formatInstallOutput,
   installPackage,
   registerCodexSkill,
+  removeDeprecatedSkillRegistrations,
   shouldInstallCodexSkill,
   shouldInstallWorkBuddySkills,
   skillNames,
@@ -70,6 +71,137 @@ test("WorkBuddy Skills 支持统一跳过和宿主级跳过", () => {
   assert.equal(shouldInstallWorkBuddySkills({ npm_config_global: "true" }), true);
   assert.equal(shouldInstallWorkBuddySkills({ npm_config_global: "true", EVERYLINE_SKIP_SKILL_INSTALL: "1" }), false);
   assert.equal(shouldInstallWorkBuddySkills({ npm_config_global: "true", EVERYLINE_SKIP_WORKBUDDY_SKILL_INSTALL: "1" }), false);
+});
+
+/**
+ * 验证豆包原生文件夹随 npm 安装更新，包含引用文件，且旧副本留在扫描目录外。
+ * 入参：t（TestContext），用于清理隔离目录。
+ * 返回值：void，未同步、重复更新或污染其他技能时断言失败。
+ */
+test("豆包本地 Skill 随安装同步并可重复更新", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const skillRoot = join(fixture.root, "workspace", ".user_skills");
+  const reference = join(fixture.packageRoot, "skills", "everyline-review", "references", "review-flow.md");
+  mkdirSync(join(reference, ".."), { recursive: true });
+  writeFileSync(reference, "最新审查流程");
+  const oldSkill = join(skillRoot, "everyline-cli");
+  mkdirSync(oldSkill, { recursive: true });
+  writeFileSync(join(oldSkill, "SKILL.md"), "---\nname: everyline-cli\n---\n旧文案");
+  const unrelated = join(skillRoot, "my-skill");
+  mkdirSync(unrelated);
+  writeFileSync(join(unrelated, "SKILL.md"), "用户技能");
+  const options = {
+    packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", userHome: fixture.userHome,
+    environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: skillRoot },
+  };
+  const result = installPackage(options);
+  assert.deepEqual(result.skills.doubao.map((skill) => skill.name), skillNames);
+  assert.equal(result.doubaoSkillReloadRequired, true);
+  assert.equal(result.skills.doubao[0].status, "updated");
+  assert.equal(lstatSync(oldSkill).isSymbolicLink(), false);
+  assert.equal(readFileSync(join(oldSkill, "SKILL.md"), "utf8"), readFileSync(join(fixture.packageRoot, "skills", "everyline-cli", "SKILL.md"), "utf8"));
+  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-flow.md"), "utf8"), "最新审查流程");
+  assert.equal(readFileSync(join(unrelated, "SKILL.md"), "utf8"), "用户技能");
+  assert.equal(result.skills.doubao[0].backupPath.startsWith(skillRoot + sep), false);
+  assert.match(readFileSync(join(result.skills.doubao[0].backupPath, "SKILL.md"), "utf8"), /旧文案/);
+  assert.match(formatInstallOutput(result), /豆包本地 Skill 已同步/);
+  const repeated = installPackage(options);
+  assert.equal(repeated.doubaoSkillReloadRequired, false);
+  assert.equal(repeated.skills.doubao.every((skill) => skill.status === "existing"), true);
+  // CLI 版本号相同也按技能内容更新，覆盖此前同版本重新打包却漏更 Skill 的场景。
+  writeFileSync(reference, "同版本修订后的流程");
+  const revised = installPackage(options);
+  assert.equal(revised.updated, false);
+  assert.equal(revised.doubaoSkillReloadRequired, true);
+  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-flow.md"), "utf8"), "同版本修订后的流程");
+  const events = formatInstallOutput(revised).split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+  assert.equal(events.some((event) => event.event === "skills_updated" && event.nextAction === "reload_skills"), true);
+});
+
+/**
+ * 验证仅探测真实存在的 macOS 豆包工作目录，其他环境由明确目录接入。
+ * 入参：t（TestContext）为临时目录清理上下文。
+ * 返回值：void，错误探测、相对路径或跳过配置失效时断言失败。
+ */
+test("豆包目录自动发现及显式跳过", (t) => {
+  const { buildDoubaoSkillPlans } = require("../../scripts/doubao-skills");
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const nativeRoot = join(fixture.userHome, "Library", "Application Support", "DoubaoWork", "Default", ".doubaowork", "agent_mode", "workspace", ".user_skills");
+  const plans = (environment, platform = "darwin") => buildDoubaoSkillPlans(fixture.packageRoot, skillNames, environment, platform, fixture.userHome);
+  assert.deepEqual(plans({}), []);
+  assert.equal(existsSync(nativeRoot), false);
+  mkdirSync(nativeRoot, { recursive: true });
+  assert.deepEqual(plans({}).map((plan) => plan.target), skillNames.map((name) => join(nativeRoot, name)));
+  assert.deepEqual(plans({}, "linux"), []);
+  assert.deepEqual(plans({ EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL: "1" }), []);
+  assert.throws(() => plans({ EVERYLINE_DOUBAO_SKILLS_DIR: "relative" }), /绝对目录/);
+  const options = { packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", userHome: fixture.userHome };
+  for (const environment of [
+    { npm_config_global: "false" },
+    { npm_config_global: "true", EVERYLINE_SKIP_SKILL_INSTALL: "1" },
+    { npm_config_global: "true", EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL: "1" },
+  ]) {
+    assert.deepEqual(installPackage({ ...options, environment: { ...environment, EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot } }).skills.doubao, []);
+    assert.deepEqual(readdirSync(nativeRoot), []);
+  }
+});
+
+/**
+ * 验证豆包同名非 EveryLine 目录在全量预检阶段阻止写入，不留下其他宿主的部分更新。
+ * 入参：t（TestContext）为临时目录清理上下文。
+ * 返回值：void，用户文件被覆盖或预检前有写入时断言失败。
+ */
+test("豆包目录冲突保留用户文件和其他宿主", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const nativeRoot = join(fixture.root, "workspace", ".user_skills");
+  const conflict = join(nativeRoot, "everyline-review", "SKILL.md");
+  mkdirSync(join(conflict, ".."), { recursive: true });
+  writeFileSync(conflict, "---\nname: my-custom-review\n---\n用户内容");
+  assert.throws(() => installPackage({
+    packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", userHome: fixture.userHome,
+    environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot },
+  }), /未声明对应 EveryLine/);
+  assert.match(readFileSync(conflict, "utf8"), /用户内容/);
+  assert.deepEqual(readdirSync(nativeRoot), ["everyline-review"]);
+  assert.equal(existsSync(join(fixture.userHome, ".agents", "skills")), false);
+});
+
+/**
+ * 验证第二项豆包技能替换失败时，第一项旧目录和其他宿主的链接均恢复。
+ * 入参：t（TestContext）为子进程故障夹具的清理上下文。
+ * 返回值：void，故障未报告、旧副本丢失或残留部分新技能时断言失败。
+ */
+test("豆包同步中途失败会回滚所有宿主的本轮变更", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const nativeRoot = join(fixture.root, "workspace", ".user_skills");
+  const original = "---\nname: everyline-cli\n---\n原始内容";
+  mkdirSync(join(nativeRoot, "everyline-cli"), { recursive: true });
+  writeFileSync(join(nativeRoot, "everyline-cli", "SKILL.md"), original);
+  const script = `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const originalRename = fs.renameSync;
+    const options = JSON.parse(process.argv[1]);
+    fs.renameSync = (source, target) => {
+      if (path.basename(source) === 'new' && target === path.join(options.environment.EVERYLINE_DOUBAO_SKILLS_DIR, 'everyline-review')) {
+        throw new Error('fixture-copy-failure');
+      }
+      return originalRename(source, target);
+    };
+    require('node:assert/strict').throws(() => require(process.argv[2]).installPackage(options), /fixture-copy-failure/);
+  `;
+  execFileSync(process.execPath, ["-e", script, JSON.stringify({
+    packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", userHome: fixture.userHome,
+    environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot },
+  }), join(__dirname, "../../scripts/install.js")]);
+  assert.equal(readFileSync(join(nativeRoot, "everyline-cli", "SKILL.md"), "utf8"), original);
+  assert.deepEqual(readdirSync(nativeRoot), ["everyline-cli"]);
+  assert.deepEqual(readdirSync(join(nativeRoot, "..")), [".user_skills"]);
+  for (const host of [".agents", ".workbuddy"]) assert.deepEqual(readdirSync(join(fixture.userHome, host, "skills")), []);
 });
 
 test("Codex Skill 登记可重复执行且始终指向包内同一来源", (t) => {
@@ -297,6 +429,68 @@ test("首次安装保留旧 token 但仍要求完成一次新授权", (t) => {
   assert.match(readFileSync(tokenPath, "utf8"), /old-dev-token/);
 });
 
+/**
+ * 验证首次安装状态写入失败后，修复文件系统并重试仍要求新授权。
+ * 入参：t（TestContext）为临时目录清理上下文；夹具使用真实原生 CLI 写入状态。
+ * 返回值：void，失败后遗留链接或重试被误判为升级时断言失败。
+ */
+test("首次安装状态写入失败后重试仍要求新授权", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const configDirectory = join(fixture.userHome, ".everyline-cli");
+  mkdirSync(fixture.userHome, { recursive: true });
+  // 用普通文件占据配置目录，确定性触发原生状态登记失败，不依赖当前用户的权限。
+  writeFileSync(configDirectory, "blocked");
+  const options = { packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", environment: { npm_config_global: "true" }, userHome: fixture.userHome };
+  assert.throws(() => installPackage(options));
+  for (const host of [".agents", ".workbuddy"]) {
+    for (const name of skillNames) {
+      assert.throws(() => lstatSync(join(fixture.userHome, host, "skills", name)), /ENOENT/);
+    }
+  }
+  rmSync(configDirectory);
+
+  const retried = installPackage(options);
+  assert.equal(retried.firstInstall, true);
+  assert.equal(retried.authorizationRequired, true);
+  assert.equal(retried.updated, false);
+  assert.equal(retried.nextAction, "authorize");
+});
+
+/**
+ * 验证写入部分 Skill 后进程中断，已持久化的首次安装意图仍约束后续重试。
+ * 入参：t（TestContext）为隔离目录清理上下文；子进程在第二次写链接前退出以模拟无回滚中断。
+ * 返回值：void，重试丢失原授权事件、解除门禁或未补齐链接时断言失败。
+ */
+test("首次安装中断留下部分链接时重试保留原授权事件", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const options = { packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", environment: { npm_config_global: "true" }, userHome: fixture.userHome };
+  assert.throws(() => execFileSync(process.execPath, ["-e", `
+const fs = require('node:fs');
+const original = fs.symlinkSync;
+let calls = 0;
+fs.symlinkSync = (...args) => {
+  if (++calls === 2) process.exit(23);
+  return original(...args);
+};
+require(process.argv[1]).installPackage(JSON.parse(process.argv[2]));
+`, join(__dirname, "../../scripts/install.js"), JSON.stringify(options)]), (error) => error.status === 23);
+  assert.equal(lstatSync(join(fixture.userHome, ".agents", "skills", skillNames[0])).isSymbolicLink(), true);
+  const statePath = join(fixture.userHome, ".everyline-cli", "install-state.json");
+  const pending = JSON.parse(readFileSync(statePath, "utf8"));
+  assert.equal(pending.authorizationRequired, true);
+
+  const retried = installPackage(options);
+  assert.equal(retried.firstInstall, true);
+  assert.equal(retried.authorizationRequired, true);
+  assert.equal(retried.updated, false);
+  assert.equal(JSON.parse(readFileSync(statePath, "utf8")).eventId, pending.eventId);
+  for (const host of [".agents", ".workbuddy"]) {
+    assert.deepEqual(readdirSync(join(fixture.userHome, host, "skills")).sort(), [...skillNames].sort());
+  }
+});
+
 test("相对 EVERYLINE_CONFIG_DIR 始终按用户目录解析", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
@@ -482,6 +676,88 @@ test("跨 Node 环境安装迁移两个宿主的链接且保持安装状态", as
       if (stateKind !== "legacy") {
         assert.equal(JSON.parse(readFileSync(repeated.installStatePath, "utf8")).eventId, state.eventId);
       }
+    });
+  }
+});
+
+/**
+ * 验证旧三项布局跨 Node 前缀升级时清理 shared，且保留旧 token 和升级语义。
+ * 入参：t（TestContext）为各旧版布局的子测试及临时目录清理上下文。
+ * 返回值：Promise<void>，遗留废弃链接、强制重新授权或覆盖 token 时断言失败。
+ */
+test("跨 Node 升级清理旧 shared 布局并保留授权", async (t) => {
+  for (const layout of ["legacy-three", "shared-only", "dangling-shared"]) {
+    await t.test(layout, (t) => {
+      const previous = createPackageFixture();
+      const current = createPackageFixture();
+      t.after(() => {
+        rmSync(previous.root, { recursive: true, force: true });
+        rmSync(current.root, { recursive: true, force: true });
+      });
+      const sharedSource = join(previous.packageRoot, "skills", "everyline-shared");
+      if (layout !== "dangling-shared") {
+        mkdirSync(sharedSource);
+        writeFileSync(join(sharedSource, "SKILL.md"), "---\nname: everyline-shared\n---\n");
+      }
+      const legacyNames = layout === "shared-only" ? ["everyline-shared"] : ["everyline-shared", "everyline-review", "everyline-review-config"];
+      for (const host of [".agents", ".workbuddy"]) {
+        const skillRoot = join(previous.userHome, host, "skills");
+        mkdirSync(skillRoot, { recursive: true });
+        for (const name of legacyNames) {
+          symlinkSync(join(previous.packageRoot, "skills", name), join(skillRoot, name), "dir");
+        }
+      }
+      const configDirectory = join(previous.userHome, ".everyline-cli");
+      mkdirSync(configDirectory, { recursive: true });
+      const tokenPath = join(configDirectory, "tokens.json");
+      const tokenContent = '{"tokens":{"test::user":{"access_token":"fixture-existing-token"}}}\n';
+      writeFileSync(tokenPath, tokenContent);
+      const result = installPackage({ packageRoot: current.packageRoot, platform: "linux", architecture: "x64", environment: { npm_config_global: "true" }, userHome: previous.userHome });
+      assert.equal(result.updated, true);
+      assert.equal(result.firstInstall, false);
+      assert.equal(result.authorizationRequired, false);
+      assert.equal(readFileSync(tokenPath, "utf8"), tokenContent);
+      for (const host of [".agents", ".workbuddy"]) {
+        const skillRoot = join(previous.userHome, host, "skills");
+        assert.deepEqual(readdirSync(skillRoot).sort(), [...skillNames].sort());
+        for (const name of skillNames) {
+          assert.equal(realpathSync(join(skillRoot, name)), realpathSync(join(current.packageRoot, "skills", name)));
+        }
+      }
+    });
+  }
+});
+
+/**
+ * 验证跨目录 shared 清理不会接管包归属不明或入口不匹配的链接。
+ * 入参：t（TestContext）为 manifest 异常子场景及临时文件清理上下文。
+ * 返回值：Promise<void>，未知来源链接被删除或替换时断言失败。
+ */
+test("旧 shared 清理保留未确认归属的链接", async (t) => {
+  const manifests = {
+    foreign: '{"name":"another-package","bin":{"everyline-cli":"scripts/run.js"}}',
+    "wrong-entry": '{"name":"everyline-cli","bin":{"everyline-cli":"custom.js"}}',
+    missing: undefined,
+    invalid: '{',
+    null: 'null',
+  };
+  for (const [kind, manifest] of Object.entries(manifests)) {
+    await t.test(kind, (t) => {
+      const fixture = createPackageFixture();
+      t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+      const oldPackage = join(fixture.root, "old-package");
+      const source = join(oldPackage, "skills", "everyline-shared");
+      const skillRoot = join(fixture.userHome, ".agents", "skills");
+      mkdirSync(source, { recursive: true });
+      mkdirSync(skillRoot, { recursive: true });
+      if (manifest !== undefined) writeFileSync(join(oldPackage, "package.json"), manifest);
+      const target = join(skillRoot, "everyline-shared");
+      symlinkSync(source, target, "dir");
+      const originalLink = readlinkSync(target);
+
+      assert.deepEqual(removeDeprecatedSkillRegistrations(fixture.packageRoot, skillRoot), []);
+      assert.equal(readlinkSync(target), originalLink);
+      assert.equal(realpathSync(target), realpathSync(source));
     });
   }
 });
