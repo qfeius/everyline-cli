@@ -59,11 +59,30 @@ type DevicePendingTransaction struct {
 	FirstInstallEventID     string              `json:"first_install_event_id,omitempty"`
 }
 
+/*
+EffectiveStatus 统一解析 Device 事务状态，让等待、异常和进程中断状态在授权期限结束后进入 expired。
+入参：now time.Time 为当前时间；接收者 DevicePendingTransaction 为持久化的授权事务。
+返回值：DevicePendingStatus 为对当前时间生效的状态；已明确拒绝或失效的终态保持原值。
+*/
+func (pending DevicePendingTransaction) EffectiveStatus(now time.Time) DevicePendingStatus {
+	status := pending.Status
+	if status == "" {
+		status = DevicePending
+	}
+	// checking/uncertain 不重复兑换旧 code，但到期后必须允许用户显式发起新事务。
+	if (status == DevicePending || status == DevicePendingChecking || status == DevicePendingUncertain) && !now.Before(pending.ExpiresAt) {
+		return DevicePendingExpired
+	}
+	return status
+}
+
 // DeviceCredential 把沙箱需要恢复的 Profile、授权事务和 user token 一起保存。
 type DeviceCredential struct {
 	Pending *DevicePendingTransaction `json:"pending,omitempty"`
 	Token   *Token                    `json:"token,omitempty"`
 	Profile *config.Profile           `json:"profile,omitempty"`
+	// TokenFirstInstallEventID 随成功 token 一起落盘，支持门禁写入失败后的本地恢复，不作为新事件的授权证明。
+	TokenFirstInstallEventID string `json:"token_first_install_event_id,omitempty"`
 }
 
 // DeviceCredentialStore 定义沙箱 Device 凭证的安全读写和跨进程刷新锁。

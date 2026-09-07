@@ -71,9 +71,11 @@ func ensureBrowserOAuthClient(ctx context.Context, runtime *Runtime, profile con
 	return profile, nil
 }
 
-// newAuthDeviceInitCommand 创建不依赖 loopback callback 的 OAuth Device Grant 授权事务。
-// 入参：runtime *Runtime 为 HTTP、Profile 和安全凭证存储；root *rootOptions 为公共 flags。
-// 返回值：*cobra.Command，可输出完整浏览器授权 URL 和过期时间。
+/*
+newAuthDeviceInitCommand 创建或复用 Device 授权事务，并恢复首次安装已兑换成功但尚未提交的本地状态。
+入参：runtime *Runtime 为 HTTP、Profile 和安全凭证存储；root *rootOptions 为公共 flags。
+返回值：*cobra.Command，可输出完整浏览器授权 URL、过期时间或已完成状态。
+*/
 func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var restart bool
 	command := &cobra.Command{
@@ -114,15 +116,17 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 				if loadErr != nil && !errors.Is(loadErr, auth.ErrDeviceCredentialNotFound) {
 					return loadErr
 				}
+				// 新 token 已绑定当前事件时，重放首次安装 nextAction 只补做本地提交，不再让用户授权。
+				if firstInstallRequired && loadErr == nil && existing.Pending == nil && existing.Token != nil && existing.Token.AccessToken != "" && existing.TokenFirstInstallEventID == installState.EventID {
+					if err := completeFirstInstallAuthorization(runtime, existing.TokenFirstInstallEventID); err != nil {
+						return err
+					}
+					result = deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(existing.Token.ExpiresAt)}
+					return nil
+				}
 				forceRestart := restart || firstInstallRequired
 				if loadErr == nil && existing.Pending != nil {
-					status := existing.Pending.Status
-					if status == "" {
-						status = auth.DevicePending
-					}
-					if status == auth.DevicePending && !runtimeNow(runtime).Before(existing.Pending.ExpiresAt) {
-						status = auth.DevicePendingExpired
-					}
+					status := existing.Pending.EffectiveStatus(runtimeNow(runtime))
 					sameFirstInstallTransaction := firstInstallRequired && installState.EventID != "" && existing.Pending.FirstInstallEventID == installState.EventID
 					activeTransaction := status == auth.DevicePending || status == auth.DevicePendingChecking || status == auth.DevicePendingUncertain
 					// 同一首次安装事件即使重放 --restart，也复用仍活跃的事务；终态只有显式 --restart 才新建。
@@ -181,6 +185,7 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 				// 首次安装强制新授权时保留旧 token 作为回滚材料，但业务门禁不会使用它；成功后由新 token 覆盖。
 				if !firstInstallRequired {
 					existing.Token = nil
+					existing.TokenFirstInstallEventID = ""
 				}
 				firstInstallEventID := ""
 				if firstInstallRequired {
@@ -248,9 +253,11 @@ func newAuthDeviceCompleteCommand(runtime *Runtime, root *rootOptions) *cobra.Co
 	}
 }
 
-// completeDeviceAuthorization 在 Profile 级跨进程锁内完成一次 Device 授权检查，确保同一 device code 只被一个进程兑换。
-// 入参：ctx context.Context 控制远端请求；runtime *Runtime 提供 HTTP、时钟和输出；root *rootOptions 提供超时与格式；profile config.Profile 为当前配置；store auth.DeviceCredentialStore 为会话凭证存储。
-// 返回值：error，状态读取、OAuth 兑换、凭证保存或结果渲染失败时非 nil。
+/*
+completeDeviceAuthorization 在 Profile 级跨进程锁内兑换一次 Device code，并幂等完成对应安装事件的本地提交。
+入参：ctx context.Context 控制远端请求；runtime *Runtime 提供 HTTP、时钟和输出；root *rootOptions 提供超时与格式；profile config.Profile 为当前配置；store auth.DeviceCredentialStore 为会话凭证存储。
+返回值：error，状态读取、OAuth 兑换、凭证保存、安装门禁提交或结果渲染失败时非 nil。
+*/
 func completeDeviceAuthorization(ctx context.Context, runtime *Runtime, root *rootOptions, profile config.Profile, store auth.DeviceCredentialStore) error {
 	return store.WithRefreshLock(profile.Name, func() error {
 		credential, err := store.Load(profile.Name)
@@ -262,23 +269,27 @@ func completeDeviceAuthorization(ctx context.Context, runtime *Runtime, root *ro
 		}
 		if credential.Pending == nil {
 			if credential.Token != nil && credential.Token.AccessToken != "" {
+				// token 与事件证明在同一份加密凭证中；重试只修复门禁，既不兑换旧 code 也不接受无证明的旧 token。
+				if err := completeFirstInstallAuthorization(runtime, credential.TokenFirstInstallEventID); err != nil {
+					return err
+				}
 				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(credential.Token.ExpiresAt)})
 			}
 			return fmt.Errorf("没有待完成的 Device 授权；auth init 与 auth complete 必须复用同一 Device 会话标识（WorkBuddy CODEBUDDY_SESSION_ID；豆包 SESSION_ID 与初始工作目录）；恢复 auth init 使用的原标识后重新执行 auth complete，仅在 CLI 明确返回 denied、expired 或 invalid_grant 后开始新事务")
 		}
 		pending := credential.Pending
+		// 先落盘到期状态，再处理 uncertain/checking，避免异常事务永久停留在不可兑换的状态。
+		if status := pending.EffectiveStatus(runtimeNow(runtime)); status != pending.Status {
+			pending.Status = status
+			if err := store.Save(profile.Name, credential); err != nil {
+				return err
+			}
+		}
 		if pending.Status == auth.DevicePendingChecking || pending.Status == auth.DevicePendingUncertain {
 			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(auth.DevicePendingUncertain)})
 		}
 		if pending.Status != auth.DevicePending {
 			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(pending.Status), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
-		}
-		if !runtimeNow(runtime).Before(pending.ExpiresAt) {
-			pending.Status = auth.DevicePendingExpired
-			if err := store.Save(profile.Name, credential); err != nil {
-				return err
-			}
-			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(auth.DevicePendingExpired), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
 		}
 		pending.Status = auth.DevicePendingChecking
 		if err := store.Save(profile.Name, credential); err != nil {
@@ -309,10 +320,12 @@ func completeDeviceAuthorization(ctx context.Context, runtime *Runtime, root *ro
 		}
 		credential.Pending = nil
 		credential.Token = &token
+		// 先与 token 原子保存事件证明；门禁提交失败或进程退出后，下一次命令仍可恢复这一提交。
+		credential.TokenFirstInstallEventID = pending.FirstInstallEventID
 		if err := store.Save(profile.Name, credential); err != nil {
 			return fmt.Errorf("保存 Device 授权结果失败，状态可能不确定，请先修复安全存储再重新开始授权: %w", err)
 		}
-		if err := completeFirstInstallAuthorization(runtime); err != nil {
+		if err := completeFirstInstallAuthorization(runtime, credential.TokenFirstInstallEventID); err != nil {
 			return err
 		}
 		return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(token.ExpiresAt)})
@@ -545,9 +558,11 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return command
 }
 
-// newAuthStatusCommand 查询当前身份及凭证运行时的状态，Device 会话不继承浏览器缓存，输出不包含 token。
-// 入参：runtime *Runtime 为 token store 和时钟；root *rootOptions 为 Profile/输出 flags。
-// 返回值：*cobra.Command，可检查缓存或环境变量凭证状态。
+/*
+newAuthStatusCommand 查询当前身份及凭证运行时的状态，统一识别 Device 事务到期且不继承浏览器缓存。
+入参：runtime *Runtime 为 token store 和时钟；root *rootOptions 为 Profile/输出 flags。
+返回值：*cobra.Command，可检查缓存或环境变量凭证状态，输出不包含 token。
+*/
 func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
@@ -601,14 +616,7 @@ func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 							status["expiresInSeconds"] = maxInt64(0, int64(credential.Token.ExpiresAt.Sub(now).Seconds()))
 						}
 					} else if credential.Pending != nil {
-						pendingStatus := credential.Pending.Status
-						if pendingStatus == "" {
-							pendingStatus = auth.DevicePending
-						}
-						if pendingStatus == auth.DevicePending && !now.Before(credential.Pending.ExpiresAt) {
-							pendingStatus = auth.DevicePendingExpired
-						}
-						status["deviceStatus"] = pendingStatus
+						status["deviceStatus"] = credential.Pending.EffectiveStatus(now)
 						status["expiresAt"] = credential.Pending.ExpiresAt
 					}
 					return render(runtime, root, profile.DefaultOutput, status)

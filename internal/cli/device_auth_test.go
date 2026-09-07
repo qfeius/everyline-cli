@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -316,6 +317,249 @@ func TestAuthDeviceInitReusesFirstInstallTransaction(t *testing.T) {
 	credential, err := runtime.DeviceCredentials.Load(profile.Name)
 	if err != nil || credential.Pending == nil || credential.Pending.FirstInstallEventID != "first-install-test" {
 		t.Fatalf("credential=%#v err=%v，Device 事务未绑定首次安装事件", credential, err)
+	}
+}
+
+/*
+TestAuthDeviceExpiredTransactionCanRestart 验证首次安装的等待、异常和中断事务到期后可显式重启。
+入参：t *testing.T 为测试上下文。
+返回值：无；到期前重复创建事务、到期后卡住或重复兑换旧 code 时通过 t.Fatal 报告。
+*/
+func TestAuthDeviceExpiredTransactionCanRestart(t *testing.T) {
+	for _, scenario := range []struct {
+		status auth.DevicePendingStatus
+		check  bool
+	}{
+		{status: auth.DevicePending, check: true},
+		{status: auth.DevicePendingUncertain},
+		{status: auth.DevicePendingChecking},
+		{status: auth.DevicePendingUncertain, check: true},
+		{status: auth.DevicePendingChecking, check: true},
+	} {
+		name := string(scenario.status) + "/direct_restart"
+		if scenario.check {
+			name = string(scenario.status) + "/complete_then_restart"
+		}
+		t.Run(name, func(t *testing.T) {
+			status := scenario.status
+			now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+			var deviceCalls, tokenCalls atomic.Int32
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/metadata":
+					_ = json.NewEncoder(writer).Encode(auth.OAuthMetadata{TokenEndpoint: server.URL + "/token", DeviceAuthorizationEndpoint: server.URL + "/device"})
+				case "/device":
+					deviceCalls.Add(1)
+					_ = json.NewEncoder(writer).Encode(auth.DeviceAuthorizationResponse{
+						DeviceCode: "fixture-code", VerificationURIComplete: "https://auth.example.com/device?user_code=fixture", ExpiresIn: 600,
+					})
+				case "/token":
+					tokenCalls.Add(1)
+					http.Error(writer, "temporary upstream failure", http.StatusServiceUnavailable)
+				default:
+					http.NotFound(writer, request)
+				}
+			}))
+			defer server.Close()
+			runtime, stdout, _ := testRuntime(t)
+			runtime.HTTP = server.Client()
+			runtime.Now = func() time.Time { return now }
+			runtime.DeviceCredentials = &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{}}
+			requireFirstInstallAuthorization(t, runtime)
+			profile := config.Profile{
+				Name: "test-user", BaseURL: server.URL, TokenURL: server.URL + "/token", OAuthMetadataURL: server.URL + "/metadata",
+				OAuthDeviceClientID: "device-client", OAuthScopes: []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+			}
+			if err := runtime.Profiles.Add(profile); err != nil {
+				t.Fatal(err)
+			}
+			run := func(action string, restart bool) deviceAuthOutput {
+				t.Helper()
+				stdout.Reset()
+				args := []string{"auth", action, "--profile", profile.Name, "--as", "user"}
+				if restart {
+					args = append(args, "--restart")
+				}
+				if err := Execute(context.Background(), runtime, args); err != nil {
+					t.Fatal(err)
+				}
+				var result deviceAuthOutput
+				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				return result
+			}
+			run("init", true)
+			if status == auth.DevicePendingUncertain {
+				if result := run("complete", false); result.Status != "uncertain" {
+					t.Fatalf("503 后状态=%s", result.Status)
+				}
+			} else if status == auth.DevicePendingChecking {
+				// 模拟进程在发出兑换请求前中断，留下已持久化的 checking。
+				credential, err := runtime.DeviceCredentials.Load(profile.Name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				credential.Pending.Status = status
+				if err := runtime.DeviceCredentials.Save(profile.Name, credential); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if result := run("init", true); !result.Reused || deviceCalls.Load() != 1 {
+				t.Fatalf("到期前应复用首次安装事务: result=%+v deviceCalls=%d", result, deviceCalls.Load())
+			}
+			// 覆盖恰好到期的边界；到期查询不得再次向 token endpoint 兑换旧 code。
+			now = now.Add(10 * time.Minute)
+			if result := run("init", false); result.Status != "expired" || !result.Reused {
+				t.Fatalf("到期后 init 状态=%+v", result)
+			}
+			if scenario.check {
+				if result := run("complete", false); result.Status != "expired" {
+					t.Fatalf("到期后 complete 状态=%+v", result)
+				}
+			}
+			if result := run("init", true); result.Status != "pending" || result.Reused || deviceCalls.Load() != 2 {
+				t.Fatalf("显式重启未创建新事务: result=%+v deviceCalls=%d", result, deviceCalls.Load())
+			}
+			wantTokenCalls := int32(0)
+			if status == auth.DevicePendingUncertain {
+				wantTokenCalls = 1
+			}
+			if tokenCalls.Load() != wantTokenCalls {
+				t.Fatalf("tokenCalls=%d，期望 %d", tokenCalls.Load(), wantTokenCalls)
+			}
+		})
+	}
+}
+
+/*
+TestAuthDeviceRetriesFirstInstallState 验证 token 保存后安装状态写入失败，可跨运行时恢复本地提交。
+入参：t *testing.T 为测试上下文。
+返回值：无；重试再次请求授权、兑换 token 或留下首次安装门禁时通过 t.Fatal 报告。
+*/
+func TestAuthDeviceRetriesFirstInstallState(t *testing.T) {
+	for _, retryAction := range []string{"complete", "init"} {
+		t.Run(retryAction, func(t *testing.T) {
+			t.Setenv("SKILL_SESSION_WORKSPACE", "")
+			t.Setenv("CODEBUDDY_SESSION_ID", "")
+			t.Setenv("SESSION_ID", "first-install-recovery-session")
+			t.Chdir(t.TempDir())
+			configDir := t.TempDir()
+			statePath := filepath.Join(configDir, "install-state.json")
+			var deviceCalls, tokenCalls atomic.Int32
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/metadata":
+					_ = json.NewEncoder(writer).Encode(auth.OAuthMetadata{TokenEndpoint: server.URL + "/token", DeviceAuthorizationEndpoint: server.URL + "/device"})
+				case "/device":
+					deviceCalls.Add(1)
+					_ = json.NewEncoder(writer).Encode(auth.DeviceAuthorizationResponse{
+						DeviceCode: "fixture-code", VerificationURIComplete: "https://auth.example.com/device?user_code=fixture", ExpiresIn: 600,
+					})
+				case "/token":
+					if tokenCalls.Add(1) == 1 {
+						// 在门禁前置检查之后制造真实文件错误，token 仍能保存到独立的加密存储。
+						if err := os.Rename(statePath, statePath+".backup"); err != nil {
+							t.Error(err)
+							http.Error(writer, "fixture error", http.StatusInternalServerError)
+							return
+						}
+						if err := os.Mkdir(statePath, 0o700); err != nil {
+							t.Error(err)
+							http.Error(writer, "fixture error", http.StatusInternalServerError)
+							return
+						}
+					}
+					_, _ = writer.Write([]byte(`{"access_token":"fixture-access","token_type":"Bearer","expires_in":3600}`))
+				default:
+					http.NotFound(writer, request)
+				}
+			}))
+			defer server.Close()
+			newRuntime := func() (*Runtime, *bytes.Buffer) {
+				stdout := &bytes.Buffer{}
+				runtime := NewRuntime(configDir, strings.NewReader(""), stdout, &bytes.Buffer{})
+				runtime.HTTP = server.Client()
+				return runtime, stdout
+			}
+			runtime, _ := newRuntime()
+			requireFirstInstallAuthorization(t, runtime)
+			profile := config.Profile{
+				Name: "test-user", BaseURL: server.URL, TokenURL: server.URL + "/token", OAuthMetadataURL: server.URL + "/metadata",
+				OAuthDeviceClientID: "device-client", OAuthScopes: []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+			}
+			if err := runtime.Profiles.Add(profile); err != nil {
+				t.Fatal(err)
+			}
+			if err := Execute(context.Background(), runtime, []string{"auth", "init", "--restart", "--profile", profile.Name, "--as", "user"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := Execute(context.Background(), runtime, []string{"auth", "complete", "--profile", profile.Name, "--as", "user"}); err == nil || !strings.Contains(err.Error(), "保存首次安装授权结果") {
+				t.Fatalf("预期安装状态提交失败，实际 err=%v", err)
+			}
+			if err := os.Remove(statePath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(statePath+".backup", statePath); err != nil {
+				t.Fatal(err)
+			}
+			// 新运行时必须从加密文件恢复完成证明，不依赖前一条命令的内存状态。
+			runtime, stdout := newRuntime()
+			args := []string{"auth", retryAction, "--profile", profile.Name, "--as", "user"}
+			if retryAction == "init" {
+				args = append(args, "--restart")
+			}
+			if err := Execute(context.Background(), runtime, args); err != nil {
+				t.Fatal(err)
+			}
+			var result deviceAuthOutput
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || result.Status != "succeeded" {
+				t.Fatalf("重试未完成授权: result=%+v err=%v", result, err)
+			}
+			state, err := runtime.InstallState.Load()
+			if err != nil || state.FirstInstall || state.AuthorizationRequired {
+				t.Fatalf("重试后门禁未解除: state=%+v err=%v", state, err)
+			}
+			stdout.Reset()
+			if err := Execute(context.Background(), runtime, []string{"auth", "status", "--profile", profile.Name, "--as", "user"}); err != nil || !strings.Contains(stdout.String(), `"authenticated": true`) {
+				t.Fatalf("恢复后状态错误: output=%s err=%v", stdout.String(), err)
+			}
+			if deviceCalls.Load() != 1 || tokenCalls.Load() != 1 {
+				t.Fatalf("恢复时不应重新授权: deviceCalls=%d tokenCalls=%d", deviceCalls.Load(), tokenCalls.Load())
+			}
+		})
+	}
+}
+
+/*
+TestAuthDeviceCompleteRejectsOldToken 验证无事件证明或属于旧事件的 token 都不解除新安装门禁。
+入参：t *testing.T 为测试上下文。
+返回值：无；旧凭证绕过新授权或改变首次安装状态时通过 t.Fatal 报告。
+*/
+func TestAuthDeviceCompleteRejectsOldToken(t *testing.T) {
+	for _, eventID := range []string{"", "previous-install-event"} {
+		t.Run("token_event="+eventID, func(t *testing.T) {
+			runtime, stdout, _ := testRuntime(t)
+			requireFirstInstallAuthorization(t, runtime)
+			profile := config.Profile{Name: "test-user", BaseURL: "https://api.example.com", TokenURL: "https://api.example.com/token", DefaultIdentity: config.IdentityUser}
+			if err := runtime.Profiles.Add(profile); err != nil {
+				t.Fatal(err)
+			}
+			runtime.DeviceCredentials = &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{
+				profile.Name: {
+					Token: &auth.Token{AccessToken: "old-token", ExpiresAt: time.Now().Add(time.Hour)}, TokenFirstInstallEventID: eventID,
+				},
+			}}
+			if err := Execute(context.Background(), runtime, []string{"auth", "complete", "--profile", profile.Name, "--as", "user"}); !errors.Is(err, auth.ErrUserAuthentication) {
+				t.Fatalf("旧 token 不应报告首次安装成功: output=%s err=%v", stdout.String(), err)
+			}
+			state, err := runtime.InstallState.Load()
+			if err != nil || !state.AuthorizationRequired || state.EventID != "first-install-test" {
+				t.Fatalf("旧 token 改变了门禁: state=%+v err=%v", state, err)
+			}
+		})
 	}
 }
 

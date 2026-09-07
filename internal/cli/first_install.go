@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/build"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 )
@@ -41,14 +42,19 @@ func pendingFirstInstallAuthorization(runtime *Runtime) (config.InstallState, bo
 	return state, state.AuthorizationRequired, nil
 }
 
-// completeFirstInstallAuthorization 在真实授权成功并保存凭证后解除门禁。
-// 入参：runtime *Runtime 为安装状态依赖。
-// 返回值：error，落盘失败时非 nil；旧安装没有状态仓库时幂等成功。
-func completeFirstInstallAuthorization(runtime *Runtime) error {
+/*
+completeFirstInstallAuthorization 在真实授权成功并保存凭证后解除门禁，支持按事件恢复 Device 的本地提交。
+入参：runtime *Runtime 为安装状态依赖；expectedEventID ...string 为 Device token 对应事件，省略时用于本次新完成的本地登录。
+返回值：error，事件不匹配或落盘失败时非 nil；旧安装没有状态仓库时幂等成功。
+*/
+func completeFirstInstallAuthorization(runtime *Runtime, expectedEventID ...string) error {
 	if runtime.InstallState == nil {
 		return nil
 	}
-	if err := runtime.InstallState.CompleteAuthorization(); err != nil {
+	if err := runtime.InstallState.CompleteAuthorization(expectedEventID...); err != nil {
+		if errors.Is(err, config.ErrInstallAuthorizationEventMismatch) {
+			return fmt.Errorf("%w；当前首次安装需要新的 Device 授权，请执行 auth init --restart", auth.ErrUserAuthentication)
+		}
 		return fmt.Errorf("保存首次安装授权结果: %w", err)
 	}
 	return nil

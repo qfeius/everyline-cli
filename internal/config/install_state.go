@@ -14,6 +14,7 @@ import (
 const InstallStateSchema = "everyline.install-state.v1"
 
 var ErrInstallStateNotFound = errors.New("安装状态不存在")
+var ErrInstallAuthorizationEventMismatch = errors.New("首次安装授权事件不匹配")
 
 // InstallState 保存安装器与 CLI 共享的首次安装授权门禁，不包含任何凭证。
 type InstallState struct {
@@ -29,7 +30,7 @@ type InstallState struct {
 type InstallStateStore interface {
 	Load() (InstallState, error)
 	Save(InstallState) error
-	CompleteAuthorization() error
+	CompleteAuthorization(...string) error
 }
 
 // FileInstallStateStore 使用权限受控的 JSON 文件保存首次安装状态。
@@ -65,10 +66,15 @@ func (store *FileInstallStateStore) Save(state InstallState) error {
 	})
 }
 
-// CompleteAuthorization 在新授权成功后解除首次安装门禁，并保留事件和安装版本用于审计。
-// 入参：无。
-// 返回值：error，状态不存在时幂等成功，读取或落盘失败时非 nil。
-func (store *FileInstallStateStore) CompleteAuthorization() error {
+/*
+CompleteAuthorization 在新授权成功后解除首次安装门禁，Device 恢复可要求匹配原安装事件。
+入参：expectedEventID ...string 可省略或指定一个事件；显式空值也需匹配，不视为任意事件。
+返回值：error，状态不存在或已完成时幂等成功，事件不匹配、读取或落盘失败时非 nil。
+*/
+func (store *FileInstallStateStore) CompleteAuthorization(expectedEventID ...string) error {
+	if len(expectedEventID) > 1 {
+		return fmt.Errorf("解除首次安装门禁最多指定一个事件")
+	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	return filelock.With(store.path+".lock", func() error {
@@ -81,6 +87,10 @@ func (store *FileInstallStateStore) CompleteAuthorization() error {
 		}
 		if !state.AuthorizationRequired && !state.FirstInstall {
 			return nil
+		}
+		// 在同一跨进程锁内比较事件并写回，避免旧 token 和旧事件解除后来创建的门禁。
+		if len(expectedEventID) == 1 && state.EventID != expectedEventID[0] {
+			return ErrInstallAuthorizationEventMismatch
 		}
 		state.FirstInstall = false
 		state.AuthorizationRequired = false
