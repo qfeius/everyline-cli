@@ -31,12 +31,13 @@ const userTokenRefreshWindow = 5 * time.Minute
 
 // Token 是缓存中的访问凭证及其可选生命周期信息。
 type Token struct {
-	AccessToken  string    `json:"access_token" yaml:"-"`
-	TokenType    string    `json:"token_type,omitempty" yaml:"-"`
-	RefreshToken string    `json:"refresh_token,omitempty" yaml:"-"`
-	Scope        string    `json:"scope,omitempty" yaml:"-"`
-	IssuedAt     time.Time `json:"issued_at,omitempty" yaml:"-"`
-	ExpiresAt    time.Time `json:"expires_at" yaml:"expires_at"`
+	AccessToken   string    `json:"access_token" yaml:"-"`
+	TokenType     string    `json:"token_type,omitempty" yaml:"-"`
+	RefreshToken  string    `json:"refresh_token,omitempty" yaml:"-"`
+	OAuthClientID string    `json:"oauth_client_id,omitempty" yaml:"-"`
+	Scope         string    `json:"scope,omitempty" yaml:"-"`
+	IssuedAt      time.Time `json:"issued_at,omitempty" yaml:"-"`
+	ExpiresAt     time.Time `json:"expires_at" yaml:"expires_at"`
 }
 
 // ValidAt 判断 token 在预留刷新窗口后是否仍有效。
@@ -128,9 +129,11 @@ func (provider *Provider) Token(ctx context.Context, profile config.Profile) (To
 	return provider.TokenForIdentity(ctx, profile, config.IdentityApp)
 }
 
-// TokenForIdentity 按 user/app 身份读取环境变量、隔离缓存、本地 secret 存储或执行对应登录流程。
-// 入参：ctx context.Context 控制远端请求；profile config.Profile 指定环境；identity config.IdentityKind 为业务身份。
-// 返回值：Token 为可用访问凭证；error 在凭证缺失或刷新失败时非 nil。
+/*
+TokenForIdentity 按 user/app 身份读取凭证；user 凭证到期且未刷新成功时提供原运行时的手动授权入口。
+入参：ctx context.Context 控制远端请求；profile config.Profile 指定环境；identity config.IdentityKind 为业务身份。
+返回值：Token 为可用访问凭证；error 为凭证缺失、过期或刷新失败，并保留原始错误。
+*/
 func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.Profile, identity config.IdentityKind) (Token, error) {
 	parsedIdentity, err := config.ParseIdentityKind(string(identity))
 	if err != nil {
@@ -152,6 +155,10 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 				if credential.Token.ValidAt(provider.now(), 0) {
 					return *credential.Token, nil
 				}
+				// 凭证已实际到期，保留刷新失败原因并引导同一 Device 会话重新生成手动授权入口。
+				if !errors.Is(refreshErr, ErrUserSessionExpired) {
+					return Token{}, fmt.Errorf("%w；刷新失败: %w", provider.UserSessionExpiredError(profile.Name), refreshErr)
+				}
 				return Token{}, refreshErr
 			}
 			if loadErr == nil && credential.Pending != nil {
@@ -160,6 +167,8 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 			if loadErr != nil && !errors.Is(loadErr, ErrDeviceCredentialNotFound) {
 				return Token{}, loadErr
 			}
+			// 豆包本地电脑也可能存在 Codex 的 OAuth 缓存，Device 会话缺少凭证时仍需独立授权。
+			return Token{}, provider.userAuthenticationError(profile.Name)
 		}
 		if identityStore, ok := provider.store.(interface {
 			LoadForIdentity(string, config.IdentityKind) (Token, error)
@@ -176,10 +185,17 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 					if cached.ValidAt(provider.now(), 0) {
 						return cached, nil
 					}
+					// 动态客户端刷新能力缺失或服务异常时，过期凭证都可通过新的浏览器授权恢复。
+					if cached.ExpiredAt(provider.now()) && !errors.Is(refreshErr, ErrUserSessionExpired) {
+						return Token{}, fmt.Errorf("%w；刷新失败: %w", provider.UserSessionExpiredError(profile.Name), refreshErr)
+					}
 					return Token{}, refreshErr
 				}
 				if cached.ValidAt(provider.now(), 0) {
 					return cached, nil
+				}
+				if cached.ExpiredAt(provider.now()) {
+					return Token{}, provider.UserSessionExpiredError(profile.Name)
 				}
 			}
 		}
@@ -207,7 +223,7 @@ func (provider *Provider) TokenForIdentity(ctx context.Context, profile config.P
 	return provider.Login(ctx, profile, secret)
 }
 
-// RefreshForIdentity 在服务端可信地拒绝当前 user access token 后强制刷新一次。
+// RefreshForIdentity 在服务端可信地拒绝当前 user access token 后，仅在原凭证运行时内强制刷新一次。
 // 入参：ctx context.Context 控制刷新；profile config.Profile 为 OAuth 配置；identity config.IdentityKind 为身份；rejectedAccessToken string 为刚被拒绝的 token。
 // 返回值：Token 为刷新或并发更新后的凭证；error 为不支持、失效或刷新失败。
 func (provider *Provider) RefreshForIdentity(ctx context.Context, profile config.Profile, identity config.IdentityKind, rejectedAccessToken string) (Token, error) {
@@ -216,7 +232,7 @@ func (provider *Provider) RefreshForIdentity(ctx context.Context, profile config
 	}
 	if provider.deviceStore != nil {
 		credential, err := provider.deviceStore.Load(profile.Name)
-		if err == nil && credential.Token != nil {
+		if err == nil && credential.Token != nil && credential.Token.AccessToken != "" {
 			if credential.Token.AccessToken != rejectedAccessToken {
 				return *credential.Token, nil
 			}
@@ -225,6 +241,8 @@ func (provider *Provider) RefreshForIdentity(ctx context.Context, profile config
 		if err != nil && !errors.Is(err, ErrDeviceCredentialNotFound) {
 			return Token{}, err
 		}
+		// Device 会话丢失时保留原授权协议，不刷新同名 Profile 的浏览器 token。
+		return Token{}, provider.userAuthenticationError(profile.Name)
 	}
 	return provider.refreshFileUserToken(ctx, profile, rejectedAccessToken)
 }
@@ -247,7 +265,11 @@ func (provider *Provider) refreshDeviceUserToken(ctx context.Context, profile co
 			result = *credential.Token
 			return nil
 		}
-		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, *credential.Token, profile.EffectiveOAuthDeviceClientID())
+		clientID := strings.TrimSpace(credential.Token.OAuthClientID)
+		if clientID == "" {
+			clientID = profile.EffectiveOAuthDeviceClientID()
+		}
+		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, *credential.Token, clientID)
 		if err != nil {
 			if IsDeviceGrantError(err, "invalid_grant") {
 				credential.Token = nil
@@ -292,7 +314,11 @@ func (provider *Provider) refreshFileUserToken(ctx context.Context, profile conf
 			result = current
 			return nil
 		}
-		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, current, profile.OAuthClientID)
+		clientID := strings.TrimSpace(current.OAuthClientID)
+		if clientID == "" {
+			clientID = profile.OAuthClientID
+		}
+		refreshed, err := provider.refreshOAuthUserToken(ctx, profile, current, clientID)
 		if err != nil {
 			if IsDeviceGrantError(err, "invalid_grant") {
 				if deleteErr := identityStore.DeleteForIdentityIfAccessTokenMatches(profile.Name, config.IdentityUser, expectedAccessToken); deleteErr != nil {
@@ -331,7 +357,7 @@ func (provider *Provider) refreshOAuthUserToken(ctx context.Context, profile con
 	return RefreshOAuthToken(ctx, provider.httpClient, metadata.TokenEndpoint, clientID, current.RefreshToken, provider.now)
 }
 
-// InvalidateForIdentity 删除服务端已判定失效且仍与请求一致的本地凭证，并保持并发更新及同一 Profile 的另一身份不变。
+// InvalidateForIdentity 清理当前凭证运行时中已失效且仍与请求一致的 token，保留其他运行时及身份的凭证。
 // 入参：profileName string 为 Profile 名称；identity config.IdentityKind 为需要失效的业务身份；rejectedAccessToken string 为服务端拒绝的 access token。
 // 返回值：error，身份非法、token store 不支持身份隔离或删除失败时非 nil。
 func (provider *Provider) InvalidateForIdentity(profileName string, identity config.IdentityKind, rejectedAccessToken string) error {
@@ -351,6 +377,8 @@ func (provider *Provider) InvalidateForIdentity(profileName string, identity con
 		if loadErr != nil && !errors.Is(loadErr, ErrDeviceCredentialNotFound) {
 			return loadErr
 		}
+		// 当前 Device token 已移除或替换时结束，避免清理同名 Profile 的浏览器凭证。
+		return nil
 	}
 	if identityStore, ok := provider.store.(interface {
 		DeleteForIdentityIfAccessTokenMatches(string, config.IdentityKind, string) error

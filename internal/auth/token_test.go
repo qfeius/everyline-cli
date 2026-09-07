@@ -205,6 +205,10 @@ func TestProviderConcurrentFileRefreshReusesNewToken(t *testing.T) {
 		case "/metadata":
 			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","grant_types_supported":["refresh_token"]}`))
 		case "/token":
+			if err := request.ParseForm(); err != nil || request.Form.Get("client_id") != "issuing-client" {
+				http.Error(writer, "wrong client", http.StatusBadRequest)
+				return
+			}
 			if refreshCalls.Add(1) == 1 {
 				close(refreshStarted)
 				<-releaseRefresh
@@ -219,11 +223,14 @@ func TestProviderConcurrentFileRefreshReusesNewToken(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "tokens.json")
 	firstStore := NewFileTokenStore(tokenPath)
 	secondStore := NewFileTokenStore(tokenPath)
-	oldToken := Token{AccessToken: "old-user-token", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(time.Hour)}
+	oldToken := Token{
+		AccessToken: "old-user-token", RefreshToken: "old-refresh", OAuthClientID: "issuing-client",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
 	if err := firstStore.SaveForIdentity("test-user", config.IdentityUser, oldToken); err != nil {
 		t.Fatal(err)
 	}
-	profile := config.Profile{Name: "test-user", OAuthMetadataURL: server.URL + "/metadata", OAuthClientID: "oauth-client"}
+	profile := config.Profile{Name: "test-user", OAuthMetadataURL: server.URL + "/metadata", OAuthClientID: "newer-profile-client"}
 	providers := []*Provider{
 		NewProvider(firstStore, server.Client(), time.Now),
 		NewProvider(secondStore, server.Client(), time.Now),
@@ -251,7 +258,7 @@ func TestProviderConcurrentFileRefreshReusesNewToken(t *testing.T) {
 	for range providers {
 		select {
 		case result := <-results:
-			if result.err != nil || result.token.AccessToken != "new-user-token" {
+			if result.err != nil || result.token.AccessToken != "new-user-token" || result.token.OAuthClientID != "issuing-client" {
 				t.Fatalf("并发 refresh 结果=%#v err=%v", result.token, result.err)
 			}
 		case <-time.After(time.Second):
@@ -280,6 +287,86 @@ func TestProviderDeviceRefreshReusesConcurrentResult(t *testing.T) {
 	}
 }
 
+/*
+TestProviderExpiredUserTokenOffersManualLogin 验证已过期且刷新失败的 user 凭证提供原运行时的手动授权入口。
+入参：t *testing.T 为测试上下文。
+返回值：无；未过期凭证提前失效、原错误丢失或重新授权入口错误时通过测试失败报告。
+*/
+func TestProviderExpiredUserTokenOffersManualLogin(t *testing.T) {
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	for _, device := range []bool{false, true} {
+		for _, expired := range []bool{false, true} {
+			for _, scenario := range []struct {
+				name         string
+				refreshToken string
+				status       int
+				body         string
+			}{
+				{name: "no_refresh_token"},
+				{name: "refresh_routed_to_code", refreshToken: "fixture-refresh", status: http.StatusBadRequest, body: `{"error":"invalid_request","error_description":"缺少 code/redirect_uri/code_verifier"}`},
+				{name: "temporary_failure", refreshToken: "fixture-refresh", status: http.StatusServiceUnavailable, body: `{"error":"temporarily_unavailable"}`},
+			} {
+				t.Run(fmt.Sprintf("device=%t/expired=%t/%s", device, expired, scenario.name), func(t *testing.T) {
+					var refreshCalls atomic.Int32
+					var server *httptest.Server
+					server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+						switch request.URL.Path {
+						case "/metadata":
+							_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token","grant_types_supported":["refresh_token"]}`))
+						case "/token":
+							refreshCalls.Add(1)
+							writer.WriteHeader(scenario.status)
+							_, _ = writer.Write([]byte(scenario.body))
+						default:
+							t.Errorf("unexpected request: %s", request.URL.Path)
+							http.NotFound(writer, request)
+						}
+					}))
+					t.Cleanup(server.Close)
+					token := Token{AccessToken: "fixture-user-token", OAuthClientID: "issuing-client", RefreshToken: scenario.refreshToken, ExpiresAt: now.Add(time.Minute)}
+					if expired {
+						token.ExpiresAt = now
+					}
+					fileStore := NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
+					provider := NewProvider(fileStore, server.Client(), func() time.Time { return now })
+					profile := config.Profile{Name: "test-user", OAuthMetadataURL: server.URL + "/metadata"}
+					loginCommand := "auth login --profile test-user --as user"
+					if device {
+						store := &encryptedDeviceStore{dir: t.TempDir(), key: make([]byte, 32)}
+						if err := store.Save(profile.Name, DeviceCredential{Token: &token}); err != nil {
+							t.Fatal(err)
+						}
+						provider.WithDeviceCredentials(store)
+						loginCommand = "auth init --profile test-user --as user --output json"
+					} else if err := fileStore.SaveForIdentity(profile.Name, config.IdentityUser, token); err != nil {
+						t.Fatal(err)
+					}
+					got, err := provider.TokenForIdentity(context.Background(), profile, config.IdentityUser)
+					if !expired {
+						if err != nil || got.AccessToken != token.AccessToken {
+							t.Fatalf("有效 token 不应因刷新失败提前登出: token=%q err=%v", got.AccessToken, err)
+						}
+					} else {
+						if !errors.Is(err, ErrUserSessionExpired) || !strings.Contains(err.Error(), loginCommand) || got.AccessToken != "" {
+							t.Fatalf("过期后未提供正确的手动授权入口: token=%q err=%v", got.AccessToken, err)
+						}
+						if scenario.name == "refresh_routed_to_code" && !IsDeviceGrantError(err, "invalid_request") {
+							t.Fatalf("原始刷新错误未保留: %v", err)
+						}
+					}
+					wantRefreshCalls := int32(0)
+					if scenario.refreshToken != "" {
+						wantRefreshCalls = 1
+					}
+					if refreshCalls.Load() != wantRefreshCalls {
+						t.Fatalf("刷新请求数=%d，期望 %d", refreshCalls.Load(), wantRefreshCalls)
+					}
+				})
+			}
+		}
+	}
+}
+
 // TestProviderDeviceMissingCredentialsUsesDeviceGrantHint 验证沙箱缺少 user 凭证时只提示 Device Grant 入口。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；错误类型或下一步命令仍指向 loopback 登录时通过 t.Fatal 报告。
@@ -294,5 +381,46 @@ func TestProviderDeviceMissingCredentialsUsesDeviceGrantHint(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "auth init --profile test-user --as user --output json") || strings.Contains(err.Error(), "auth login") {
 		t.Fatalf("沙箱鉴权提示未固定使用 Device Grant: %v", err)
+	}
+}
+
+// TestDeviceRuntimeDoesNotUseBrowserCredentials 验证 Device 凭证缺失时读取、刷新和失效都保持会话隔离。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；复用或删除本地 OAuth 凭证、错误提示退到 auth login 时通过测试失败报告。
+func TestDeviceRuntimeDoesNotUseBrowserCredentials(t *testing.T) {
+	for _, emptyCredential := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty_credential=%t", emptyCredential), func(t *testing.T) {
+			store := &encryptedDeviceStore{dir: t.TempDir(), key: make([]byte, 32)}
+			if emptyCredential {
+				if err := store.Save("test-user", DeviceCredential{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			legacyStore := NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
+			legacyToken := Token{AccessToken: "browser-token", ExpiresAt: time.Now().Add(time.Hour)}
+			if err := legacyStore.SaveForIdentity("test-user", config.IdentityUser, legacyToken); err != nil {
+				t.Fatal(err)
+			}
+			provider := NewProvider(legacyStore, http.DefaultClient, time.Now).WithDeviceCredentials(store)
+			profile := config.Profile{Name: "test-user"}
+			for _, operation := range []string{"read", "refresh"} {
+				var token Token
+				var err error
+				if operation == "read" {
+					token, err = provider.TokenForIdentity(context.Background(), profile, config.IdentityUser)
+				} else {
+					token, err = provider.RefreshForIdentity(context.Background(), profile, config.IdentityUser, "rejected-device-token")
+				}
+				if !errors.Is(err, ErrUserAuthentication) || token.AccessToken != "" || !strings.Contains(err.Error(), "auth init") {
+					t.Errorf("%s 未保持 Device 会话隔离: token=%q err=%v", operation, token.AccessToken, err)
+				}
+			}
+			if err := provider.InvalidateForIdentity(profile.Name, config.IdentityUser, legacyToken.AccessToken); err != nil {
+				t.Fatal(err)
+			}
+			if token, err := legacyStore.LoadForIdentity(profile.Name, config.IdentityUser); err != nil || token.AccessToken != legacyToken.AccessToken {
+				t.Fatalf("Device 凭证失效影响了本地 OAuth 缓存: %v", err)
+			}
+		})
 	}
 }

@@ -27,7 +27,7 @@ func newAuthCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 auth use 会修改 Profile 的默认身份；仅对当前命令临时指定身份请使用 --as。`,
 	}
 	withNotes(command,
-		"app 身份使用 app secret；user 本机使用 OAuth/PKCE，远端沙箱使用 auth init/complete Device Grant。",
+		"app 身份使用 app secret；Codex/人工本地 user 使用 OAuth/PKCE，豆包/WorkBuddy（含本地电脑）使用 auth init/complete Device Grant。",
 		"auth logout 清理当前 Profile 的 token；Device metadata 提供 revocation endpoint 时先撤销 refresh token。",
 	)
 	command.AddCommand(
@@ -45,18 +45,45 @@ auth use 会修改 Profile 的默认身份；仅对当前命令临时指定身�
 type deviceAuthOutput struct {
 	Status                  string `json:"status"`
 	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
-	ExpiresAt               string `json:"expires_at,omitempty"`
+	// VerificationLinkText 固定待授权入口文案，供豆包与 WorkBuddy 直接用于链接按钮。
+	VerificationLinkText string `json:"verification_link_text,omitempty"`
+	ExpiresAt            string `json:"expires_at,omitempty"`
+	Reused               bool   `json:"reused,omitempty"`
 }
 
-// newAuthDeviceInitCommand 创建不依赖 loopback callback 的 OAuth Device Grant 授权事务。
-// 入参：runtime *Runtime 为 HTTP、Profile 和安全凭证存储；root *rootOptions 为公共 flags。
-// 返回值：*cobra.Command，可输出完整浏览器授权 URL 和过期时间。
+// ensureBrowserOAuthClient 通过 metadata 声明的动态注册端点获取本次 Codex PKCE 使用的浏览器 client_id。
+// 入参：ctx context.Context 控制请求；runtime *Runtime 提供 HTTP 客户端；profile config.Profile 为当前配置；registrationEndpoint string 为 metadata 声明的注册端点；force bool 表示是否替换历史缓存值。
+// 返回值：config.Profile 为仅在内存补齐浏览器 client 后的配置；error 为注册参数、网络或协议错误。
+func ensureBrowserOAuthClient(ctx context.Context, runtime *Runtime, profile config.Profile, registrationEndpoint string, force bool) (config.Profile, error) {
+	if !force && strings.TrimSpace(profile.OAuthClientID) != "" {
+		return profile, nil
+	}
+	if !profile.HasOAuthClientRegistrationConfiguration() {
+		return profile, fmt.Errorf("Profile %q 的 OAuth client 动态注册配置不完整", profile.Name)
+	}
+	clientID, err := auth.RegisterOAuthClient(ctx, runtime.HTTP, auth.OAuthClientRegistrationRequest{
+		Endpoint: strings.TrimSpace(registrationEndpoint), ClientName: "EveryLine CLI", RedirectURI: profile.OAuthRedirectURL,
+		Scope: strings.Join(profile.OAuthScopes, " "),
+	})
+	if err != nil {
+		return profile, err
+	}
+	// 浏览器 client 与 Device client 始终分开，Codex 动态注册不得覆盖豆包/WorkBuddy 的固定 Device client。
+	profile.OAuthClientID = clientID
+	return profile, nil
+}
+
+/*
+newAuthDeviceInitCommand 复用有效凭证或 Device 授权事务，为过期凭证生成新链接，并恢复首次安装未提交的本地状态。
+入参：runtime *Runtime 为 HTTP、Profile 和安全凭证存储；root *rootOptions 为公共 flags。
+返回值：*cobra.Command，可输出完整浏览器授权 URL、过期时间或已完成状态。
+*/
 func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var restart bool
 	command := &cobra.Command{
 		Use:   "init",
 		Short: "初始化沙箱可用的用户 Device 授权",
-		Long:  "初始化 OAuth Device Grant，返回宿主浏览器可直接打开的完整授权 URL；不监听 127.0.0.1 回调。",
+		Long:  "初始化 OAuth Device Grant，返回宿主浏览器可直接打开的完整授权 URL；同一 Profile 已有可复用事务时不重复创建，不监听 127.0.0.1 回调。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			if root.Identity != "" {
@@ -79,79 +106,125 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 			if err != nil {
 				return err
 			}
-			existing, loadErr := store.Load(profile.Name)
-			if loadErr != nil && !errors.Is(loadErr, auth.ErrDeviceCredentialNotFound) {
-				return loadErr
-			}
-			if !restart && loadErr == nil && existing.Pending != nil {
-				status := string(existing.Pending.Status)
-				if status == "" {
-					status = string(auth.DevicePending)
+			var result deviceAuthOutput
+			// Device 初始化与 complete/refresh 共用 Profile 级跨进程锁，避免两个 Agent 调用同时创建两笔授权。
+			if err := store.WithRefreshLock(profile.Name, func() error {
+				// 锁内重读安装门禁，避免等待 complete 时沿用已经失效的首次安装状态并再次发起授权。
+				installState, firstInstallRequired, err := pendingFirstInstallAuthorization(runtime)
+				if err != nil {
+					return err
 				}
-				if !runtimeNow(runtime).Before(existing.Pending.ExpiresAt) && existing.Pending.Status == auth.DevicePending {
-					status = string(auth.DevicePendingExpired)
+				existing, loadErr := store.Load(profile.Name)
+				if loadErr != nil && !errors.Is(loadErr, auth.ErrDeviceCredentialNotFound) {
+					return loadErr
 				}
-				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{
-					Status: status, VerificationURIComplete: existing.Pending.VerificationURIComplete, ExpiresAt: formatOptionalTime(existing.Pending.ExpiresAt),
+				// 当前事件的 token 仍有效时才补做本地提交；过期后继续创建新授权事务。
+				if firstInstallRequired && loadErr == nil && existing.Pending == nil && existing.Token != nil && existing.Token.ValidAt(runtimeNow(runtime), 0) && existing.TokenFirstInstallEventID == installState.EventID {
+					if err := completeFirstInstallAuthorization(runtime, existing.TokenFirstInstallEventID); err != nil {
+						return err
+					}
+					result = deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(existing.Token.ExpiresAt)}
+					return nil
+				}
+				forceRestart := restart || firstInstallRequired
+				if loadErr == nil && existing.Pending != nil {
+					status := existing.Pending.EffectiveStatus(runtimeNow(runtime))
+					sameFirstInstallTransaction := firstInstallRequired && installState.EventID != "" && existing.Pending.FirstInstallEventID == installState.EventID
+					activeTransaction := status == auth.DevicePending || status == auth.DevicePendingChecking || status == auth.DevicePendingUncertain
+					// 同一首次安装事件即使重放 --restart，也复用仍活跃的事务；终态只有显式 --restart 才新建。
+					if sameFirstInstallTransaction && (activeTransaction || !restart) {
+						forceRestart = false
+					}
+					if !forceRestart {
+						result = deviceAuthOutput{
+							Status: string(status), VerificationURIComplete: existing.Pending.VerificationURIComplete,
+							ExpiresAt: formatOptionalTime(existing.Pending.ExpiresAt), Reused: true,
+						}
+						return nil
+					}
+				}
+				// 只有仍有效的 token 才表示已登录；到期后继续创建新事务，让用户从新链接手动授权。
+				if !forceRestart && loadErr == nil && existing.Token != nil && existing.Token.ValidAt(runtimeNow(runtime), 0) {
+					result = deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(existing.Token.ExpiresAt)}
+					return nil
+				}
+				authContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
+				defer cancel()
+				metadata, err := auth.DiscoverOAuthMetadata(authContext, runtime.HTTP, profile.OAuthMetadataURL)
+				if err != nil {
+					return err
+				}
+				deviceEndpoint := strings.TrimSpace(profile.OAuthDeviceAuthorizationURL)
+				if deviceEndpoint == "" {
+					deviceEndpoint = strings.TrimSpace(metadata.DeviceAuthorizationEndpoint)
+				}
+				if deviceEndpoint == "" {
+					return fmt.Errorf("OAuth metadata 尚未发布 device_authorization_endpoint；请在认证服务启用 Device Grant 并发布该端点，或通过 config add --oauth-device-authorization-url 写入平台确认配置")
+				}
+				if strings.TrimSpace(metadata.TokenEndpoint) == "" {
+					return fmt.Errorf("OAuth metadata 缺少 token_endpoint")
+				}
+				deviceClientID := profile.EffectiveOAuthDeviceClientID()
+				response, err := auth.StartDeviceAuthorization(authContext, runtime.HTTP, auth.DeviceAuthorizationRequest{
+					Endpoint: deviceEndpoint, ClientID: deviceClientID,
+					Scope: strings.Join(profile.OAuthScopes, " "), Resource: profile.EffectiveOAuthResource(),
 				})
-			}
-			if !restart && loadErr == nil && existing.Token != nil && existing.Token.AccessToken != "" {
-				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(existing.Token.ExpiresAt)})
-			}
-			authContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
-			defer cancel()
-			metadata, err := auth.DiscoverOAuthMetadata(authContext, runtime.HTTP, profile.OAuthMetadataURL)
-			if err != nil {
+				if err != nil {
+					return err
+				}
+				expiresAt := runtimeNow(runtime).Add(time.Duration(response.ExpiresIn) * time.Second)
+				revocationEndpoint := strings.TrimSpace(profile.OAuthRevocationURL)
+				if revocationEndpoint == "" {
+					revocationEndpoint = strings.TrimSpace(metadata.RevocationEndpoint)
+				}
+				profile.DefaultIdentity = config.IdentityUser
+				if err := runtime.Profiles.Add(profile); err != nil {
+					return err
+				}
+				profileSnapshot := profile
+				// Device Profile 只用于 user 沙箱恢复，去除无关的 app 标识，避免跨身份带入配置。
+				profileSnapshot.AppID = ""
+				existing.Profile = &profileSnapshot
+				// 首次安装强制新授权时保留旧 token 作为回滚材料，但业务门禁不会使用它；成功后由新 token 覆盖。
+				if !firstInstallRequired {
+					existing.Token = nil
+					existing.TokenFirstInstallEventID = ""
+				}
+				firstInstallEventID := ""
+				if firstInstallRequired {
+					firstInstallEventID = installState.EventID
+				}
+				existing.Pending = &auth.DevicePendingTransaction{
+					Status: auth.DevicePending, DeviceCode: response.DeviceCode,
+					VerificationURIComplete: response.VerificationURIComplete,
+					TokenEndpoint:           metadata.TokenEndpoint, RevocationEndpoint: revocationEndpoint,
+					ClientID: deviceClientID, ExpiresAt: expiresAt, FirstInstallEventID: firstInstallEventID,
+				}
+				if err := store.Save(profile.Name, existing); err != nil {
+					return err
+				}
+				result = deviceAuthOutput{
+					Status: string(auth.DevicePending), VerificationURIComplete: response.VerificationURIComplete, ExpiresAt: formatOptionalTime(expiresAt),
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
-			deviceEndpoint := strings.TrimSpace(profile.OAuthDeviceAuthorizationURL)
-			if deviceEndpoint == "" {
-				deviceEndpoint = strings.TrimSpace(metadata.DeviceAuthorizationEndpoint)
+			// 新建和复用的待授权事务使用同一文案；终态或结果不确定时不再提示用户点击。
+			if result.Status == string(auth.DevicePending) && result.VerificationURIComplete != "" {
+				result.VerificationLinkText = "点击授权"
 			}
-			if deviceEndpoint == "" {
-				return fmt.Errorf("OAuth metadata 尚未发布 device_authorization_endpoint；请在认证服务启用 Device Grant 并提供对应 Device client，或通过 config add --oauth-device-authorization-url/--oauth-device-client-id 写入平台确认配置")
-			}
-			if strings.TrimSpace(metadata.TokenEndpoint) == "" {
-				return fmt.Errorf("OAuth metadata 缺少 token_endpoint")
-			}
-			response, err := auth.StartDeviceAuthorization(authContext, runtime.HTTP, auth.DeviceAuthorizationRequest{
-				Endpoint: deviceEndpoint, ClientID: profile.EffectiveOAuthDeviceClientID(),
-				Scope: strings.Join(profile.OAuthScopes, " "), Resource: profile.EffectiveOAuthResource(),
-			})
-			if err != nil {
-				return err
-			}
-			expiresAt := runtimeNow(runtime).Add(time.Duration(response.ExpiresIn) * time.Second)
-			revocationEndpoint := strings.TrimSpace(profile.OAuthRevocationURL)
-			if revocationEndpoint == "" {
-				revocationEndpoint = strings.TrimSpace(metadata.RevocationEndpoint)
-			}
-			profile.DefaultIdentity = config.IdentityUser
-			if err := runtime.Profiles.Add(profile); err != nil {
-				return err
-			}
-			profileSnapshot := profile
-			// Device Profile 只用于 user 沙箱恢复，去除无关的 app 标识，避免跨身份带入配置。
-			profileSnapshot.AppID = ""
-			existing.Profile = &profileSnapshot
-			existing.Token = nil
-			existing.Pending = &auth.DevicePendingTransaction{
-				Status: auth.DevicePending, DeviceCode: response.DeviceCode,
-				VerificationURIComplete: response.VerificationURIComplete,
-				TokenEndpoint:           metadata.TokenEndpoint, RevocationEndpoint: revocationEndpoint,
-				ClientID: profile.EffectiveOAuthDeviceClientID(), ExpiresAt: expiresAt,
-			}
-			if err := store.Save(profile.Name, existing); err != nil {
-				return err
-			}
-			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{
-				Status: string(auth.DevicePending), VerificationURIComplete: response.VerificationURIComplete, ExpiresAt: formatOptionalTime(expiresAt),
-			})
+			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
 	command.Flags().BoolVar(&restart, "restart", false, "明确废弃已有事务并重新开始 Device 授权")
 	withNotes(command,
-		"把 verification_uri_complete 作为一个完整链接原样展示给用户，不拆分、不改写 query。",
+		"Device Grant 只使用 Profile 或 dev/test 预设中的独立 Device client，不动态注册且不复用 Codex 浏览器 client。",
+		"豆包本地电脑同样使用 Device Grant；首次 auth status 前固定 SESSION_ID 和初始工作目录，后续每条命令显式复用。",
+		"待授权时 verification_link_text 固定为点击授权；豆包与 WorkBuddy 都以该字段作为按钮或 Markdown 链接文字。",
+		"把 verification_uri_complete 作为一个完整链接原样展示给用户，不拆分、不改写 query；链接目标保留完整 URL，展示文字使用点击授权。",
+		"并发初始化和同一首次安装事件重放会复用已有事务，并在结构化输出中标记 reused=true。",
+		"user token 过期后重新执行 auth init 会生成新授权链接；尚未过期的 token 和已有待完成事务继续复用。",
 		"用户完成浏览器授权后执行 auth complete；每次 complete 只检查一次。",
 	)
 	return command
@@ -189,34 +262,46 @@ func newAuthDeviceCompleteCommand(runtime *Runtime, root *rootOptions) *cobra.Co
 	}
 }
 
-// completeDeviceAuthorization 在 Profile 级跨进程锁内完成一次 Device 授权检查，确保同一 device code 只被一个进程兑换。
-// 入参：ctx context.Context 控制远端请求；runtime *Runtime 提供 HTTP、时钟和输出；root *rootOptions 提供超时与格式；profile config.Profile 为当前配置；store auth.DeviceCredentialStore 为会话凭证存储。
-// 返回值：error，状态读取、OAuth 兑换、凭证保存或结果渲染失败时非 nil。
+/*
+completeDeviceAuthorization 在 Profile 级跨进程锁内兑换一次 Device code，并幂等完成对应安装事件的本地提交。
+入参：ctx context.Context 控制远端请求；runtime *Runtime 提供 HTTP、时钟和输出；root *rootOptions 提供超时与格式；profile config.Profile 为当前配置；store auth.DeviceCredentialStore 为会话凭证存储。
+返回值：error，状态读取、OAuth 兑换、凭证保存、安装门禁提交或结果渲染失败时非 nil。
+*/
 func completeDeviceAuthorization(ctx context.Context, runtime *Runtime, root *rootOptions, profile config.Profile, store auth.DeviceCredentialStore) error {
 	return store.WithRefreshLock(profile.Name, func() error {
 		credential, err := store.Load(profile.Name)
 		if err != nil {
-			return fmt.Errorf("没有待完成的 Device 授权，请先执行 auth init: %w", err)
+			if errors.Is(err, auth.ErrDeviceCredentialNotFound) {
+				return fmt.Errorf("没有待完成的 Device 授权；auth init 与 auth complete 必须复用同一 Device 会话标识（WorkBuddy CODEBUDDY_SESSION_ID；豆包 SESSION_ID 与初始工作目录）；恢复 auth init 使用的原标识后重新执行 auth complete，仅在 CLI 明确返回 denied、expired 或 invalid_grant 后开始新事务: %w", err)
+			}
+			return fmt.Errorf("读取待完成的 Device 授权: %w", err)
 		}
 		if credential.Pending == nil {
 			if credential.Token != nil && credential.Token.AccessToken != "" {
+				if !credential.Token.ValidAt(runtimeNow(runtime), 0) {
+					return fmt.Errorf("%w；Device 凭证已过期，请执行 auth init --restart --profile %s --as user", auth.ErrUserAuthentication, profile.Name)
+				}
+				// token 与事件证明在同一份加密凭证中；重试只修复门禁，既不兑换旧 code 也不接受无证明的旧 token。
+				if err := completeFirstInstallAuthorization(runtime, credential.TokenFirstInstallEventID); err != nil {
+					return err
+				}
 				return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(credential.Token.ExpiresAt)})
 			}
-			return fmt.Errorf("没有待完成的 Device 授权，请先执行 auth init")
+			return fmt.Errorf("没有待完成的 Device 授权；auth init 与 auth complete 必须复用同一 Device 会话标识（WorkBuddy CODEBUDDY_SESSION_ID；豆包 SESSION_ID 与初始工作目录）；恢复 auth init 使用的原标识后重新执行 auth complete，仅在 CLI 明确返回 denied、expired 或 invalid_grant 后开始新事务")
 		}
 		pending := credential.Pending
+		// 先落盘到期状态，再处理 uncertain/checking，避免异常事务永久停留在不可兑换的状态。
+		if status := pending.EffectiveStatus(runtimeNow(runtime)); status != pending.Status {
+			pending.Status = status
+			if err := store.Save(profile.Name, credential); err != nil {
+				return err
+			}
+		}
 		if pending.Status == auth.DevicePendingChecking || pending.Status == auth.DevicePendingUncertain {
 			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(auth.DevicePendingUncertain)})
 		}
 		if pending.Status != auth.DevicePending {
 			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(pending.Status), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
-		}
-		if !runtimeNow(runtime).Before(pending.ExpiresAt) {
-			pending.Status = auth.DevicePendingExpired
-			if err := store.Save(profile.Name, credential); err != nil {
-				return err
-			}
-			return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: string(auth.DevicePendingExpired), ExpiresAt: formatOptionalTime(pending.ExpiresAt)})
 		}
 		pending.Status = auth.DevicePendingChecking
 		if err := store.Save(profile.Name, credential); err != nil {
@@ -247,8 +332,13 @@ func completeDeviceAuthorization(ctx context.Context, runtime *Runtime, root *ro
 		}
 		credential.Pending = nil
 		credential.Token = &token
+		// 先与 token 原子保存事件证明；门禁提交失败或进程退出后，下一次命令仍可恢复这一提交。
+		credential.TokenFirstInstallEventID = pending.FirstInstallEventID
 		if err := store.Save(profile.Name, credential); err != nil {
 			return fmt.Errorf("保存 Device 授权结果失败，状态可能不确定，请先修复安全存储再重新开始授权: %w", err)
+		}
+		if err := completeFirstInstallAuthorization(runtime, credential.TokenFirstInstallEventID); err != nil {
+			return err
 		}
 		return render(runtime, root, profile.DefaultOutput, deviceAuthOutput{Status: "succeeded", ExpiresAt: formatOptionalTime(token.ExpiresAt)})
 	})
@@ -262,7 +352,7 @@ func requireDeviceCredentialStore(runtime *Runtime) (auth.DeviceCredentialStore,
 		return nil, runtime.DeviceCredentialError
 	}
 	if runtime.DeviceCredentials == nil {
-		return nil, fmt.Errorf("Device 授权需要豆包 SKILL_SESSION_WORKSPACE/SESSION_ID 或 WorkBuddy CODEBUDDY_SESSION_ID 运行时")
+		return nil, fmt.Errorf("Device 授权需要豆包 SKILL_SESSION_WORKSPACE/SESSION_ID 或 WorkBuddy CODEBUDDY_SESSION_ID 运行时；豆包本地电脑也使用 Device Grant，请在首次 auth status 前固定 SESSION_ID 和初始工作目录，并在后续每条命令中显式复用")
 	}
 	return runtime.DeviceCredentials, nil
 }
@@ -287,9 +377,11 @@ func formatOptionalTime(value time.Time) string {
 	return value.Format(time.RFC3339)
 }
 
-// newAuthLoginCommand 创建 auth login；app 使用 app secret，user 使用 OAuth/PKCE 浏览器授权。
-// 入参：runtime *Runtime 为 I/O、HTTP 和 token store；root *rootOptions 为 Profile/输出 flags。
-// 返回值：*cobra.Command，可获取并缓存 app 或 user token。
+/*
+newAuthLoginCommand 创建 app secret 或本地 OAuth 登录命令，并为人工浏览器授权提供独立默认等待时间。
+入参：runtime *Runtime 为 I/O、HTTP 和 token store；root *rootOptions 为 Profile、输出和显式超时 flags。
+返回值：*cobra.Command，可获取并缓存 app 或 user token；豆包/WorkBuddy user 引导到 Device Grant。
+*/
 func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var secretFromStdin bool
 	var noOpenBrowser bool
@@ -299,7 +391,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "login",
 		Short: "获取并安全缓存 app/user token",
-		Long:  "获取并安全缓存 app 或 user 身份凭证；app 使用 app secret，user 仅在本机使用 OAuth/PKCE loopback 授权。豆包/WorkBuddy 沙箱使用 auth init/complete Device Grant。",
+		Long:  "获取并安全缓存 app 或 user 身份凭证；app 使用 app secret，Codex/人工本地 user 使用 OAuth/PKCE loopback 授权。豆包/WorkBuddy（含本地电脑）使用 auth init/complete Device Grant。",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, args []string) error {
 			profile, err := selectedProfile(runtime, root)
@@ -314,8 +406,8 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				return err
 			}
 			if identity == config.IdentityUser && runtime.DeviceCredentials != nil {
-				// 已识别的豆包/WorkBuddy 运行时与宿主浏览器不共享 loopback，固定转入 Device Grant。
-				return fmt.Errorf("%w；当前豆包/WorkBuddy 沙箱使用 Device Grant，请执行 auth init --profile %s --as user --output json", auth.ErrUserAuthentication, profile.Name)
+				// 授权协议由宿主决定；豆包在本地执行时也保持与 WorkBuddy 一致的 Device Grant。
+				return fmt.Errorf("%w；当前豆包/WorkBuddy 运行时使用 Device Grant，请执行 auth init --profile %s --as user --output json", auth.ErrUserAuthentication, profile.Name)
 			}
 			appIDFlagSet := command.Flags().Changed("app-id")
 			appSecretFlagSet := command.Flags().Changed("app-secret")
@@ -332,7 +424,26 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				return fmt.Errorf("%w: --app-secret 不能为空", auth.ErrCredentialsMissing)
 			}
 			appSecret := ""
+			browserOAuthClientRegistered := false
 			if identity == config.IdentityUser {
+				if strings.TrimSpace(profile.OAuthMetadataURL) != "" && profile.HasOAuthClientRegistrationConfiguration() {
+					registrationContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
+					defer cancel()
+					// 浏览器 client 的注册端点以 authorization server metadata 为准，与合同 CLI 的发现流程保持一致。
+					metadata, discoveryErr := auth.DiscoverOAuthMetadata(registrationContext, runtime.HTTP, profile.OAuthMetadataURL)
+					if discoveryErr != nil {
+						return discoveryErr
+					}
+					if strings.TrimSpace(metadata.RegistrationEndpoint) == "" {
+						return fmt.Errorf("OAuth metadata 缺少 registration_endpoint")
+					}
+					// 显式登录总是创建当前环境的 public client，避免升级后继续使用历史环境留下的无效 client_id。
+					profile, err = ensureBrowserOAuthClient(registrationContext, runtime, profile, metadata.RegistrationEndpoint, true)
+					if err != nil {
+						return err
+					}
+					browserOAuthClientRegistered = true
+				}
 				if !profile.HasOAuthConfiguration() {
 					page := profile.AuthURLFor(identity)
 					if page != "" {
@@ -358,7 +469,7 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 					appSecret = auth.SecretFromEnvironment(profile.Name)
 				}
 				if secretFromStdin {
-					appSecret, err = readSecret(runtime.Input)
+					appSecret, err = readSecret(runtime.Input, runtime.Error)
 					if err != nil {
 						return fmt.Errorf("%w: %v", auth.ErrCredentialsMissing, err)
 					}
@@ -375,7 +486,12 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 					return auth.ErrCredentialsMissing
 				}
 			}
-			loginContext, cancel := context.WithTimeout(command.Context(), root.Timeout)
+			// user 登录包含人工阅读和浏览器确认，默认给出三分钟；显式 --timeout 仍由调用方决定。
+			loginTimeout := root.Timeout
+			if identity == config.IdentityUser && !command.Flags().Changed("timeout") {
+				loginTimeout = 3 * time.Minute
+			}
+			loginContext, cancel := context.WithTimeout(command.Context(), loginTimeout)
 			defer cancel()
 			var token auth.Token
 			if identity == config.IdentityUser {
@@ -409,6 +525,12 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if identity == config.IdentityUser && browserOAuthClientRegistered {
+				// token 已绑定本次签发 client；先保存 token 再更新 Profile，授权失败时不会污染旧配置。
+				if err := runtime.Profiles.Add(profile); err != nil {
+					return err
+				}
+			}
 			if identity == config.IdentityApp && saveAppSecret {
 				if runtime.Secrets == nil {
 					return fmt.Errorf("当前运行时不支持保存 app secret")
@@ -428,6 +550,9 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 					}
 				}
 			}
+			if err := completeFirstInstallAuthorization(runtime); err != nil {
+				return err
+			}
 			result := map[string]any{
 				"profile":       profile.Name,
 				"identity":      identity,
@@ -439,17 +564,25 @@ func newAuthLoginCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			return render(runtime, root, profile.DefaultOutput, result)
 		},
 	}
-	command.Flags().BoolVar(&secretFromStdin, "app-secret-stdin", false, "从 stdin 读取 app secret")
+	command.Flags().BoolVar(&secretFromStdin, "app-secret-stdin", false, "从 stdin 读取 app secret；交互终端隐藏输入并按回车结束")
 	command.Flags().BoolVar(&noOpenBrowser, "no-open-browser", false, "不自动打开浏览器，仅输出用户 OAuth 授权链接")
 	command.Flags().BoolVar(&saveAppSecret, "save-app-secret", false, "授权成功后将 app secret 保存到本地安全存储（macOS Keychain，其他系统 secrets.json）")
 	command.Flags().StringVar(&appIDFlag, "app-id", "", "app 登录使用的 app ID；优先于环境变量和 Profile")
 	command.Flags().StringVar(&appSecretFlag, "app-secret", "", "app 登录使用的 app secret；不会输出到日志，优先于 stdin、环境变量和本地保存值")
+	withNotes(command,
+		"user 浏览器登录默认等待 3 分钟，显式 --timeout 可覆盖；动态注册和 app 登录仍使用普通请求超时。",
+		"Codex 本地 user 每次显式登录都会读取 OAuth metadata 的 registration_endpoint，动态注册 public client，并用返回的 client_id 完成本次 OAuth/PKCE。",
+		"豆包本地电脑与 WorkBuddy 同样使用 auth init/complete；豆包在首次 auth status 前固定 SESSION_ID 和初始工作目录。",
+		"动态注册只更新浏览器 OAuth client，不覆盖显式 Device Grant client。",
+	)
 	return command
 }
 
-// newAuthStatusCommand 创建 auth status，绝不输出 token 本身。
-// 入参：runtime *Runtime 为 token store 和时钟；root *rootOptions 为 Profile/输出 flags。
-// 返回值：*cobra.Command，可检查缓存或环境变量凭证状态。
+/*
+newAuthStatusCommand 查询当前身份及凭证运行时的状态，统一识别 Device 事务到期且不继承浏览器缓存。
+入参：runtime *Runtime 为 token store 和时钟；root *rootOptions 为 Profile/输出 flags。
+返回值：*cobra.Command，可检查缓存或环境变量凭证状态，输出不包含 token。
+*/
 func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
@@ -467,6 +600,19 @@ func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 			}
 			if err := validateDeviceCredentialRuntime(runtime, identity); err != nil {
 				return err
+			}
+			if installState, firstInstallRequired, err := pendingFirstInstallAuthorization(runtime); err != nil {
+				return err
+			} else if firstInstallRequired {
+				return render(runtime, root, profile.DefaultOutput, map[string]any{
+					"profile":               profile.Name,
+					"identity":              identity,
+					"authenticated":         false,
+					"source":                "first_install",
+					"firstInstall":          installState.FirstInstall,
+					"authorizationRequired": true,
+					"nextAction":            firstInstallAuthorizationCommand(runtime, profile, identity),
+				})
 			}
 			if identity == config.IdentityApp && strings.TrimSpace(os.Getenv("EVERYLINE_ACCESS_TOKEN")) != "" {
 				status := map[string]any{
@@ -490,14 +636,7 @@ func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 							status["expiresInSeconds"] = maxInt64(0, int64(credential.Token.ExpiresAt.Sub(now).Seconds()))
 						}
 					} else if credential.Pending != nil {
-						pendingStatus := credential.Pending.Status
-						if pendingStatus == "" {
-							pendingStatus = auth.DevicePending
-						}
-						if pendingStatus == auth.DevicePending && !now.Before(credential.Pending.ExpiresAt) {
-							pendingStatus = auth.DevicePendingExpired
-						}
-						status["deviceStatus"] = pendingStatus
+						status["deviceStatus"] = credential.Pending.EffectiveStatus(now)
 						status["expiresAt"] = credential.Pending.ExpiresAt
 					}
 					return render(runtime, root, profile.DefaultOutput, status)
@@ -505,6 +644,10 @@ func newAuthStatusCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 				if !errors.Is(deviceErr, auth.ErrDeviceCredentialNotFound) {
 					return deviceErr
 				}
+				// Device 会话尚未授权时直接返回，防止本地 OAuth 旧 token 让 Agent 跳过 Device 授权。
+				return render(runtime, root, profile.DefaultOutput, map[string]any{
+					"profile": profile.Name, "identity": identity, "authenticated": false, "source": "device",
+				})
 			}
 			var token auth.Token
 			var loadErr error

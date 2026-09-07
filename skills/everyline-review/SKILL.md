@@ -4,7 +4,7 @@ description: "使用 EveryLine CLI 发起或继续单份合同智能审查，包
 metadata:
   requires:
     bins: ["everyline-cli"]
-    skills: ["everyline-shared"]
+    skills: ["everyline-cli"]
   cliHelp: "everyline-cli review file upload --help;everyline-cli review task start --help;everyline-cli review task result --help"
 ---
 
@@ -16,16 +16,16 @@ metadata:
 
 在用户要求使用 EveryLine/智审审查合同、继续本会话真实任务，或提供真实 task ID 查询状态与结果时使用。
 
-- 用户已经表达审查目标但遇到首次配置、user/app 授权或鉴权问题时，本 Skill 保持业务流程负责人身份；`everyline-shared` 只处理配置或恢复步骤，成功后回到原审查步骤，不重复询问已经确认的合同、主体、清单或强度。
+- 用户已经表达审查目标但遇到首次配置、user/app 授权或鉴权问题时，本 Skill 保持业务流程负责人身份；`everyline-cli` 只处理配置或恢复步骤，成功后回到原审查步骤，不重复询问已经确认的合同、主体、清单或强度。
 - “用清单 A 审查这份合同”等在一次审查中选择已有清单的请求仍属于本 Skill；只有用户要查询或改变清单、规则、规则分组本身时才交给 `everyline-review-config`。
 - “新建或修改清单后审查合同”拆分为两个连续阶段：先由 `everyline-review-config` 单独确认、写入并回读配置，再回到本 Skill 发起审查；审查请求本身不代表用户确认配置写入。
 - 一般法律咨询、合同起草、改写、翻译以及其他合同 CLI 不使用本 Skill。
 
 ## 依赖与调用上下文
 
-1. 执行 `command -v everyline-cli` 和 `everyline-cli version --output json`；按 `everyline-shared` 记录 `updateRequired`，先让当前审查完成上传、发起、终态轮询和结果获取，再执行延迟更新。
-2. 固定本次 `<profile>` 与 `<identity>`，并按 `everyline-shared` 查询 `auth status`；恢复后只重试中断步骤一次。
-3. 本流程每条命令显式携带 `--profile <profile> --as <identity>`，不因资源不可见自动切换身份。
+1. 执行 `command -v everyline-cli` 和 `everyline-cli version --output json`；先按 `everyline-cli` 公共 Skill 的首次使用引导处理已确认的首次安装、导入上下文和授权门禁，在回复正文展示统一文案，同次对话已展示时复用。再记录 `updateRequired`，先让当前审查完成上传、发起、终态轮询和结果获取，再执行延迟更新。
+2. 固定本次 `<profile>` 与 `<identity>`，并按 `everyline-cli` 公共 Skill 查询 `auth status`；恢复后只重试中断步骤一次。
+3. 本流程每条命令显式携带 `--profile <profile> --as <identity>`，并复用公共 Skill 已固定的 Device 会话上下文：豆包普通工作任务（含本地电脑）每次注入同一 `SESSION_ID` 并使用同一初始工作目录，WorkBuddy 每次注入同一 `CODEBUDDY_SESSION_ID`，AgentKit 保留平台工作区与注入密钥。不因资源不可见自动切换身份。
 
 ## 目标版本就绪门
 
@@ -47,6 +47,8 @@ everyline-cli review task result --help
 - 主体提取返回同一候选的 `name` 与 `role`；
 - 沙箱可使用 `upload --stdin`，完整 URL 可使用 `upload-url`；
 - `review task result` 等待同一 task ID 的终态并获取详情。
+- Codex、豆包和 WorkBuddy 的审查顺序统一为「主体 → 强度 → 清单」，每次只收集一个维度；已明确且能唯一匹配的值直接复用，清单选择完成后直接校验并发起审查。
+- 三端清单读取全部远端分页后，在正文完整展示内置项与全部真实清单，等待用户回复一个或多个编号；不做对话分页，不使用选项组件或搜索导航。WorkBuddy 的主体和强度也使用正文编号列表，Codex、豆包沿用各自的单选方式。
 
 关键能力缺失时列出缺口，停止上传和任务创建；保留授权、帮助查询和无关只读操作。
 

@@ -113,17 +113,18 @@ everyline-cli config add test-app \
 | `blue` | `https://blue-open.qtech.cn` | `https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://blue-contract-agent.qtech.cn` |
 | `prod` | `https://open.qfei.cn` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://contract-agent.qfei.cn` |
 
-dev/test 还内置了 user OAuth 配置：
+dev/test/prod 还内置了 user OAuth 配置：
 
-| 配置 | dev | test |
-|---|---|---|
-| OAuth metadata | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` |
-| business type | `contract-review` | `contract-review` |
-| public client ID | `zscli_a9f2a3ce87fa5bb6` | `zscli_a94c9aa398389bd7` |
-| redirect URL | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` |
-| scope | `contract-review:full` | `contract-review:full` |
+| 配置 | dev | test | prod |
+|---|---|---|---|
+| OAuth metadata | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
+| business type | `contract-review` | `contract-review` | `contract-review` |
+| 浏览器 public client ID | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 |
+| Device client ID | `zscli_c77221e810ce3977` | `zscli_c77221e810ce3977` | 当前未配置，使用时显式提供 |
+| redirect URL | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` |
+| scope | `contract-review:full` | `contract-review:full` | `contract-review:full` |
 
-blue/prod 当前未内置 user OAuth metadata、public client ID、redirect URL 和 scope。需要使用 user 身份时，由对应环境提供这些参数后显式注入。
+blue 当前未内置 user OAuth metadata、business type、redirect URL 和 scope。需要使用 user 身份时，由对应环境提供这些参数后显式注入；Codex 浏览器 client ID 由每次显式登录动态注册。
 
 其他内置环境的 app Profile：
 
@@ -147,7 +148,7 @@ everyline-cli config add custom-app \
 
 自定义 user Profile 可增加 `--user-base-url`，并通过 `--oauth-metadata-url`、`--oauth-business-type`、`--oauth-client-id`、`--oauth-redirect-url`、`--oauth-scope` 注入 OAuth 配置。
 
-Profile 默认保存在 `~/.everyline-cli/config.json`，可通过 `EVERYLINE_CONFIG_DIR` 修改目录。Profile 不保存 access token、OAuth code 或未显式保存的 app secret。
+Profile 默认保存在 `~/.everyline-cli/config.json`，可通过 `EVERYLINE_CONFIG_DIR` 修改目录；相对路径以用户主目录为基准。Profile 不保存 access token、OAuth code 或未显式保存的 app secret。
 
 ### 3. 完成授权
 

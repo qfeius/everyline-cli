@@ -1,6 +1,6 @@
 {
   "name": "everyline-cli",
-  "version": "0.0.2",
+  "version": "0.0.7",
   "description": "EveryLine CLI 工具的 npm/npx 薄包装",
   "license": "UNLICENSED",
   "bin": {
@@ -17,6 +17,7 @@
     "docs/everyline-cli-skill-guide.md",
     "docs/everyline-cli-skill-interaction-scenarios.md",
     "scripts/install.js",
+    "scripts/doubao-skills.js",
     "scripts/package-version.js",
     "scripts/platform.js",
     "scripts/run.js",

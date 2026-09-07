@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +38,19 @@ func testRuntime(t *testing.T) (*Runtime, *bytes.Buffer, *bytes.Buffer) {
 	runtime.Tokens = auth.NewFileTokenStore(filepath.Join(directory, "tokens.json"))
 	runtime.Secrets = auth.NewFileSecretStore(filepath.Join(directory, "secrets.json"))
 	return runtime, stdout, stderr
+}
+
+// requireFirstInstallAuthorization 为命令测试建立待完成的新安装授权门禁。
+// 入参：t *testing.T 为测试上下文；runtime *Runtime 为待修改运行时。
+// 返回值：无；保存失败时通过 t.Fatal 报告。
+func requireFirstInstallAuthorization(t *testing.T, runtime *Runtime) {
+	t.Helper()
+	if err := runtime.InstallState.Save(config.InstallState{
+		Schema: config.InstallStateSchema, EventID: "first-install-test", InstalledVersion: "0.0.2",
+		FirstInstall: true, AuthorizationRequired: true, NextAction: "authorize",
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestConfigCommands 验证 config add/use/show 共享同一持久化 Store。
@@ -89,7 +104,7 @@ func TestConfigAddDefaultsToJSONAndPreservesExplicitOutput(t *testing.T) {
 	}
 }
 
-// TestConfigAddEnvironmentPreset 验证 config add 可用预设环境创建 test 和 blue Profile。
+// TestConfigAddEnvironmentPreset 验证 config add 可创建四套预设，Codex 保留动态注册参数，dev/test 同时内置专用 Device client。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestConfigAddEnvironmentPreset(t *testing.T) {
@@ -99,8 +114,10 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		baseURL  string
 		tokenURL string
 	}{
+		{name: "dev", baseURL: "https://dev-open.qtech.cn", tokenURL: "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
 		{name: "test", baseURL: "https://test-open.qtech.cn", tokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
 		{name: "blue", baseURL: "https://blue-open.qtech.cn", tokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
+		{name: "prod", baseURL: "https://open.qfei.cn", tokenURL: "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal"},
 	} {
 		if err := Execute(context.Background(), runtime, []string{
 			"config", "add", test.name,
@@ -119,11 +136,21 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if profile.AuthURL == "" {
 			t.Fatalf("environment=%s 缺少自有认证页面: %#v", test.name, profile)
 		}
-		if test.name == "test" && !profile.HasOAuthConfiguration() {
-			t.Fatalf("environment=%s 缺少 OAuth 预设: %#v", test.name, profile)
+		if test.name != "blue" && !profile.HasOAuthClientRegistrationConfiguration() {
+			t.Fatalf("environment=%s 缺少 Codex OAuth 动态注册预设: %#v", test.name, profile)
 		}
-		if test.name == "test" && profile.OAuthDeviceClientID != "zscli_c77221e810ce3977" {
-			t.Fatalf("environment=%s Device client=%q", test.name, profile.OAuthDeviceClientID)
+		if profile.OAuthClientID != "" {
+			t.Fatalf("environment=%s 不应内置浏览器 client_id: %#v", test.name, profile)
+		}
+		expectedDeviceClientID := ""
+		if test.name == "dev" || test.name == "test" {
+			expectedDeviceClientID = "zscli_c77221e810ce3977"
+		}
+		if profile.OAuthDeviceClientID != expectedDeviceClientID {
+			t.Fatalf("environment=%s deviceClientID=%q", test.name, profile.OAuthDeviceClientID)
+		}
+		if expectedDeviceClientID != "" && !profile.HasDeviceOAuthConfiguration() {
+			t.Fatalf("environment=%s 缺少 Device Grant 预设: %#v", test.name, profile)
 		}
 	}
 }
@@ -155,6 +182,78 @@ func TestVersionReportsLatestStateAndUpdateCommand(t *testing.T) {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
 		}
+	}
+}
+
+/*
+TestFirstInstallStatusRejectsExistingToken 验证首次安装拒绝旧 token，并通过事件提供指定的安装与授权帮助文案。
+入参：t *testing.T 为测试上下文。
+返回值：无；状态仍信任旧 token 或缺少正确的授权引导时通过 t.Fatal 报告。
+*/
+func TestFirstInstallStatusRejectsExistingToken(t *testing.T) {
+	runtime, stdout, stderr := testRuntime(t)
+	profile := config.Profile{Name: "dev", BaseURL: "https://api.example.com", TokenURL: "https://api.example.com/token", AppID: "app", DefaultIdentity: config.IdentityUser, DefaultOutput: "json"}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	identityStore := runtime.Tokens.(interface {
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	if err := identityStore.SaveForIdentity(profile.Name, config.IdentityUser, auth.Token{AccessToken: "old-dev-token", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	requireFirstInstallAuthorization(t, runtime)
+
+	if err := Execute(context.Background(), runtime, []string{"auth", "status", "--profile", profile.Name, "--as", "user", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"authenticated": false`, `"source": "first_install"`, `"authorizationRequired": true`, `"nextAction": "everyline-cli auth login --profile dev --as user --output json"`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
+		}
+	}
+	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) || !strings.Contains(stderr.String(), `"recommendedSkill":"everyline-cli"`) || !strings.Contains(stderr.String(), `"message":"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。"`) {
+		t.Fatalf("stderr=%s，缺少首次安装 NDJSON 事件", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := Execute(context.Background(), runtime, []string{"version", "--output", "json"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"firstInstall": true`, `"authorizationRequired": true`, `"nextAction": "authorize"`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("version stdout=%s，缺少 %s", stdout.String(), expected)
+		}
+	}
+}
+
+// TestFirstInstallBlocksBusinessCommands 验证完成新授权前不会调用任何业务 API。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；业务请求穿透门禁或退出类型错误时通过 t.Fatal 报告。
+func TestFirstInstallBlocksBusinessCommands(t *testing.T) {
+	businessCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		businessCalls++
+		_, _ = writer.Write([]byte(`{"code":200,"msg":"success","data":[]}`))
+	}))
+	defer server.Close()
+	t.Setenv("EVERYLINE_ACCESS_TOKEN", "old-app-token")
+	runtime, stdout, stderr := testRuntime(t)
+	runtime.HTTP = server.Client()
+	if err := runtime.Profiles.Add(config.Profile{Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app", DefaultOutput: "json"}); err != nil {
+		t.Fatal(err)
+	}
+	requireFirstInstallAuthorization(t, runtime)
+
+	err := Execute(context.Background(), runtime, []string{"checklist", "list", "--profile", "dev", "--as", "app", "--output", "json"})
+	if !errors.Is(err, auth.ErrUserAuthentication) || ExitCode(err) != ExitAuth {
+		t.Fatalf("err=%v exit=%d，期望首次安装鉴权门禁", err, ExitCode(err))
+	}
+	if businessCalls != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"authorizationRequired":true`) {
+		t.Fatalf("businessCalls=%d stdout=%q stderr=%q", businessCalls, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(err.Error(), "everyline-cli Skill") {
+		t.Fatalf("err=%v，首次安装提示未指向合并后的 Skill", err)
 	}
 }
 
@@ -488,6 +587,7 @@ func TestAuthAppLoginAcceptsCredentialFlagsAndPersistsAppID(t *testing.T) {
 	if err := runtime.Profiles.Add(profile); err != nil {
 		t.Fatal(err)
 	}
+	requireFirstInstallAuthorization(t, runtime)
 
 	if err := Execute(context.Background(), runtime, []string{
 		"auth", "login", "--as", "app", "--app-id", "flag-app", "--app-secret", "flag-secret", "--output", "json",
@@ -503,6 +603,10 @@ func TestAuthAppLoginAcceptsCredentialFlagsAndPersistsAppID(t *testing.T) {
 	}
 	if updated.AppID != "flag-app" {
 		t.Fatalf("app id=%q, want flag-app", updated.AppID)
+	}
+	installState, err := runtime.InstallState.Load()
+	if err != nil || installState.FirstInstall || installState.AuthorizationRequired {
+		t.Fatalf("installState=%#v err=%v，app 新授权成功后应解除门禁", installState, err)
 	}
 	token, err := runtime.Tokens.Load("dev")
 	if err != nil || token.AccessToken != "flag-token" {
@@ -554,6 +658,41 @@ func TestAuthAppLoginRejectsConflictingSecretInputs(t *testing.T) {
 	}
 }
 
+// TestAuthAppLoginReadsSecretFromStdin 验证 WorkBuddy 用户终端命令的 stdin secret 可完成登录且不进入输出。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；secret 未传给认证服务或出现在 stdout/stderr 时通过 t.Fatal 报告。
+func TestAuthAppLoginReadsSecretFromStdin(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["appId"] != "workbuddy-app" || body["appSecret"] != "stdin-secret" {
+			t.Fatalf("token body=%#v", body)
+		}
+		_, _ = writer.Write([]byte(`{"code":0,"msg":"ok","tenant_access_token":"app-token","expire":7200}`))
+	}))
+	defer server.Close()
+
+	runtime, stdout, stderr := testRuntime(t)
+	runtime.Input = strings.NewReader("stdin-secret\n")
+	runtime.HTTP = server.Client()
+	if err := runtime.Profiles.Add(config.Profile{Name: "test", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "old-app", DefaultOutput: "json"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), runtime, []string{
+		"auth", "login", "--profile", "test", "--as", "app", "--app-id", "workbuddy-app", "--app-secret-stdin", "--output", "json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "stdin-secret") || strings.Contains(stderr.String(), "stdin-secret") {
+		t.Fatalf("secret leaked: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"authenticated": true`) {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
 // TestAuthUserLoginRejectsAppCredentialFlags 验证 user 登录不会静默接受 app 专用参数。
 func TestAuthUserLoginRejectsAppCredentialFlags(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
@@ -588,7 +727,7 @@ func TestAuthUserLoginRequiresOAuthConfiguration(t *testing.T) {
 	}
 }
 
-// TestAuthUserLoginUsesBrowserOAuth 验证 user 登录会打开 PKCE 授权链接、接收 loopback callback 并缓存 token。
+// TestAuthUserLoginUsesBrowserOAuth 验证 Codex user 登录会先动态注册浏览器 client，再完成 PKCE 授权且不覆盖 Device client。
 func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	callbackListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -598,11 +737,15 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	_ = callbackListener.Close()
 
 	var tokenRequest url.Values
+	var registrationCalls int
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
+		case "/oauth/register/contract-review":
+			registrationCalls++
+			_, _ = writer.Write([]byte(`{"client_id":"dynamic-oauth-client","client_id_issued_at":1788480000,"client_secret_expires_at":0,"token_endpoint_auth_method":"none"}`))
 		case "/metadata":
-			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","code_challenge_methods_supported":["S256"]}`))
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","registration_endpoint":"` + server.URL + `/oauth/register/contract-review","code_challenge_methods_supported":["S256"]}`))
 		case "/token":
 			if err := request.ParseForm(); err != nil {
 				t.Fatal(err)
@@ -639,17 +782,18 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 		return nil
 	}
 	profile := config.Profile{
-		Name:              "dev",
-		BaseURL:           "https://api.example.com",
-		AuthURL:           "https://auth.example.com",
-		TokenURL:          "https://api.example.com/token",
-		OAuthMetadataURL:  server.URL + "/metadata",
-		OAuthBusinessType: "contract-review",
-		OAuthClientID:     "oauth-client",
-		OAuthRedirectURL:  fmt.Sprintf("http://127.0.0.1:%d/login", callbackPort),
-		OAuthScopes:       []string{"contract-review:full"},
-		DefaultIdentity:   config.IdentityUser,
-		DefaultOutput:     "json",
+		Name:                "dev",
+		BaseURL:             server.URL,
+		AuthURL:             "https://auth.example.com",
+		TokenURL:            server.URL + "/tenant-token",
+		OAuthMetadataURL:    server.URL + "/metadata",
+		OAuthBusinessType:   "contract-review",
+		OAuthClientID:       "stale-oauth-client",
+		OAuthDeviceClientID: "existing-device-client",
+		OAuthRedirectURL:    fmt.Sprintf("http://127.0.0.1:%d/login", callbackPort),
+		OAuthScopes:         []string{"contract-review:full"},
+		DefaultIdentity:     config.IdentityUser,
+		DefaultOutput:       "json",
 	}
 	if err := runtime.Profiles.Add(profile); err != nil {
 		t.Fatal(err)
@@ -658,7 +802,7 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 	if err := Execute(context.Background(), runtime, []string{"auth", "login", "--as", "user"}); err != nil {
 		t.Fatal(err)
 	}
-	if tokenRequest.Get("code") != "authorization-code" || tokenRequest.Get("client_id") != "oauth-client" || tokenRequest.Get("grant_type") != "authorization_code" {
+	if registrationCalls != 1 || tokenRequest.Get("code") != "authorization-code" || tokenRequest.Get("client_id") != "dynamic-oauth-client" || tokenRequest.Get("grant_type") != "authorization_code" {
 		t.Fatalf("token request=%v", tokenRequest)
 	}
 	if tokenRequest.Get("code_verifier") == "" || tokenRequest.Get("redirect_uri") != profile.OAuthRedirectURL {
@@ -674,8 +818,231 @@ func TestAuthUserLoginUsesBrowserOAuth(t *testing.T) {
 		LoadForIdentity(string, config.IdentityKind) (auth.Token, error)
 	})
 	cached, err := identityStore.LoadForIdentity("dev", config.IdentityUser)
-	if err != nil || cached.AccessToken != "oauth-token" || cached.RefreshToken != "refresh-token" {
+	if err != nil || cached.AccessToken != "oauth-token" || cached.RefreshToken != "refresh-token" || cached.OAuthClientID != "dynamic-oauth-client" {
 		t.Fatalf("cached=%#v err=%v", cached, err)
+	}
+	storedProfile, err := runtime.Profiles.Get(profile.Name)
+	if err != nil || storedProfile.OAuthClientID != "dynamic-oauth-client" || storedProfile.OAuthDeviceClientID != "existing-device-client" {
+		t.Fatalf("storedProfile=%#v err=%v", storedProfile, err)
+	}
+}
+
+// TestAuthUserLoginFailurePreservesOAuthClientAndToken 验证动态注册后的授权失败不会让旧 Profile 与旧 token 失配。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；失败登录覆盖任一旧凭证关联时通过 t.Fatal 报告。
+func TestAuthUserLoginFailurePreservesOAuthClientAndToken(t *testing.T) {
+	metadataCalls := 0
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oauth/register/contract-review":
+			_, _ = writer.Write([]byte(`{"client_id":"new-oauth-client","token_endpoint_auth_method":"none"}`))
+		case "/metadata":
+			metadataCalls++
+			if metadataCalls > 1 {
+				http.Error(writer, "authorization unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","registration_endpoint":"` + server.URL + `/oauth/register/contract-review","code_challenge_methods_supported":["S256"]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	runtime, _, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{
+		Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/tenant-token",
+		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review",
+		OAuthClientID: "old-oauth-client", OAuthRedirectURL: "http://127.0.0.1:8000/login",
+		OAuthScopes: []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	identityStore := runtime.Tokens.(interface {
+		LoadForIdentity(string, config.IdentityKind) (auth.Token, error)
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	oldToken := auth.Token{
+		AccessToken: "old-access-token", RefreshToken: "old-refresh-token", OAuthClientID: profile.OAuthClientID,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if err := identityStore.SaveForIdentity(profile.Name, config.IdentityUser, oldToken); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--profile", profile.Name, "--as", "user"})
+	if err == nil || !strings.Contains(err.Error(), "获取 OAuth metadata 失败") {
+		t.Fatalf("err=%v", err)
+	}
+	storedProfile, profileErr := runtime.Profiles.Get(profile.Name)
+	if profileErr != nil || storedProfile.OAuthClientID != profile.OAuthClientID {
+		t.Fatalf("storedProfile=%#v err=%v", storedProfile, profileErr)
+	}
+	storedToken, tokenErr := identityStore.LoadForIdentity(profile.Name, config.IdentityUser)
+	if tokenErr != nil || storedToken.AccessToken != oldToken.AccessToken || storedToken.OAuthClientID != oldToken.OAuthClientID {
+		t.Fatalf("storedToken=%#v err=%v", storedToken, tokenErr)
+	}
+}
+
+/*
+TestAuthUserLoginDeniedPreservesOAuthClientAndToken 验证动态注册后拒绝授权会显示明确结果，并保留既有登录凭证。
+入参：t *testing.T 为测试上下文。
+返回值：无；回调响应、CLI 错误、token 兑换次数或原有凭证与预期不符时通过测试失败报告。
+*/
+func TestAuthUserLoginDeniedPreservesOAuthClientAndToken(t *testing.T) {
+	callbackListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackPort := callbackListener.Addr().(*net.TCPAddr).Port
+	_ = callbackListener.Close()
+
+	// 请求计数由 HTTP handler 写入，使用原子变量保证跨 goroutine 的检查可靠。
+	var registrationCalls, tokenCalls atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/register":
+			registrationCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"client_id":"new-oauth-client","token_endpoint_auth_method":"none"}`))
+		case "/metadata":
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"` + server.URL + `/token","registration_endpoint":"` + server.URL + `/register","code_challenge_methods_supported":["S256"]}`))
+		case "/token":
+			tokenCalls.Add(1)
+			http.Error(writer, "unexpected token exchange", http.StatusBadRequest)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	runtime, stdout, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	// 浏览器独立读取完整响应，覆盖 CLI 收到拒绝后关闭回调服务的并发路径。
+	browserResults := make(chan struct {
+		status int
+		body   string
+		err    error
+	}, 1)
+	runtime.OpenBrowser = func(authorizationURL string) error {
+		parsed, err := url.Parse(authorizationURL)
+		if err != nil {
+			return err
+		}
+		redirectURL, err := url.Parse(parsed.Query().Get("redirect_uri"))
+		if err != nil {
+			return err
+		}
+		// 复现服务端拒绝分支只携带 error 和 error_description、没有 state 的回调。
+		redirectURL.RawQuery = url.Values{
+			"error": {"access_denied"}, "error_description": {"用户拒绝授权"},
+		}.Encode()
+		go func() {
+			result := struct {
+				status int
+				body   string
+				err    error
+			}{}
+			client := &http.Client{Timeout: 2 * time.Second}
+			response, err := client.Get(redirectURL.String())
+			if err != nil {
+				result.err = err
+			} else {
+				defer response.Body.Close()
+				body, readErr := io.ReadAll(response.Body)
+				result.status, result.body, result.err = response.StatusCode, string(body), readErr
+			}
+			browserResults <- result
+		}()
+		return nil
+	}
+	profile := config.Profile{
+		Name: "dev", BaseURL: server.URL, TokenURL: server.URL + "/tenant-token",
+		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review",
+		OAuthClientID: "old-oauth-client", OAuthDeviceClientID: "existing-device-client",
+		OAuthRedirectURL: fmt.Sprintf("http://127.0.0.1:%d/login", callbackPort),
+		OAuthScopes:      []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+	identityStore := runtime.Tokens.(interface {
+		LoadForIdentity(string, config.IdentityKind) (auth.Token, error)
+		SaveForIdentity(string, config.IdentityKind, auth.Token) error
+	})
+	oldToken := auth.Token{
+		AccessToken: "old-access-token", RefreshToken: "old-refresh-token", OAuthClientID: profile.OAuthClientID,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if err := identityStore.SaveForIdentity(profile.Name, config.IdentityUser, oldToken); err != nil {
+		t.Fatal(err)
+	}
+
+	// 拒绝必须结束本次登录；上下文仅用于防止错误实现一直等待授权超时。
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err = Execute(ctx, runtime, []string{"auth", "login", "--profile", profile.Name, "--as", "user"})
+	if err == nil || !strings.Contains(err.Error(), "access_denied") || !strings.Contains(err.Error(), "用户拒绝授权") {
+		t.Errorf("err=%v", err)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("拒绝授权应立即结束登录: %v", ctx.Err())
+	}
+	select {
+	case result := <-browserResults:
+		if result.err != nil || result.status != http.StatusForbidden || !strings.Contains(result.body, "用户已拒绝授权") || strings.Contains(result.body, "授权已完成") {
+			t.Errorf("browser status=%d body=%q err=%v", result.status, result.body, result.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("浏览器未收到完整拒绝响应")
+	}
+	if registrationCalls.Load() != 1 || tokenCalls.Load() != 0 {
+		t.Errorf("registration calls=%d token calls=%d", registrationCalls.Load(), tokenCalls.Load())
+	}
+	if strings.Contains(stdout.String(), `"authenticated": true`) || strings.Contains(stdout.String(), `"authenticated":true`) {
+		t.Errorf("拒绝授权后输出了成功结果: %s", stdout.String())
+	}
+	storedProfile, profileErr := runtime.Profiles.Get(profile.Name)
+	if profileErr != nil || storedProfile.OAuthClientID != profile.OAuthClientID || storedProfile.OAuthDeviceClientID != profile.OAuthDeviceClientID {
+		t.Errorf("storedProfile=%#v err=%v", storedProfile, profileErr)
+	}
+	storedToken, tokenErr := identityStore.LoadForIdentity(profile.Name, config.IdentityUser)
+	if tokenErr != nil || storedToken.AccessToken != oldToken.AccessToken || storedToken.RefreshToken != oldToken.RefreshToken || storedToken.OAuthClientID != oldToken.OAuthClientID || !storedToken.ExpiresAt.Equal(oldToken.ExpiresAt) {
+		t.Errorf("storedToken=%#v err=%v", storedToken, tokenErr)
+	}
+}
+
+// TestAuthUserLoginRequiresMetadataRegistrationEndpoint 验证 Codex 登录不再猜测开放平台动态注册路径。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；metadata 缺少 registration_endpoint 时未明确停止则通过 t.Fatal 报告。
+func TestAuthUserLoginRequiresMetadataRegistrationEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/metadata" {
+			_, _ = writer.Write([]byte(`{"authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"https://auth.example.com/token","code_challenge_methods_supported":["S256"]}`))
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	defer server.Close()
+
+	runtime, _, _ := testRuntime(t)
+	runtime.HTTP = server.Client()
+	profile := config.Profile{
+		Name: "test-user", BaseURL: server.URL, TokenURL: server.URL + "/tenant-token",
+		OAuthMetadataURL: server.URL + "/metadata", OAuthBusinessType: "contract-review",
+		OAuthClientID: "stale-client", OAuthRedirectURL: "http://127.0.0.1:8000/login",
+		OAuthScopes: []string{"contract-review:full"}, DefaultIdentity: config.IdentityUser, DefaultOutput: "json",
+	}
+	if err := runtime.Profiles.Add(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Execute(context.Background(), runtime, []string{"auth", "login", "--profile", profile.Name, "--as", "user"})
+	if err == nil || !strings.Contains(err.Error(), "OAuth metadata 缺少 registration_endpoint") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -1026,6 +1393,75 @@ func TestAuthLoginHonorsRootTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("登录超时未及时生效: %s", elapsed)
+	}
+}
+
+// loginDeadlineTransport 为登录测试检查实际 HTTP 请求所携带的上下文。
+type loginDeadlineTransport func(*http.Request) (*http.Response, error)
+
+/*
+RoundTrip 将请求交给测试回调，避免为超时预算验证等待真实的三分钟。
+入参：request *http.Request 为 CLI 发出的请求。
+返回值：*http.Response 为模拟响应；error 为回调返回的请求错误。
+*/
+func (transport loginDeadlineTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
+/*
+TestUserLoginWaitingBudget 验证浏览器登录默认有三分钟预算，显式 --timeout 仍生效且不改变动态注册预算。
+入参：t *testing.T 为测试上下文。
+返回值：无；登录与注册实际请求的 deadline 不符合预期时测试失败。
+*/
+func TestUserLoginWaitingBudget(t *testing.T) {
+	for _, scenario := range []struct {
+		name                            string
+		flags                           []string
+		loginBudget, registrationBudget time.Duration
+	}{
+		{"default", nil, 3 * time.Minute, 30 * time.Second},
+		{"explicit", []string{"--timeout", "2m"}, 2 * time.Minute, 2 * time.Minute},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			runtime, _, _ := testRuntime(t)
+			stop := errors.New("已检查登录预算")
+			metadataCalls := 0
+			runtime.HTTP = &http.Client{Transport: loginDeadlineTransport(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Path == "/metadata" {
+					metadataCalls++
+				}
+				budget := scenario.registrationBudget
+				if metadataCalls == 2 {
+					budget = scenario.loginBudget
+				}
+				deadline, ok := request.Context().Deadline()
+				remaining := time.Until(deadline)
+				if !ok || remaining > budget || remaining < budget-time.Second {
+					t.Errorf("path=%s remaining=%s，期望预算 %s", request.URL.Path, remaining, budget)
+				}
+				// LoginUserOAuth 的 metadata 与 callback 共用此上下文；检查后立即结束，不占用回调端口。
+				if metadataCalls == 2 {
+					return nil, stop
+				}
+				body := `{"client_id":"fixture-client"}`
+				if request.URL.Path == "/metadata" {
+					body = `{"registration_endpoint":"https://auth.example.com/register","authorization_endpoint":"https://auth.example.com/authorize","token_endpoint":"https://auth.example.com/token"}`
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+			})}
+			profile := config.Profile{
+				Name: "test-user", BaseURL: "https://api.example.com", TokenURL: "https://auth.example.com/token",
+				OAuthMetadataURL: "https://auth.example.com/metadata", OAuthBusinessType: "contract-review",
+				OAuthRedirectURL: "http://127.0.0.1:8000/login", DefaultIdentity: config.IdentityUser,
+			}
+			if err := runtime.Profiles.Add(profile); err != nil {
+				t.Fatal(err)
+			}
+			args := append([]string{"auth", "login", "--profile", profile.Name, "--as", "user", "--no-open-browser"}, scenario.flags...)
+			if err := Execute(context.Background(), runtime, args); !errors.Is(err, stop) || metadataCalls != 2 {
+				t.Fatalf("metadataCalls=%d err=%v", metadataCalls, err)
+			}
+		})
 	}
 }
 

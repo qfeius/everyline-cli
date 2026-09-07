@@ -15,6 +15,7 @@ import (
 // Runtime 汇总 CLI 可注入依赖，避免命令处理器直接读取全局状态。
 type Runtime struct {
 	Profiles              config.Store
+	InstallState          config.InstallStateStore
 	Tokens                auth.TokenStore
 	Secrets               auth.AppSecretStore
 	DeviceCredentials     auth.DeviceCredentialStore
@@ -38,6 +39,7 @@ func NewRuntime(configDir string, input io.Reader, stdout io.Writer, stderr io.W
 	}
 	return &Runtime{
 		Profiles:              config.NewFileStore(filepath.Join(configDir, "config.json")),
+		InstallState:          config.NewFileInstallStateStore(filepath.Join(configDir, "install-state.json")),
 		Tokens:                auth.NewFileTokenStore(filepath.Join(configDir, "tokens.json")),
 		Secrets:               auth.NewDefaultAppSecretStore(configDir),
 		DeviceCredentials:     deviceCredentials,

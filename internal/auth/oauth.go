@@ -42,6 +42,7 @@ type OAuthLoginOptions struct {
 type OAuthMetadata struct {
 	AuthorizationEndpoint       string   `json:"authorization_endpoint"`
 	TokenEndpoint               string   `json:"token_endpoint"`
+	RegistrationEndpoint        string   `json:"registration_endpoint"`
 	DeviceAuthorizationEndpoint string   `json:"device_authorization_endpoint"`
 	RevocationEndpoint          string   `json:"revocation_endpoint"`
 	CodeChallengeMethods        []string `json:"code_challenge_methods_supported"`
@@ -223,11 +224,12 @@ func exchangeOAuthCode(ctx context.Context, client *http.Client, endpoint string
 	}
 	issuedAt := now()
 	token := Token{
-		AccessToken:  payload.AccessToken,
-		TokenType:    payload.TokenType,
-		RefreshToken: payload.RefreshToken,
-		Scope:        payload.Scope,
-		IssuedAt:     issuedAt,
+		AccessToken:   payload.AccessToken,
+		TokenType:     payload.TokenType,
+		RefreshToken:  payload.RefreshToken,
+		OAuthClientID: profile.OAuthClientID,
+		Scope:         payload.Scope,
+		IssuedAt:      issuedAt,
 	}
 	if payload.ExpiresIn > 0 {
 		token.ExpiresAt = issuedAt.Add(time.Duration(payload.ExpiresIn) * time.Second)
@@ -310,17 +312,33 @@ func StartOAuthCallbackServer(rawURL string) (OAuthCallback, error) {
 	return callback, nil
 }
 
+// handle 接收 OAuth 回调，并向浏览器和等待登录的终端返回一致的授权结果。
+// 入参：writer http.ResponseWriter 为浏览器响应；request *http.Request 携带授权码或错误参数。
+// 返回值：无；通过 HTTP 响应展示结果，通过 results 通知登录流程。
 func (callback *loopbackOAuthCallback) handle(writer http.ResponseWriter, request *http.Request) {
 	query := request.URL.Query()
+	// 拒绝回调可能没有 state；沿用错误直接结束登录的语义，成功授权仍由 Wait 校验 state。
+	result := oauthCallbackResult{state: query.Get("state")}
+	message, status := oauthCallbackMessage, http.StatusOK
 	if oauthError := strings.TrimSpace(query.Get("error")); oauthError != "" {
-		callback.send(oauthCallbackResult{state: query.Get("state"), err: fmt.Errorf("OAuth 授权失败: %s", oauthError)})
+		result.err = fmt.Errorf("OAuth 授权失败: %s", oauthError)
+		if description := strings.TrimSpace(query.Get("error_description")); description != "" {
+			result.err = fmt.Errorf("%w（%s）", result.err, description)
+		}
+		message, status = result.err.Error()+"，请返回终端重试。", http.StatusBadRequest
+		if oauthError == "access_denied" {
+			message, status = "用户已拒绝授权，可以关闭此页面并返回终端。", http.StatusForbidden
+		}
 	} else if strings.TrimSpace(query.Get("code")) == "" || strings.TrimSpace(query.Get("state")) == "" {
-		callback.send(oauthCallbackResult{err: fmt.Errorf("OAuth callback 缺少 code 或 state")})
+		result.err = fmt.Errorf("OAuth callback 缺少 code 或 state")
+		message, status = result.err.Error()+"，请返回终端重试。", http.StatusBadRequest
 	} else {
-		callback.send(oauthCallbackResult{code: query.Get("code"), state: query.Get("state")})
+		result.code = query.Get("code")
 	}
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = io.WriteString(writer, oauthCallbackMessage)
+	writer.WriteHeader(status)
+	_, _ = io.WriteString(writer, message)
+	callback.send(result)
 }
 
 func (callback *loopbackOAuthCallback) send(result oauthCallbackResult) {
@@ -342,9 +360,17 @@ func (callback *loopbackOAuthCallback) Wait(ctx context.Context, expectedState s
 	}
 }
 
+// Close 关闭一次性回调服务，给已接收回调的浏览器留出完成响应的时间。
+// 入参：无；使用 callback 保存的 *http.Server。
+// 返回值：无；优雅关闭超过一秒时强制释放连接。
 func (callback *loopbackOAuthCallback) Close() {
 	if callback.server != nil {
-		_ = callback.server.Close()
+		// Wait 返回会触发登录流程关闭服务，此时 handler 的响应可能仍在 HTTP 缓冲区。
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := callback.server.Shutdown(ctx); err != nil {
+			_ = callback.server.Close()
+		}
 	}
 }
 

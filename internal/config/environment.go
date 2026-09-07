@@ -12,7 +12,6 @@ type EnvironmentPreset struct {
 	TokenURL            string
 	OAuthMetadataURL    string
 	OAuthBusinessType   string
-	OAuthClientID       string
 	OAuthDeviceClientID string
 	OAuthRedirectURL    string
 	OAuthScopes         []string
@@ -26,7 +25,6 @@ var environmentPresets = map[string]EnvironmentPreset{
 		TokenURL:            "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 		OAuthMetadataURL:    "https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
 		OAuthBusinessType:   "contract-review",
-		OAuthClientID:       "zscli_a9f2a3ce87fa5bb6",
 		OAuthDeviceClientID: "zscli_c77221e810ce3977",
 		OAuthRedirectURL:    "http://127.0.0.1:8000/login",
 		OAuthScopes:         []string{"contract-review:full"},
@@ -37,7 +35,6 @@ var environmentPresets = map[string]EnvironmentPreset{
 		TokenURL:            "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 		OAuthMetadataURL:    "https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
 		OAuthBusinessType:   "contract-review",
-		OAuthClientID:       "zscli_a94c9aa398389bd7",
 		OAuthDeviceClientID: "zscli_c77221e810ce3977",
 		OAuthRedirectURL:    "http://127.0.0.1:8000/login",
 		OAuthScopes:         []string{"contract-review:full"},
@@ -48,15 +45,19 @@ var environmentPresets = map[string]EnvironmentPreset{
 		TokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 	},
 	"prod": {
-		BaseURL:  "https://open.qfei.cn",
-		AuthURL:  "https://contract-agent.qfei.cn",
-		TokenURL: "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal",
+		BaseURL:           "https://open.qfei.cn",
+		AuthURL:           "https://contract-agent.qfei.cn",
+		TokenURL:          "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal",
+		OAuthMetadataURL:  "https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review",
+		OAuthBusinessType: "contract-review",
+		OAuthRedirectURL:  "http://127.0.0.1:8000/login",
+		OAuthScopes:       []string{"contract-review:full"},
 	},
 }
 
-// ResolveEnvironmentDeviceClientID 按标准 metadata URL 查找内置环境的 Device client，供旧 Profile 无感迁移。
+// ResolveEnvironmentDeviceClientID 按标准 metadata URL 查找 dev/test 的 Device client，兼容升级前已保存且缺少专用字段的 Profile。
 // 入参：metadataURL string 为 Profile 保存的 OAuth metadata URL。
-// 返回值：string 为匹配环境的 Device client ID；非内置环境返回空字符串。
+// 返回值：string 为匹配环境的 Device client ID；其他环境返回空字符串。
 func ResolveEnvironmentDeviceClientID(metadataURL string) string {
 	for _, preset := range environmentPresets {
 		if strings.TrimSpace(metadataURL) == preset.OAuthMetadataURL {

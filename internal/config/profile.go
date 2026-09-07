@@ -150,26 +150,31 @@ func (profile Profile) HasOAuthConfiguration() bool {
 		strings.TrimSpace(profile.OAuthRedirectURL) != ""
 }
 
-// HasDeviceOAuthConfiguration 判断 Profile 是否具备发现或显式调用 Device Grant 的基础配置。
+// HasDeviceOAuthConfiguration 判断 Profile 是否具备发现并启动 Device Grant 的基础配置。
 // 入参：无，接收者 Profile 为当前环境配置。
-// 返回值：bool，metadata、Device client ID 和 scope 均可用时为 true。
+// 返回值：bool，metadata、scope 和独立 Device client ID 均可用时为 true。
 func (profile Profile) HasDeviceOAuthConfiguration() bool {
 	return strings.TrimSpace(profile.OAuthMetadataURL) != "" &&
 		strings.TrimSpace(profile.EffectiveOAuthDeviceClientID()) != "" && len(profile.OAuthScopes) > 0
 }
 
-// EffectiveOAuthDeviceClientID 返回 Device Grant 专用 client ID，依次兼容显式值、内置环境预设和 OAuth public client。
+// HasOAuthClientRegistrationConfiguration 判断 Profile 是否具备调用开放平台动态注册接口的参数。
+// 入参：无，接收者 Profile 为当前环境配置。
+// 返回值：bool，业务 API 基址、business type 和回调地址均可用时为 true。
+func (profile Profile) HasOAuthClientRegistrationConfiguration() bool {
+	return strings.TrimSpace(profile.BaseURLFor(IdentityUser)) != "" &&
+		strings.TrimSpace(profile.OAuthBusinessType) != "" && strings.TrimSpace(profile.OAuthRedirectURL) != ""
+}
+
+// EffectiveOAuthDeviceClientID 返回 Device Grant 专用 client ID，兼容 dev/test 旧 Profile，但不复用浏览器 OAuth public client。
 // 入参：无，接收者 Profile 为当前环境配置。
 // 返回值：string，为 Device Grant 的 client_id。
 func (profile Profile) EffectiveOAuthDeviceClientID() string {
 	if clientID := strings.TrimSpace(profile.OAuthDeviceClientID); clientID != "" {
 		return clientID
 	}
-	// 已保存的 dev/test Profile 可能早于独立 Device client；按官方 metadata 预设补齐，不要求用户重建配置。
-	if clientID := ResolveEnvironmentDeviceClientID(profile.OAuthMetadataURL); clientID != "" {
-		return clientID
-	}
-	return strings.TrimSpace(profile.OAuthClientID)
+	// dev/test 的 Device client 是平台预先登记值，旧 Profile 不需要重建即可恢复 Device Grant。
+	return ResolveEnvironmentDeviceClientID(profile.OAuthMetadataURL)
 }
 
 // EffectiveOAuthResource 返回 Device Grant 的 resource，未配置时使用 user 业务 API 基址。

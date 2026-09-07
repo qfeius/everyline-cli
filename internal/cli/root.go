@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/output"
 
@@ -23,9 +24,11 @@ type rootOptions struct {
 	NoColor  bool
 }
 
-// NewRootCommand 创建完整 Cobra 命令树，并注入运行时依赖。
-// 入参：runtime *Runtime 为存储、HTTP、时钟和 I/O 依赖。
-// 返回值：*cobra.Command，可被应用层执行或测试。
+/*
+NewRootCommand 创建完整 Cobra 命令树，包括 npm 安装器的隐藏状态登记入口。
+入参：runtime *Runtime 为存储、HTTP、时钟和 I/O 依赖。
+返回值：*cobra.Command，可被应用层执行或测试。
+*/
 func NewRootCommand(runtime *Runtime) *cobra.Command {
 	// 帮助命令按业务流程展示，而不是按名称排序；各命令组显式维护自己的顺序。
 	cobra.EnableCommandSorting = false
@@ -54,8 +57,12 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	command.PersistentFlags().DurationVar(&options.Timeout, "timeout", 30*time.Second, "普通远端请求超时")
 	command.PersistentFlags().BoolVar(&options.Verbose, "verbose", false, "将工作流进度写入 stderr，不污染 stdout")
 	command.PersistentFlags().BoolVar(&options.NoColor, "no-color", false, "禁用彩色输出")
-	command.PersistentPreRun = func(command *cobra.Command, args []string) {
+	command.PersistentPreRunE = func(command *cobra.Command, args []string) error {
+		if err := enforceFirstInstallAuthorization(runtime, command); err != nil {
+			return err
+		}
 		maybeDeferRequiredUpdate(command.Context(), runtime, options, command)
+		return nil
 	}
 	command.AddGroup(
 		&cobra.Group{ID: "business", Title: "Review"},
@@ -91,8 +98,28 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	versionCommand.GroupID = "cli"
 	updateCommand := newUpdateCommand(runtime, options)
 	updateCommand.GroupID = "cli"
-	command.AddCommand(versionCommand, updateCommand)
+	command.AddCommand(versionCommand, updateCommand, newRecordInstallCommand(runtime))
 	return command
+}
+
+// enforceFirstInstallAuthorization 输出可重放的首次安装事件，并在新授权前阻止业务请求。
+// 入参：runtime *Runtime 为安装状态和 stderr；command *cobra.Command 为即将执行的叶子命令。
+// 返回值：error，状态损坏或首次安装仍尝试业务命令时非 nil。
+func enforceFirstInstallAuthorization(runtime *Runtime, command *cobra.Command) error {
+	state, required, err := pendingFirstInstallAuthorization(runtime)
+	if err != nil {
+		return err
+	}
+	if !required {
+		return nil
+	}
+	if err := emitFirstInstallEvent(runtime, state); err != nil {
+		return err
+	}
+	if isBusinessCommand(command) {
+		return fmt.Errorf("%w；首次安装需要完成一次新的授权，请先使用 everyline-cli Skill 执行授权流程", auth.ErrUserAuthentication)
+	}
+	return nil
 }
 
 // selectedIdentity 按显式 --as、Profile 默认身份和兼容默认值解析业务身份。

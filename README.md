@@ -6,6 +6,10 @@ EveryLine 命令行工具，支持合同审查工作流、审查清单和审查�
 
 ## 安装
 
+npm 全局安装会同步登记 Codex 和 WorkBuddy 的三项 Skill。切换 Node/npm 安装目录时，安装器会校验旧链接所属的 EveryLine 包并更新链接，保留已有授权状态；迁移中途失败会尝试恢复原链接。用户自建目录或其他来源的同名 Skill 会保留并提示冲突。需要手动备份时，请放在 Skill 扫描目录之外，避免仅添加 `.bak` 后缀后仍被作为同名 Skill 加载。
+
+豆包工作本地技能也随 npm 全局安装同步。macOS 自动识别已存在的 `~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills`；其他平台或自定义工作区通过 `EVERYLINE_DOUBAO_SKILLS_DIR` 指定实际技能根目录。安装器比较三项技能的完整内容，同版本重新打包也会更新引用文件，旧副本留在扫描目录外，失败时回滚。同步后返回 `skills_updated / reload_skills`，Agent 应重新读取技能或新建任务；仅更新文件不会改写历史对话。`EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL=1` 可单独跳过豆包。
+
 ### 本地构建
 
 构建要求：Go 1.24 或更高版本、Node.js 18 或更高版本。进入 everyline-cli 源码目录后执行：
@@ -26,8 +30,8 @@ everyline-cli version
 
 | 使用场景 | 推荐身份 | 授权方式 |
 |---|---|---|
-| Codex、人工用户、本地交互 | user | 浏览器 OAuth 授权 |
-| 豆包、WorkBuddy 远端沙箱 | user | `auth init` / `auth complete` Device Grant |
+| Codex、人工终端交互 | user | 浏览器 OAuth 授权 |
+| 豆包（含本地电脑）、WorkBuddy | user | `auth init` / `auth complete` Device Grant |
 | CI、定时任务、无浏览器 Agent | app | app-id + app secret |
 
 user 身份不需要 app-id；app 身份必须配置 app-id。建议为不同身份创建不同 Profile，并在每次调用时显式指定 --profile 和 --as。
@@ -51,17 +55,24 @@ everyline-cli auth login \
   --timeout 3m
 ~~~
 
-CLI 会打开浏览器完成用户登录，通过本机 loopback 回调接收授权结果，并缓存 user token。auth login 不使用 --env；环境在 config add 时指定。
+CLI 会先读取 OAuth metadata 的 `registration_endpoint` 并动态注册浏览器 public client，再打开浏览器完成用户登录，通过本机 loopback 回调接收授权结果并缓存 user token。每次显式 `auth login --as user` 都使用本次注册返回的 client ID，历史 Profile 中的旧值不会继续参与登录。auth login 不使用 --env；环境在 config add 时指定。
 
-豆包或 WorkBuddy 沙箱与宿主浏览器不共享 loopback 端口时，使用 Device Grant：
+user Token 过期且未刷新成功后，通过新的授权链接手动登录：Codex 重新执行 `auth login --profile <profile> --as user --no-open-browser --timeout 3m`；豆包/WorkBuddy 在原会话中执行 `auth init --profile <profile> --as user --output json`，展示本次返回的完整授权链接，用户完成后执行一次 `auth complete`。以 `auth status` 的 `authenticated=true` 确认恢复，再继续原业务操作。
+
+豆包（含本地电脑）和 WorkBuddy 统一使用 Device Grant；dev/test Profile 已内置独立 Device client。执行下面的命令前先按后文准备并固定对应宿主的会话变量：
 
 ~~~bash
-everyline-cli auth init --profile prod-user --as user --output json
+everyline-cli config add test-user --env test --default-identity user
+everyline-cli auth init --profile test-user --as user --output json
 # 用户打开 verification_uri_complete 并完成授权后：
-everyline-cli auth complete --profile prod-user --as user --output json
+everyline-cli auth complete --profile test-user --as user --output json
 ~~~
 
-`auth init` 不监听 `127.0.0.1`。dev/test 的 `contract-review` metadata 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，scope 固定为 `contract-review:full`；已有旧 Profile 会按标准 metadata URL 自动选择该 client。其他环境也可把平台确认的 endpoint/client ID 写入 Profile。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
+`auth init` 不监听 `127.0.0.1`，不动态注册 client，也不复用 Codex 浏览器 client。dev/test 预设使用独立 Device client `zscli_c77221e810ce3977`；prod 或自定义环境使用 Device Grant 时，通过 `--oauth-device-client-id` 配置平台确认的 client。dev/test/prod 均不内置浏览器 client ID；Codex 本地每次显式 user 登录会调用 metadata 声明的 `registration_endpoint`，保存返回值后启动 OAuth Authorization Code + PKCE，且不覆盖 Device client。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
+
+WorkBuddy 必须在第一次 `auth init` 前固定一个 `CODEBUDDY_SESSION_ID`，并在 `auth init`、用户回复“已授权”后的 `auth complete` 以及后续 `auth status` 中复用同一值。`auth complete` 本地提示没有待完成事务时，先用原值重试 `auth complete`；只有服务端状态明确为 `denied`、`expired` 或 `invalid_grant` 后才开始新的授权事务，避免让用户重复打开授权链接。
+
+豆包普通工作任务（含“本地电脑”模式）在首次 `auth status` 前固定 `SESSION_ID` 和初始工作目录；宿主未提供标识时由 Agent 只生成一次 UUID，后续每条 CLI 命令都显式添加 `SESSION_ID=<same-session-id>`，并使用同一工作目录。豆包本地模式不使用 `auth login --as user`。Device 会话缺少凭证时返回未授权，不继承本机旧 OAuth token；找不到待完成事务时先恢复原标识和工作目录。
 
 检查授权状态：
 
@@ -74,7 +85,7 @@ everyline-cli auth status \
 
 `auth status` 默认读取当前身份对应的安全缓存。OAuth metadata 声明 refresh grant 时，CLI 会在过期前五分钟尝试刷新；业务请求收到可信 `code=110004` 时只刷新并重放一次。服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token；并发写入的新 token 会保留。
 
-如果 prod 预设尚未包含正式的 OAuth metadata、client ID 和 loopback redirect，需要由平台提供确认后的配置，再通过 --oauth-* 参数补充。CLI 不猜测 OAuth 地址，也不把 AuthURL 直接当作 OAuth authorization endpoint。
+prod 预设已包含正式 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env prod` 创建 user Profile 后，每次显式 Codex user 登录都会通过 metadata 声明的注册端点动态获取浏览器 client ID。prod 当前不内置 Device client，豆包/WorkBuddy 使用 prod 时需显式配置 `--oauth-device-client-id`。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
 
 ## app 应用授权
 
@@ -110,9 +121,11 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 ## Codex/Agent 最佳实践
 
-仓库和 npm 发布包包含三项职责分离的交互式 Skill：`everyline-shared` 负责首次配置、身份和授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单、规则和规则分组。三项 Skill 共用当前 CLI 的实时帮助和结构化输出约束；旧 `skills/everyline-cli/` 作为兼容内容继续随包发布。
+仓库和 npm 发布包包含三项职责分离的交互式 Skill：`everyline-cli` 负责首次配置、身份和授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单、规则和规则分组。三项 Skill 共用当前 CLI 的实时帮助和结构化输出约束；原 `everyline-shared` 已合并到 `everyline-cli`。
 
-全局安装 npm 包时，`postinstall` 会把三项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills` 和 WorkBuddy 的 `$HOME/.workbuddy/skills`。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包通过 `make skill-assets` 生成的三个独立 ZIP 从界面导入。Skill 不修改或替代 CLI 接口。
+全局安装 npm 包时，`postinstall` 会把三项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills`、WorkBuddy 的 `$HOME/.workbuddy/skills`，并同步已发现或显式指定的豆包本地技能目录。首次安装建立授权门禁：旧 token 保留，但必须完成一次新的 user/app 授权后才能调用审查、清单或规则业务命令。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包云端导入路径仍使用 `make skill-assets` 生成的三个独立 ZIP。Skill 不修改或替代 CLI 接口。
+
+首次安装使用 `npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@latest`，让安装器提示可见。Codex、WorkBuddy 和豆包均需在确认 CLI 与 Skill 就绪后，由 Agent 在回复正文展示统一安装完成文案；豆包静态 ZIP 导入在导入后首次运行时完成这一检查和提示。
 
 在 Codex、WorkBuddy 或豆包电脑版安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)；评审全部对话分支，请参阅 [EveryLine CLI Skill 全量交互场景](docs/everyline-cli-skill-interaction-scenarios.md)。
 
@@ -265,7 +278,7 @@ everyline-cli update \
 
 manifest 需要声明版本、当前平台的制品 URL 和 SHA-256。CLI 只有在新版本、平台匹配且摘要校验通过时才替换二进制；下载失败或校验失败会保留原文件。Windows 需要延后替换时返回 `updated=false, scheduled=true`，独立 helper 的最终结果写入 stderr。通过 npm/npx 薄包装启动时不会修改包内二进制，请使用 npm 更新包。
 
-Codex 与 WorkBuddy 的 CLI 和三项 Skill 来自同一个 npm 包，npm 更新成功后现有目录链接会直接使用新版 Skill。版本门禁以统一包版本为检测信号，因此每次 Skill 发布（包括纯文案调整）都必须提升 `package.json` 版本、发布同版本 npm 包并更新远端 manifest；只替换 ZIP 而不提升统一版本不会触发本地强制更新。豆包导入版仍按平台发布流程上传新 ZIP。
+CLI 和三项 Skill 来自同一个 npm 包。npm 更新成功后，Codex 与 WorkBuddy 的现有目录链接直接使用新版 Skill，已发现或显式配置的豆包本地技能目录同步完整内容。版本门禁以统一包版本为检测信号，因此每次 Skill 发布（包括纯文案调整）都必须提升 `package.json` 版本、发布同版本 npm 包并更新远端 manifest；只替换 ZIP 而不提升统一版本不会触发本地强制更新。主动重装 npm 包时，豆包同步仍会比较内容；豆包云端导入版按平台发布流程上传新 ZIP。
 
 manifest 示例：
 
