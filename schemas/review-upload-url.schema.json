@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-upload-url.schema.json",
+  "title": "uploadContractFileByURLV3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fileUrl", "name"],
+  "properties": {
+    "fileUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
+    "name": {"type": "string", "pattern": "(?i)\\.(doc|docx|pdf)$"}
+  }
+}

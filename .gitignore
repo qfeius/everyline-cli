@@ -1,0 +1,9 @@
+.DS_Store
+.idea/
+.everyline-cli/
+/everyline-cli
+/everyline-cli.exe
+bin/
+dist/
+coverage.out
+tmp/

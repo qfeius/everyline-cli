@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/review-start.schema.json",
+  "title": "smartAuditTaskStartReview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["businessId", "fileId", "fileHash", "config", "usageReportContext"],
+  "properties": {
+    "businessId": {"type": "string", "minLength": 1},
+    "fileId": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+    "fileHash": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "usageReportContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reportBusinessCode"],
+      "properties": {
+        "reportBusinessCode": {"const": "everyLine_100_openApi_cli"}
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selectedPosition", "selectedAuditRole", "reviewStrength"],
+      "properties": {
+        "selectedPosition": {"type": "string", "minLength": 1, "description": "合同主体提取响应中所选 counterpart.name 的精确值"},
+        "selectedAuditRole": {"type": "string", "minLength": 1, "description": "同一所选 counterpart.role 的精确值，例如甲方或乙方"},
+        "reviewStrength": {"type": "integer", "enum": [0, 1, 2]},
+        "selectedCheckListIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "matchContractTypeRulePackage": {"type": "boolean"}
+      },
+      "anyOf": [
+        {"required": ["selectedCheckListIds"]},
+        {
+          "required": ["matchContractTypeRulePackage"],
+          "properties": {
+            "matchContractTypeRulePackage": {"const": true}
+          }
+        }
+      ]
+    }
+  }
+}

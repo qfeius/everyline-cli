@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git.qtech.cn/ai/everyline-cli/schemas/rule-query.schema.json",
+  "title": "ReviewRuleQuery",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sort": { "type": "array", "items": { "type": "string" } },
+    "pageIndex": { "type": "integer", "minimum": 1 },
+    "pageSize": { "type": "integer", "minimum": 1 }
+  }
+}
