@@ -1,0 +1,61 @@
+name: Publish npm package
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Set package version from tag
+        id: metadata
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -eu
+          version="${TAG_NAME#v}"
+          node - "$version" <<'NODE'
+          const { readFileSync, writeFileSync } = require("node:fs");
+
+          const path = "package.json";
+          const packageData = JSON.parse(readFileSync(path, "utf8"));
+          packageData.version = process.argv[2];
+          writeFileSync(path, `${JSON.stringify(packageData, null, 2)}\n`);
+          NODE
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Run release checks and build platform assets
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: make release-check VERSION="$VERSION"
+
+      - name: Publish to npm with OIDC
+        run: npm publish --provenance --access public

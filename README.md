@@ -73,3 +73,9 @@ everyline-cli review run --as user --input review-run.json --output json
 ## npm/npx 包装
 
 Node 包只负责启动对应平台的 Go 二进制，CLI 本体没有 Node 运行时依赖。发布前运行 `scripts/build-release-assets.sh` 生成六个平台架构的 `bin/<platform>-<arch>/everyline-cli`。CI 会把 tag 或提交版本规范化为 SemVer、同步到 npm manifest，并产出带正确版本号的 `.tgz` 制品。
+
+安装 scoped npm 包后，执行文件名仍为 `everyline-cli`：
+
+```bash
+npx @qfeius/everyline-cli version
+```
