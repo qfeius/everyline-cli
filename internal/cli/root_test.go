@@ -104,9 +104,11 @@ func TestConfigAddDefaultsToJSONAndPreservesExplicitOutput(t *testing.T) {
 	}
 }
 
-// TestConfigAddEnvironmentPreset 验证 config add 可创建四套预设，Codex 保留动态注册参数，dev/test 同时内置专用 Device client。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；失败通过 t.Fatal 报告。
+/*
+TestConfigAddEnvironmentPreset 验证 config add 可创建四套预设，Codex 保留动态注册参数，dev/test 同时内置专用 Device client。
+入参：t *testing.T 为测试上下文。
+返回值：无；失败通过 t.Fatal 报告。
+*/
 func TestConfigAddEnvironmentPreset(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
 	for _, test := range []struct {
@@ -116,7 +118,7 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 	}{
 		{name: "dev", baseURL: "https://dev-open.qtech.cn", tokenURL: "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
 		{name: "test", baseURL: "https://test-open.qtech.cn", tokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
-		{name: "blue", baseURL: "https://blue-open.qtech.cn", tokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
+		{name: "blue", baseURL: "https://open-b.qfei.cn", tokenURL: "https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal"},
 		{name: "prod", baseURL: "https://open.qfei.cn", tokenURL: "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal"},
 	} {
 		if err := Execute(context.Background(), runtime, []string{
@@ -2150,7 +2152,7 @@ func TestConfigAddDefaultsToBlue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.BaseURL != "https://blue-open.qtech.cn" || profile.AuthURL != "https://blue-contract-agent.qtech.cn" || profile.TokenURL != "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal" {
+	if profile.BaseURL != "https://open-b.qfei.cn" || profile.AuthURL != "https://contract-agent-b.qfei.cn" || profile.TokenURL != "https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal" {
 		t.Fatalf("默认环境错误: %+v", profile)
 	}
 }

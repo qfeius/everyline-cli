@@ -107,10 +107,10 @@ everyline-cli config add custom-user \
 
 | Profile 字段 | dev | test | blue | prod |
 |---|---|---|---|---|
-| `base_url` | `https://dev-open.qtech.cn` | `https://test-open.qtech.cn` | `https://blue-open.qtech.cn` | `https://open.qfei.cn` |
+| `base_url` | `https://dev-open.qtech.cn` | `https://test-open.qtech.cn` | `https://open-b.qfei.cn` | `https://open.qfei.cn` |
 | `user_base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` |
-| `auth_url` | `https://dev-contract-agent.qtech.cn` | `https://test-contract-agent.qtech.cn` | `https://blue-contract-agent.qtech.cn` | `https://contract-agent.qfei.cn` |
-| `token_url` | `https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` |
+| `auth_url` | `https://dev-contract-agent.qtech.cn` | `https://test-contract-agent.qtech.cn` | `https://contract-agent-b.qfei.cn` | `https://contract-agent.qfei.cn` |
+| `token_url` | `https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` |
 | `oauth_metadata_url` | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | 当前未配置 | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
 | `oauth_business_type` | `contract-review` | `contract-review` | 当前未配置 | `contract-review` |
 | `oauth_client_id` | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 | 当前未配置 | 每次显式 Codex user 登录动态注册并替换 |
@@ -152,9 +152,9 @@ everyline-cli config add test-user \
 
 ```bash
 everyline-cli config add blue-app \
-  --base-url 'https://blue-open.qtech.cn' \
-  --token-url 'https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal' \
-  --auth-url 'https://blue-contract-agent.qtech.cn' \
+  --base-url 'https://open-b.qfei.cn' \
+  --token-url 'https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal' \
+  --auth-url 'https://contract-agent-b.qfei.cn' \
   --app-id '<BLUE_APP_ID>' \
   --default-identity app \
   --default-output json

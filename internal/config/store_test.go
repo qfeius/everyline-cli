@@ -29,14 +29,16 @@ func TestDefaultDirResolvesRelativeOverrideFromHome(t *testing.T) {
 	}
 }
 
-// TestFileStoreLifecycle 验证 Profile 原子持久化、默认选择、排序和 0600 权限。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；失败通过 t.Fatal 报告。
+/*
+TestFileStoreLifecycle 验证 Profile 原子持久化、默认选择、排序和 0600 权限。
+入参：t *testing.T 为测试上下文。
+返回值：无；失败通过 t.Fatal 报告。
+*/
 func TestFileStoreLifecycle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")
 	store := NewFileStore(path)
 	dev := Profile{Name: "dev", BaseURL: "https://dev-open.qtech.cn", TokenURL: "https://dev-open.qtech.cn/token", AppID: "cli-dev", DefaultOutput: "json"}
-	prod := Profile{Name: "prod", BaseURL: "https://blue-open.qtech.cn", TokenURL: "https://blue-open.qtech.cn/token", AppID: "cli-prod", DefaultOutput: "table"}
+	prod := Profile{Name: "prod", BaseURL: "https://open-b.qfei.cn", TokenURL: "https://open-b.qfei.cn/token", AppID: "cli-prod", DefaultOutput: "table"}
 	if err := store.Add(prod); err != nil {
 		t.Fatal(err)
 	}

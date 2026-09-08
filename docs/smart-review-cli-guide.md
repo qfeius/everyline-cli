@@ -110,7 +110,7 @@ everyline-cli config add test-app \
 |---|---|---|---|
 | `dev` | `https://dev-open.qtech.cn` | `https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://dev-contract-agent.qtech.cn` |
 | `test` | `https://test-open.qtech.cn` | `https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://test-contract-agent.qtech.cn` |
-| `blue` | `https://blue-open.qtech.cn` | `https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://blue-contract-agent.qtech.cn` |
+| `blue` | `https://open-b.qfei.cn` | `https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://contract-agent-b.qfei.cn` |
 | `prod` | `https://open.qfei.cn` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://contract-agent.qfei.cn` |
 
 dev/test/prod 还内置了 user OAuth 配置：

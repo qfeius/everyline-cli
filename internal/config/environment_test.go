@@ -2,9 +2,11 @@ package config
 
 import "testing"
 
-// TestResolveEnvironment 验证四套环境连接参数，并锁定 dev/test 的平台专用 Device client。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；失败通过 t.Fatal 报告。
+/*
+TestResolveEnvironment 验证四套环境连接参数，并锁定 dev/test 的平台专用 Device client。
+入参：t *testing.T 为测试上下文。
+返回值：无；失败通过 t.Fatal 报告。
+*/
 func TestResolveEnvironment(t *testing.T) {
 	tests := map[string]struct {
 		baseURL          string
@@ -30,9 +32,9 @@ func TestResolveEnvironment(t *testing.T) {
 		"blue": {
 			oauthMetadataURL: "https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review",
 			deviceClientID:   "zscli_bc60fee4de9913ae",
-			baseURL:          "https://blue-open.qtech.cn",
-			authURL:          "https://blue-contract-agent.qtech.cn",
-			tokenURL:         "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
+			baseURL:          "https://open-b.qfei.cn",
+			authURL:          "https://contract-agent-b.qfei.cn",
+			tokenURL:         "https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal",
 		},
 		"prod": {
 			baseURL:          "https://open.qfei.cn",

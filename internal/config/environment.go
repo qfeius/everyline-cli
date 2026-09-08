@@ -45,9 +45,9 @@ var environmentPresets = map[string]EnvironmentPreset{
 		OAuthRedirectURL:    "http://127.0.0.1:8000/login",
 		OAuthScopes:         []string{"contract-review:full"},
 		OAuthDeviceClientID: "zscli_bc60fee4de9913ae",
-		BaseURL:             "https://blue-open.qtech.cn",
-		AuthURL:             "https://blue-contract-agent.qtech.cn",
-		TokenURL:            "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
+		BaseURL:             "https://open-b.qfei.cn",
+		AuthURL:             "https://contract-agent-b.qfei.cn",
+		TokenURL:            "https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal",
 	},
 	"prod": {
 		BaseURL:           "https://open.qfei.cn",
