@@ -125,7 +125,7 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 全局安装 npm 包时，`postinstall` 会把三项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills`、WorkBuddy 的 `$HOME/.workbuddy/skills`，并同步已发现或显式指定的豆包本地技能目录。首次安装建立授权门禁：旧 token 保留，但必须完成一次新的 user/app 授权后才能调用审查、清单或规则业务命令。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包云端导入路径仍使用 `make skill-assets` 生成的三个独立 ZIP。Skill 不修改或替代 CLI 接口。
 
-首次安装使用 `npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@latest`，让安装器提示可见。Codex、WorkBuddy 和豆包均需在确认 CLI 与 Skill 就绪后，由 Agent 在回复正文展示统一安装完成文案；豆包静态 ZIP 导入在导入后首次运行时完成这一检查和提示。
+首次安装使用 `npm install -g --foreground-scripts --allow-scripts=everyline-cli @qfeius/everyline-cli@latest`，让安装器提示可见。Codex、WorkBuddy 和豆包均需在确认 CLI 与 Skill 就绪后，由 Agent 在回复正文展示统一安装完成文案；豆包静态 ZIP 导入在导入后首次运行时完成这一检查和提示。
 
 在 Codex、WorkBuddy 或豆包电脑版安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)；评审全部对话分支，请参阅 [EveryLine CLI Skill 全量交互场景](docs/everyline-cli-skill-interaction-scenarios.md)。
 
