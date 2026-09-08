@@ -77,5 +77,5 @@ Node 包只负责启动对应平台的 Go 二进制，CLI 本体没有 Node 运�
 安装 scoped npm 包后，执行文件名仍为 `everyline-cli`：
 
 ```bash
-npx @yuwengueen/everyline-test version
+npx @qfeius/everyline-cli version
 ```

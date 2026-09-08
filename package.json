@@ -1,5 +1,5 @@
 {
-  "name": "@yuwengueen/everyline-test",
+  "name": "@qfeius/everyline-cli",
   "version": "0.1.0",
   "description": "智审开放平台 V3 命令行客户端的 npm/npx 薄包装",
   "license": "UNLICENSED",
