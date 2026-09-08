@@ -25,7 +25,7 @@ fi
 package_file=$(node -e 'const value=require(process.argv[1]); process.stdout.write(value[0].filename)' "$temporary_dir/pack.json")
 npm install --silent --prefix "$temporary_dir/install" "$temporary_dir/$package_file"
 output=$("$temporary_dir/install/node_modules/.bin/everyline-cli" version --output json)
-package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$temporary_dir/install/node_modules/everyline-cli/package.json")
+package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$temporary_dir/install/node_modules/@yuwengueen/everyline-test/package.json")
 
 # 可选的期望版本同时约束 manifest 和 ldflags，防止两个发布版本源漂移。
 if [ -n "${EXPECTED_VERSION:-}" ]; then

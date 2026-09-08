@@ -1,6 +1,6 @@
 {
-  "name": "everyline-cli",
-  "version": "0.0.0-development",
+  "name": "@yuwengueen/everyline-test",
+  "version": "0.1.0",
   "description": "智审开放平台 V3 命令行客户端的 npm/npx 薄包装",
   "license": "UNLICENSED",
   "repository": {
