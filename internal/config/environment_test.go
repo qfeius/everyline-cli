@@ -28,9 +28,11 @@ func TestResolveEnvironment(t *testing.T) {
 			deviceClientID:   "zscli_c77221e810ce3977",
 		},
 		"blue": {
-			baseURL:  "https://blue-open.qtech.cn",
-			authURL:  "https://blue-contract-agent.qtech.cn",
-			tokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
+			oauthMetadataURL: "https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review",
+			deviceClientID:   "zscli_bc60fee4de9913ae",
+			baseURL:          "https://blue-open.qtech.cn",
+			authURL:          "https://blue-contract-agent.qtech.cn",
+			tokenURL:         "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 		},
 		"prod": {
 			baseURL:          "https://open.qfei.cn",
@@ -53,7 +55,7 @@ func TestResolveEnvironment(t *testing.T) {
 		if preset.OAuthDeviceClientID != expected.deviceClientID {
 			t.Fatalf("environment=%s deviceClientID=%q", name, preset.OAuthDeviceClientID)
 		}
-		if expected.oauthMetadataURL != "" && (preset.OAuthBusinessType != "contract-review" || preset.OAuthRedirectURL == "" || len(preset.OAuthScopes) == 0) {
+		if preset.OAuthBusinessType != "contract-review" || preset.OAuthRedirectURL != "http://127.0.0.1:8000/login" || len(preset.OAuthScopes) != 1 || preset.OAuthScopes[0] != "contract-review:full" {
 			t.Fatalf("environment=%s 缺少 OAuth 动态注册参数: %#v", name, preset)
 		}
 	}

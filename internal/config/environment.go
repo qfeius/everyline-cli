@@ -40,9 +40,14 @@ var environmentPresets = map[string]EnvironmentPreset{
 		OAuthScopes:         []string{"contract-review:full"},
 	},
 	"blue": {
-		BaseURL:  "https://blue-open.qtech.cn",
-		AuthURL:  "https://blue-contract-agent.qtech.cn",
-		TokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
+		OAuthMetadataURL:    "https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review",
+		OAuthBusinessType:   "contract-review",
+		OAuthRedirectURL:    "http://127.0.0.1:8000/login",
+		OAuthScopes:         []string{"contract-review:full"},
+		OAuthDeviceClientID: "zscli_bc60fee4de9913ae",
+		BaseURL:             "https://blue-open.qtech.cn",
+		AuthURL:             "https://blue-contract-agent.qtech.cn",
+		TokenURL:            "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
 	},
 	"prod": {
 		BaseURL:           "https://open.qfei.cn",
@@ -59,6 +64,10 @@ var environmentPresets = map[string]EnvironmentPreset{
 // 入参：metadataURL string 为 Profile 保存的 OAuth metadata URL。
 // 返回值：string 为匹配环境的 Device client ID；其他环境返回空字符串。
 func ResolveEnvironmentDeviceClientID(metadataURL string) string {
+	// 空 metadata 不标识任何环境，避免匹配尚未配置 OAuth 地址的 blue 预设。
+	if strings.TrimSpace(metadataURL) == "" {
+		return ""
+	}
 	for _, preset := range environmentPresets {
 		if strings.TrimSpace(metadataURL) == preset.OAuthMetadataURL {
 			return preset.OAuthDeviceClientID

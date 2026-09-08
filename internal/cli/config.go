@@ -38,6 +38,11 @@ func newConfigCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 // newConfigAddCommand 创建 config add，并拒绝把 app secret 写入 Profile。
 // 入参：runtime *Runtime 为配置仓库；root *rootOptions 为输出选项。
 // 返回值：*cobra.Command，可新增或覆盖 Profile。
+/*
+newConfigAddCommand 创建 Profile 配置命令，未指定环境及地址时默认 blue。
+入参：runtime *Runtime 为配置存储；root *rootOptions 为输出选项。
+返回值：*cobra.Command 为配置新增命令。
+*/
 func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var environment string
 	var baseURL string
@@ -59,9 +64,13 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "add <name>",
 		Short: "新增或更新 Profile",
-		Long:  "新增或更新 Profile。使用 --env 创建预设环境配置，或同时提供 --base-url 和 --token-url；默认身份为 app 时必须提供 app-id，user 身份可省略。",
+		Long:  "新增或更新 Profile。未指定环境和地址时默认 blue；使用 --env 创建预设环境配置，或同时提供 --base-url 和 --token-url；默认身份为 app 时必须提供 app-id，user 身份可省略。",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
+			// 未指定环境或自定义地址时选择 blue，显式地址继续使用自定义 Profile 校验。
+			if !command.Flags().Changed("env") && baseURL == "" && tokenURL == "" {
+				environment = "blue"
+			}
 			if environment != "" {
 				// 预设环境统一提供 base/token 地址，避免同一个 Profile 混用不同环境的 URL。
 				if baseURL != "" || tokenURL != "" {
@@ -184,7 +193,7 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 		},
 	}
 	withNotes(command, "Profile 不保存 app secret 或 access token。")
-	command.Flags().StringVar(&environment, "env", "", "使用预设环境：dev|test|blue|prod")
+	command.Flags().StringVar(&environment, "env", "", "使用预设环境：dev|test|blue|prod；未指定环境及地址时默认 blue")
 	command.Flags().StringVar(&baseURL, "base-url", "", "EveryLine 服务基础 URL")
 	command.Flags().StringVar(&userBaseURL, "user-base-url", "", "用户身份业务基础 URL；为空时复用 base-url")
 	command.Flags().StringVar(&authURL, "auth-url", "", "EveryLine 用户认证页面基础 URL")

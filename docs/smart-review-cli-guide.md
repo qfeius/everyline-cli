@@ -124,7 +124,7 @@ dev/test/prod 还内置了 user OAuth 配置：
 | redirect URL | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` |
 | scope | `contract-review:full` | `contract-review:full` | `contract-review:full` |
 
-blue 当前未内置 user OAuth metadata、business type、redirect URL 和 scope。需要使用 user 身份时，由对应环境提供这些参数后显式注入；Codex 浏览器 client ID 由每次显式登录动态注册。
+blue 已内置 business type `contract-review`、redirect URL `http://127.0.0.1:8000/login` 和 scope `contract-review:full`，OAuth metadata URL 为 `https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review`。需要使用 user 身份时，由对应环境提供这些参数后显式注入；Codex 浏览器 client ID 由每次显式登录动态注册。
 
 其他内置环境的 app Profile：
 

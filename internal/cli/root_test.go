@@ -136,7 +136,7 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if profile.AuthURL == "" {
 			t.Fatalf("environment=%s 缺少自有认证页面: %#v", test.name, profile)
 		}
-		if test.name != "blue" && !profile.HasOAuthClientRegistrationConfiguration() {
+		if !profile.HasOAuthClientRegistrationConfiguration() {
 			t.Fatalf("environment=%s 缺少 Codex OAuth 动态注册预设: %#v", test.name, profile)
 		}
 		if profile.OAuthClientID != "" {
@@ -145,6 +145,9 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		expectedDeviceClientID := ""
 		if test.name == "dev" || test.name == "test" {
 			expectedDeviceClientID = "zscli_c77221e810ce3977"
+		}
+		if test.name == "blue" {
+			expectedDeviceClientID = "zscli_bc60fee4de9913ae"
 		}
 		if profile.OAuthDeviceClientID != expectedDeviceClientID {
 			t.Fatalf("environment=%s deviceClientID=%q", test.name, profile.OAuthDeviceClientID)
@@ -2130,5 +2133,24 @@ func TestExitCodeMapsContractFailuresToAPI(t *testing.T) {
 		if ExitCode(err) != ExitAPI {
 			t.Fatalf("err=%v exit=%d", err, ExitCode(err))
 		}
+	}
+}
+
+/*
+TestConfigAddDefaultsToBlue 验证未指定地址和环境的新 Profile 默认使用 blue。
+入参：t *testing.T 为测试上下文。
+返回值：无；默认环境地址错误时报告失败。
+*/
+func TestConfigAddDefaultsToBlue(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{"config", "add", "default-app", "--app-id", "fixture-app"}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := runtime.Profiles.Get("default-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.BaseURL != "https://blue-open.qtech.cn" || profile.AuthURL != "https://blue-contract-agent.qtech.cn" || profile.TokenURL != "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal" {
+		t.Fatalf("默认环境错误: %+v", profile)
 	}
 }

@@ -160,7 +160,7 @@ everyline-cli config add blue-app \
   --default-output json
 ```
 
-blue 当前没有内置 OAuth metadata、business type、redirect URL 或 scope。配置这些字段前需要由对应环境提供确认值；Codex 浏览器 client ID 在每次显式 user 登录时动态注册。
+blue 已内置 business type `contract-review`、redirect URL `http://127.0.0.1:8000/login` 和 scope `contract-review:full`，OAuth metadata URL 为 `https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review`。配置这些字段前需要由对应环境提供确认值；Codex 浏览器 client ID 在每次显式 user 登录时动态注册。
 
 #### prod Profile
 

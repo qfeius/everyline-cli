@@ -328,3 +328,5 @@ everyline-cli completion zsh
  npm 安装版通过 `everyline-cli version --output json` 查询 npm 官方源的 `latest` 版本，无需配置 manifest。发现新版后，在当前业务流程结束时执行返回的 `updateCommand`，由 npm 安装器同步 CLI 和本地 Skills；检查失败时最新版本状态保持未知。独立二进制安装仍使用 HTTPS manifest。
 
 三项 Skill 使用 `metadata.version` 标记实际加载版本。`npm pack` / `npm publish` 的 prepack 和 `scripts/build-skill-bundles.sh` 会自动从 `package.json` 同步该版本；发布前仍需以相同版本构建 CLI。每个会话首次使用时展示 Skill、CLI 和 npm 最新安装包版本，发现新版后在当前业务结束时更新；宿主文件已更新而会话仍旧时提示新建任务。
+
+默认环境为 blue：未指定环境或自定义地址的 `config add` 使用 blue 预设，Skill 默认选择 `blue-user` / `blue-app`。显式 Profile 和环境优先；已有配置不会迁移。blue 默认 Device client ID 为 `zscli_bc60fee4de9913ae`；OAuth metadata 默认使用 `https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review`，并内置 `contract-review` 业务、`contract-review:full` scope 和本机回调地址。

@@ -262,7 +262,7 @@ $everyline-cli 使用当前 prod-user Profile 和 user 身份检查 CLI 版本�
 
 所有 Agent 在发起授权前都先让用户选择身份。同次授权已有用户明确的 `user` 或 `app` 选择时直接复用；尚未明确时，WorkBuddy 使用 `AskUserQuestion` 单选并设置 `multiSelect=false`，Codex 在 `request_user_input` 可用时使用互斥单选，豆包在原生单选组件可用时使用该组件。没有原生组件时统一显示 `1. user（个人账号授权）` 和 `2. app（应用授权）`，等待用户回复 `1/2` 或 `user/app`。收到选择前不匹配或创建 Profile，也不执行身份相关的状态查询或授权命令。Profile 名称、默认身份、唯一候选、历史 token 和 CLI `nextAction` 都不作为用户选择的依据；笼统的“开始授权”或“继续授权”也不等于选择了身份。
 
-身份明确后，用户本轮没有指定 Profile 或环境时，Codex、WorkBuddy 和豆包统一默认 test：user 复用或创建 `test-user`，app 复用 `test-app`，缺少时在取得非敏感 app ID 后创建。当前 dev、blue、prod Profile 不会被默认继承；用户本轮显式指定的 Profile 或环境优先。宿主差异只影响 user 的授权协议：Codex 本地使用 OAuth/PKCE，豆包和 WorkBuddy 使用 Device Grant。
+身份明确后，用户本轮没有指定 Profile 或环境时，Codex、WorkBuddy 和豆包统一默认 blue：user 复用或创建 `blue-user`，app 复用 `blue-app`，缺少时在取得非敏感 app ID 后创建。当前 dev、test、prod Profile 不会被默认继承；用户本轮显式指定的 Profile 或环境优先。宿主差异只影响 user 的授权协议：Codex 本地使用 OAuth/PKCE，豆包和 WorkBuddy 使用 Device Grant。
 
 user 流程取得 CLI 返回的完整授权 URL 后，优先生成宿主原生链接按钮，按钮文字固定为“点击授权”；没有链接按钮时显示 `[点击授权](<FULL_AUTHORIZATION_URL>)`。链接目标逐字保留 CLI 返回值及全部 query 参数，由用户主动点击，Agent 不自动打开浏览器，也不为改变展示方式创建第二笔授权事务。app 流程没有此链接，继续使用下方隐藏输入 app secret 的方式。
 
@@ -270,7 +270,7 @@ user 流程取得 CLI 返回的完整授权 URL 后，优先生成宿主原生�
 
 ### user 身份：推荐用于人工交互验证
 
-默认 test Profile 可由 Agent 自动创建；手工等价命令为：
+默认 blue Profile 可由 Agent 自动创建；手工等价命令为：
 
 ```bash
 everyline-cli config add test-user \

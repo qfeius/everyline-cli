@@ -104,11 +104,11 @@ EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、
 
 1. 发起任何授权事务前必须先固定 `user/app` 身份。用户在本次请求中或同一次授权交互中已经明确身份时直接使用；尚未明确时必须先让用户单选 `user（个人账号授权）` 或 `app（应用授权）`。收到选择前不创建身份相关 Profile、不索取 app ID 或 app secret，也不执行 `auth status`、`auth login`、`auth init` 或 `auth complete`。
 2. Profile 名称、`default_identity`、唯一候选、历史 token、CLI 默认身份及 `nextAction` 均不代表客户选择；即使帮助或结构化输出带有默认身份，也先完成单选。笼统回复“开始授权”“继续登录”或“好的”只表达登录意愿，不视为选择 user 或 app。
-3. 身份确定后，用户在本次请求中明确指定 Profile 或环境时，以该选择为准；指定 Profile 先执行 `everyline-cli config show <profile> --output json` 校验。用户未指定 Profile 和环境时，Codex、WorkBuddy、豆包 AgentKit/Skills Sandbox 与豆包普通工作任务统一默认 `test` 环境。执行 `config list --output json`，只复用连接地址属于 `test` 预设且身份兼容的 Profile；当前 Profile 是 dev、blue 或 prod 时不得继承它。多个 test Profile 同时匹配时，user 按 `test-user`、app 按 `test-app` 优先；仍不唯一时展示真实候选项让用户选择。
-4. test 环境没有可复用 Profile 时，先读取 `config add --help`：user 身份创建 `test-user`（`config add test-user --env test --default-identity user --default-output json`）；app 身份取得非敏感 app ID 后创建 `test-app`（`config add test-app --env test --default-identity app --app-id <app-id> --default-output json`）。本规则已获得默认 test 的配置授权，不追加环境确认；同名 Profile 已存在但并非 test 时不覆盖，向用户报告名称冲突并请其显式选择 Profile。
+3. 身份确定后，用户在本次请求中明确指定 Profile 或环境时，以该选择为准；指定 Profile 先执行 `everyline-cli config show <profile> --output json` 校验。用户未指定 Profile 和环境时，Codex、WorkBuddy、豆包 AgentKit/Skills Sandbox 与豆包普通工作任务统一默认 `blue` 环境。执行 `config list --output json`，只复用连接地址属于 `blue` 预设且身份兼容的 Profile；当前 Profile 是 dev、test 或 prod 时不得继承它。多个 blue Profile 同时匹配时，user 按 `blue-user`、app 按 `blue-app` 优先；仍不唯一时展示真实候选项让用户选择。
+4. blue 环境没有可复用 Profile 时，先读取 `config add --help`：user 身份创建 `blue-user`（`config add blue-user --env blue --default-identity user --default-output json`）；app 身份取得非敏感 app ID 后创建 `blue-app`（`config add blue-app --env blue --default-identity app --app-id <app-id> --default-output json`）。本规则已获得默认 blue 的配置授权，不追加环境确认；同名 Profile 已存在但并非 blue 时不覆盖，向用户报告名称冲突并请其显式选择 Profile。
 5. 本次会话后续每条命令都显式携带 `--profile <profile> --as <identity>`，不依赖当前 Profile 或 Profile 默认身份。
-6. 宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant；三者默认环境始终是 test。
-7. 不因权限、资源可见性或一种身份授权失败而自动切换另一种身份，也不自动改到 dev、blue 或 prod。
+6. 宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant；三者默认环境始终是 blue。
+7. 不因权限、资源可见性或一种身份授权失败而自动切换另一种身份，也不自动改到 dev、test 或 prod。
 
 ### 宿主结构化选项卡
 
@@ -188,7 +188,7 @@ CODEBUDDY_SESSION_ID=<same-session-id> everyline-cli auth complete --profile <pr
 
 ### 发起与完成 Device 授权
 
-dev/test/prod 固定使用 `business_type=contract-review`、`scope=contract-review:full` 和对应开放平台 resource。Codex `auth login` 按上节规则动态注册浏览器 client，并始终走 OAuth Authorization Code + PKCE。豆包和 WorkBuddy 始终执行 `auth init`/`auth complete` Device Grant；dev/test 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，`auth init` 不动态注册 client，也不复用 Codex 浏览器 client。prod、blue 或自定义环境使用 Device Grant 时，Profile 必须配置平台确认的 `oauth_device_client_id`。两类 client 分开使用，Agent 不在两种授权方式之间复制 client ID。
+dev/test/prod 固定使用 `business_type=contract-review`、`scope=contract-review:full` 和对应开放平台 resource。Codex `auth login` 按上节规则动态注册浏览器 client，并始终走 OAuth Authorization Code + PKCE。豆包和 WorkBuddy 始终执行 `auth init`/`auth complete` Device Grant；dev/test 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，`auth init` 不动态注册 client，也不复用 Codex 浏览器 client。blue 默认使用 Device client `zscli_bc60fee4de9913ae`；prod 或自定义环境使用 Device Grant 时，Profile 必须配置平台确认的 `oauth_device_client_id`。两类 client 分开使用，Agent 不在两种授权方式之间复制 client ID。
 
 读取 `auth init --help` 和 `auth complete --help`。首次安装门禁期间执行：
 
