@@ -103,6 +103,34 @@ func Check(ctx context.Context, currentVersion string, manifestURL string, httpC
 	}, nil
 }
 
+/*
+CheckNPM 从 npm latest 标签检查安装包版本。
+入参：ctx context.Context 控制取消；currentVersion string 为当前版本；httpClient *http.Client 为网络客户端。
+返回值：CheckResult 为版本比较结果；error 为网络、响应或版本格式错误。
+*/
+func CheckNPM(ctx context.Context, currentVersion string, httpClient *http.Client) (CheckResult, error) {
+	current, err := parseVersion(currentVersion)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	// 使用固定包地址，检查来源与建议安装的包保持一致。
+	content, err := getLimited(ctx, httpClient, "https://registry.npmjs.org/everyline-cli/latest", maxManifestBytes)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	var metadata struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(content, &metadata); err != nil {
+		return CheckResult{}, err
+	}
+	latest, err := parseVersion(metadata.Version)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	return CheckResult{CurrentVersion: strings.TrimSpace(currentVersion), LatestVersion: strings.TrimSpace(metadata.Version), IsLatest: compareVersions(current, latest) >= 0}, nil
+}
+
 // Run 获取 manifest、校验当前平台制品并在需要时完成独立二进制更新。
 // 入参：ctx context.Context 控制 manifest 与制品下载；currentVersion/manifestURL string 分别为当前构建版本和显式 HTTPS manifest 地址；options Options 为更新边界。
 // 返回值：Result 为更新结果；error 为校验、下载、替换调度或同步替换失败。
