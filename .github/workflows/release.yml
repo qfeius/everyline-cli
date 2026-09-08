@@ -70,20 +70,20 @@ jobs:
         run: |
           # GoReleaser 清理 dist 后，重新生成独立 Skill 导入包。
           make skill-assets
-          npm pack --pack-destination .
+          node scripts/pack-release.js .
 
       - name: Attach npm and Skill packages
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.package.outputs.version }}
-        run: gh release upload "$GITHUB_REF_NAME" "qfeius-everyline-cli-${RELEASE_VERSION}.tgz" dist/*-skill.zip --clobber
+        run: gh release upload "$GITHUB_REF_NAME" "everyline-cli-${RELEASE_VERSION}.tgz" dist/*-skill.zip --clobber
 
       - name: Publish npm package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_VERSION: ${{ steps.package.outputs.version }}
           NPM_TAG: ${{ steps.package.outputs.channel }}
-        run: npm publish "qfeius-everyline-cli-${RELEASE_VERSION}.tgz" --registry "$NPM_REGISTRY_URL" --access public --tag "$NPM_TAG"
+        run: npm publish "everyline-cli-${RELEASE_VERSION}.tgz" --registry "$NPM_REGISTRY_URL" --access public --tag "$NPM_TAG"
 
       - name: Verify npm channel
         env:

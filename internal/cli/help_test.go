@@ -1064,3 +1064,22 @@ func helpCommandNames(help string) []string {
 	}
 	return commands
 }
+
+/*
+TestReviewOutputDocsExcludeCharts 验证随包指南与 Skill 均采用无图表输出。
+入参：t *testing.T 为测试上下文。
+返回值：无，旧图表要求残留时报告失败。
+*/
+func TestReviewOutputDocsExcludeCharts(t *testing.T) {
+	for _, path := range []string{"../../docs/everyline-cli-skill-guide.md", "../../docs/everyline-cli-skill-interaction-scenarios.md", "../../skills/everyline-review/SKILL.md", "../../skills/everyline-review/references/review-flow.md"} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, obsolete := range []string{"饼图", "条形图", "横排双图", "环形图"} {
+			if strings.Contains(string(body), obsolete) {
+				t.Errorf("%s 残留图表规则 %s", path, obsolete)
+			}
+		}
+	}
+}

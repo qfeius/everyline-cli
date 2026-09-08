@@ -269,7 +269,7 @@ CLI 与三项本地 Skill 支持两种更新来源：用户提供的 `.tgz`，�
 
 ```bash
 # 使用指定包，无需先发布到 npm；将路径替换为实际文件。
-npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli ./qfeius-everyline-cli-<版本>.tgz
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli ./everyline-cli-<版本>.tgz
 
 # 使用已经发布到 npm 的最新版。
 npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org

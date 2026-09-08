@@ -43,7 +43,7 @@ everyline-cli version --output json
 
 ```bash
 make package
-npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli "./dist/qfeius-everyline-cli-<版本>.tgz"
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli "./dist/everyline-cli-<版本>.tgz"
 ```
 
 `make package` 每次先将补丁版本递增一位（例如 `0.0.7 → 0.0.8`），再同步三项 Skill、重新构建六个平台的二进制并生成 `.tgz`；不会提交代码、创建 Git 标签或发布到 npm。若当前是预发布版本，按 npm 的 patch 规则转为对应正式版本。文件名中的版本以实际产物为准。日常交付使用 `make package`；`npm pack` 仅用于 CI 已固定版本的发布和内部校验，不自动升版。三个 `*-skill.zip` 是 Skill 导入包，不替代 CLI 安装包。
@@ -68,3 +68,5 @@ everyline-cli version --output json
 - npm 403：核对 scope、包写权限、token 有效期及非交互发布权限。
 - 版本已存在：不要覆盖；核对已发布结果，需要变更时提升版本并创建新标签。
 - GitHub Release 已生成但 npm 发布失败：npm 包尚未发布成功；解决错误后可安装 Release 中的 `.tgz`，再处理 npm 发布。不要仅凭 Release 存在宣称 npm 已可安装。
+
+交付文件名统一为 `everyline-cli-<版本>.tgz`，包内名称仍为 `@qfeius/everyline-cli`。固定版本打包使用 `node scripts/pack-release.js dist`；该脚本将 npm 自动生成的 scoped 文件名重命名，GitHub、GitLab 与本地打包均使用同一入口。
