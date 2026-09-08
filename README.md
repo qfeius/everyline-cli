@@ -324,3 +324,7 @@ everyline-cli completion zsh
 - 不提交 app secret、access token、OAuth code、Keychain 内容或本地配置文件。
 - 使用 fake HTTP、临时 Profile 和测试 token 验证功能，不依赖真实 prod 凭证。
 - 运行 go test ./...、go vet ./... 和 make build。
+
+ npm 安装版通过 `everyline-cli version --output json` 查询 npm 官方源的 `latest` 版本，无需配置 manifest。发现新版后，在当前业务流程结束时执行返回的 `updateCommand`，由 npm 安装器同步 CLI 和本地 Skills；检查失败时最新版本状态保持未知。独立二进制安装仍使用 HTTPS manifest。
+
+三项 Skill 使用 `metadata.version` 标记实际加载版本。`npm pack` / `npm publish` 的 prepack 和 `scripts/build-skill-bundles.sh` 会自动从 `package.json` 同步该版本；发布前仍需以相同版本构建 CLI。每个会话首次使用时展示 Skill、CLI 和 npm 最新安装包版本，发现新版后在当前业务结束时更新；宿主文件已更新而会话仍旧时提示新建任务。

@@ -6,6 +6,8 @@ repository_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 output_dir=${1:-"$repository_root/dist"}
 skill_names="everyline-cli everyline-review everyline-review-config"
 
+node "$repository_root/scripts/sync-skill-versions.js"
+
 mkdir -p "$output_dir"
 # 合并后不再发布 everyline-shared；清理同一输出目录中的旧 ZIP，避免上传四项 Skill。
 rm -f "$output_dir/everyline-shared-skill.zip"

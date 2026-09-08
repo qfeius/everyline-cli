@@ -2,6 +2,7 @@
 name: everyline-review-config
 description: "使用 EveryLine CLI 查询或管理审查清单、审查规则和规则分组，包括新增、修改、调整归属和删除；仅在合同审查中选择已有清单时不使用本 Skill。"
 metadata:
+  version: "0.0.7"
   requires:
     bins: ["everyline-cli"]
     skills: ["everyline-cli"]
@@ -59,3 +60,5 @@ everyline-cli rule group --help
 - 不猜测对象 ID、类型、归属、引用、级联结果、权限或业务成功。
 - 不在用户确认前写入，不把预检、退出码或中间进度描述为写入成功。
 - 合同、规则内容和附件只发送给用户选择的 EveryLine 流程，不进入其他服务。
+
+首次使用本 Skill 时，将当前实际加载的 `metadata.version` 交给 `everyline-cli` 公共 Skill，统一执行版本检查和面向客户的更新提示；同一会话不重复提示。
