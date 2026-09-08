@@ -6,7 +6,7 @@ UPDATE_MANIFEST_URL ?=
 PACKAGE_VERSION ?= $(shell node scripts/package-version.js "$(VERSION)")
 LDFLAGS := -s -w -X git.qtech.cn/ai/everyline-cli/internal/build.Version=$(VERSION) -X git.qtech.cn/ai/everyline-cli/internal/build.Commit=$(COMMIT) -X git.qtech.cn/ai/everyline-cli/internal/build.Date=$(BUILD_DATE) -X git.qtech.cn/ai/everyline-cli/internal/build.UpdateManifestURL=$(UPDATE_MANIFEST_URL)
 
-.PHONY: build test vet skill-assets release-assets release-check package-check clean
+.PHONY: build test vet skill-assets release-assets release-check package-check package clean
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/everyline-cli ./cmd/everyline-cli
@@ -26,6 +26,13 @@ skill-assets:
 
 release-assets: skill-assets
 	VERSION="$(PACKAGE_VERSION)" COMMIT="$(COMMIT)" BUILD_DATE="$(BUILD_DATE)" sh scripts/build-release-assets.sh
+
+# 本地交付统一从这里打包：先升补丁版本，再让子 make 读取新版本构建全部制品。
+# CI 发布已有标签时仍使用 release-check/npm pack，不再次递增标签版本。
+package:
+	npm version patch --no-git-tag-version
+	$(MAKE) release-assets VERSION="$$(node -p 'require("./package.json").version')" PACKAGE_VERSION="$$(node -p 'require("./package.json").version')"
+	npm pack --pack-destination dist
 
 package-check: skill-assets
 	sh tests/release/verify-assets.sh

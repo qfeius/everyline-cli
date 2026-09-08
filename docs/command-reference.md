@@ -38,7 +38,7 @@ auth logout [--as app|user]
 
 `auth init`/`auth complete` 为豆包与 WorkBuddy 沙箱提供不依赖 `127.0.0.1` callback 的 Device Grant。dev/test 的 `contract-review` 业务使用独立 Device client `zscli_c77221e810ce3977` 和 `contract-review:full` scope；`auth init` 不动态注册 client，也不复用 Codex 的浏览器 client。prod、blue 或自定义环境使用 Device Grant 时，Profile 需通过 `--oauth-device-client-id` 提供平台确认的独立 client。豆包 AgentKit 使用工作区加密文件并要求 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`（base64 编码 32 字节）；豆包工作任务按 `SESSION_ID` 派生会话隔离密钥；WorkBuddy 按 `CODEBUDDY_SESSION_ID` 使用系统 Credential Manager/Keychain/Secret Service。WorkBuddy 的 `auth init`、`auth complete` 和后续 `auth status` 必须显式复用同一个稳定值，通用 `SESSION_ID` 的变化不参与 WorkBuddy 凭证定位。`auth complete` 本地未找到事务时先恢复原标识并重试 `auth complete`，不直接重启授权。加密凭证中携带非敏感 Device Profile 快照，沙箱重建后可通过显式 `--profile` 恢复。OAuth metadata 尚未发布 `device_authorization_endpoint` 时，CLI 会明确报告服务端能力缺口；不会在远端沙箱自动回退到 loopback 登录。
 
-`auth status` 对服务端提供过期时间的 token 输出 `expiresAt` 和 `expiresInSeconds`；对 app 环境变量交接的未知过期 token 输出 `expiresKnown=false`，不输出虚假时间。OAuth metadata 声明 `refresh_token` grant 时，user token 进入五分钟刷新窗口会在跨进程锁内尝试 refresh；临时刷新失败会保留尚未真正过期的旧 token。业务请求收到可信 `code=110004` 时只强制刷新并原样重放一次；服务端未声明刷新能力时保持原有失效清理和重新登录提示，`invalid_grant` 也会清理失效凭证并要求重新授权。如果缓存已由并发重新登录更新，CLI 会保留新 token。
+`auth status` 对服务端提供过期时间的 token 输出 `expiresAt` 和 `expiresInSeconds`；对 app 环境变量交接的未知过期 token 输出 `expiresKnown=false`，不输出虚假时间。OAuth metadata 声明 `refresh_token` grant 时，user token 进入五分钟刷新窗口会在跨进程锁内尝试 refresh；缺少 refresh token 或刷新失败时提示手动重新授权，不回退使用旧 token。业务请求收到可信 `code=110004` 时只强制刷新并原样重放一次；服务端未声明刷新能力时保持原有失效清理和重新登录提示，`invalid_grant` 也会清理失效凭证并要求重新授权。如果缓存已由并发重新登录更新，CLI 会保留新 token。
 
 app 身份的 status 只输出 `appSecretConfigured` 布尔值，不输出 secret 内容；`auth logout` 只删除 token 缓存，不删除已显式保存的 app secret。
 

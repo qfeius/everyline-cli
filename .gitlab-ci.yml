@@ -58,4 +58,4 @@ package:
     - npm pack
   artifacts:
     paths:
-      - everyline-cli-*.tgz
+      - qfeius-everyline-cli-*.tgz

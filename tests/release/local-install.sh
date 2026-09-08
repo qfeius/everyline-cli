@@ -11,7 +11,7 @@ if [ -n "${EXPECTED_VERSION:-}" ]; then
   mkdir -p "$package_root"
   cp package.json README.md "$package_root/"
   mkdir -p "$package_root/docs"
-  cp docs/everyline-cli-skill-guide.md docs/everyline-cli-skill-interaction-scenarios.md "$package_root/docs/"
+  cp docs/npm-release.md docs/everyline-cli-skill-guide.md docs/everyline-cli-skill-interaction-scenarios.md "$package_root/docs/"
   # 临时安装包与正式发布包保持一致，包含可独立导入的 Agent Skill。
   cp -R bin scripts skills "$package_root/"
   node - "$package_root/package.json" "$EXPECTED_VERSION" <<'NODE'
@@ -49,7 +49,7 @@ codex_skills_dir="$temporary_dir/codex-skills"
 workbuddy_skills_dir="$temporary_dir/workbuddy-skills"
 doubao_skills_dir="$temporary_dir/doubao-workspace/.user_skills"
 global_config_dir="$temporary_dir/global-config"
-EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" EVERYLINE_DOUBAO_SKILLS_DIR="$doubao_skills_dir" npm install --silent --global --allow-scripts=everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
+EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" EVERYLINE_DOUBAO_SKILLS_DIR="$doubao_skills_dir" npm install --silent --global --allow-scripts=@qfeius/everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
 global_package_root=$(npm root --global --prefix "$global_prefix")
 for skill_name in everyline-cli everyline-review everyline-review-config; do
   codex_skill_target="$codex_skills_dir/$skill_name"

@@ -1,6 +1,6 @@
 {
   "name": "@qfeius/everyline-cli",
-  "version": "0.1.0",
+  "version": "0.0.12",
   "description": "EveryLine CLI 工具的 npm/npx 薄包装",
   "license": "UNLICENSED",
   "repository": {
@@ -18,6 +18,7 @@
     "bin/linux-arm64/",
     "bin/windows-amd64/",
     "bin/windows-arm64/",
+    "docs/npm-release.md",
     "docs/everyline-cli-skill-guide.md",
     "docs/everyline-cli-skill-interaction-scenarios.md",
     "scripts/install.js",
@@ -26,14 +27,23 @@
     "scripts/platform.js",
     "scripts/run.js",
     "scripts/verify-package-version.js",
+    "scripts/sync-skill-versions.js",
     "skills/"
   ],
   "scripts": {
     "postinstall": "node scripts/install.js",
-    "prepack": "node scripts/verify-package-version.js",
+    "prepack": "node scripts/verify-package-version.js && node scripts/sync-skill-versions.js",
     "test": "node --test tests/release/*.test.js"
   },
   "engines": {
     "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qfeius/everyline-cli.git"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   }
 }

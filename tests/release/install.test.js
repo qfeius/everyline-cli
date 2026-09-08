@@ -1011,3 +1011,39 @@ assert.equal(failed, true);
   }
   assert.equal(readFileSync(original.installStatePath, "utf8"), originalState);
 });
+
+/**
+ * 验证带 scope 的安装包能迁移旧包或旧安装目录的 Skill 链接，并保留授权状态。
+ * 入参：t（TestContext）提供子场景与临时目录清理。
+ * 返回值：void；包名改动导致来源误判、链接未更新或授权状态丢失时断言失败。
+ */
+test("scoped package migrates legacy and scoped Skill registrations", async (t) => {
+  for (const previousName of ["everyline-cli", "@qfeius/everyline-cli"]) {
+    await t.test(previousName, (t) => {
+      const previous = createPackageFixture();
+      const current = createPackageFixture();
+      t.after(() => {
+        rmSync(previous.root, { recursive: true, force: true });
+        rmSync(current.root, { recursive: true, force: true });
+      });
+      for (const [fixture, name] of [[previous, previousName], [current, "@qfeius/everyline-cli"]]) {
+        const manifestPath = join(fixture.packageRoot, "package.json");
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        manifest.name = name;
+        writeFileSync(manifestPath, JSON.stringify(manifest));
+      }
+      const options = { platform: "linux", architecture: "x64", environment: { npm_config_global: "true" }, userHome: previous.userHome };
+      const before = installPackage({ ...options, packageRoot: previous.packageRoot });
+      const state = JSON.parse(readFileSync(before.installStatePath, "utf8"));
+      state.authorizationRequired = false;
+      writeFileSync(before.installStatePath, JSON.stringify(state));
+      const after = installPackage({ ...options, packageRoot: current.packageRoot });
+      assert.equal(after.authorizationRequired, false);
+      for (const registrations of Object.values(after.skills)) {
+        for (const skill of registrations) {
+          assert.equal(realpathSync(skill.target), realpathSync(join(current.packageRoot, "skills", skill.name)));
+        }
+      }
+    });
+  }
+});

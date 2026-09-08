@@ -61,7 +61,7 @@ func newVersionCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().StringVar(&manifestURL, "manifest-url", "", "覆盖更新 manifest 的 HTTPS 地址")
 	withNotes(command,
 		"检查失败不会使 version 命令失败，isLatest 返回 null，避免误报已是最新版。",
-		"更新地址按 --manifest-url、EVERYLINE_CLI_UPDATE_MANIFEST_URL、构建内置值的顺序选择。",
+		"npm 安装版从 npm latest 检查更新，无需 manifest；独立二进制更新地址按 --manifest-url、EVERYLINE_CLI_UPDATE_MANIFEST_URL、构建内置值的顺序选择。",
 	)
 	return command
 }
@@ -78,13 +78,20 @@ func inspectVersion(ctx context.Context, runtime *Runtime, manifestURL string) v
 			result.NextAction = "authorize"
 		}
 	}
-	if manifestURL == "" {
+	if manifestURL == "" && os.Getenv("EVERYLINE_CLI_WRAPPER") != "1" {
 		result.CheckError = "未配置更新 manifest URL"
 		return result
 	}
 	checkContext, cancel := context.WithTimeout(ctx, versionCheckTimeout)
 	defer cancel()
-	checked, err := selfupdate.Check(checkContext, result.Version, manifestURL, runtime.HTTP)
+	var checked selfupdate.CheckResult
+	var err error
+	// npm 安装版始终查询 npm，避免 manifest 与 npm 实际可安装版本不一致。
+	if os.Getenv("EVERYLINE_CLI_WRAPPER") == "1" {
+		checked, err = selfupdate.CheckNPM(checkContext, result.Version, runtime.HTTP)
+	} else {
+		checked, err = selfupdate.Check(checkContext, result.Version, manifestURL, runtime.HTTP)
+	}
 	if err != nil {
 		result.CheckError = err.Error()
 		result.UpdateCommand = versionUpdateCommand(manifestURL, false)
@@ -109,13 +116,15 @@ func resolvedUpdateManifestURL(explicit string) string {
 	return ""
 }
 
-// versionUpdateCommand 根据安装方式返回用户可直接执行的更新命令。
-// 入参：manifestURL string 为独立二进制更新源；explicit bool 表示该地址来自本次命令显式覆盖。
-// 返回值：string，npm 包使用 npm 命令，独立二进制使用 update 命令。
+/*
+versionUpdateCommand 根据安装方式返回用户可直接执行的更新命令。
+入参：manifestURL string 为独立二进制更新源；explicit bool 表示该地址来自本次命令显式覆盖。
+返回值：string，npm 包使用 npm 命令，独立二进制使用 update 命令。
+*/
 func versionUpdateCommand(manifestURL string, explicit bool) string {
 	if os.Getenv("EVERYLINE_CLI_WRAPPER") == "1" {
 		// npm 包同时携带 CLI 与 Skill，显式允许 everyline-cli 的 postinstall 才能重新登记两个宿主。
-		return "npm install -g --allow-scripts=everyline-cli everyline-cli@latest"
+		return "npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org"
 	}
 	if explicit && strings.TrimSpace(manifestURL) != "" {
 		return "everyline-cli update --manifest-url " + strings.TrimSpace(manifestURL)
@@ -147,7 +156,7 @@ func maybeDeferRequiredUpdate(ctx context.Context, runtime *Runtime, root *rootO
 		}
 	}
 	manifestURL := resolvedUpdateManifestURL("")
-	if manifestURL == "" {
+	if manifestURL == "" && os.Getenv("EVERYLINE_CLI_WRAPPER") != "1" {
 		return
 	}
 	result := inspectVersion(ctx, runtime, manifestURL)
