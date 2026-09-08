@@ -2,7 +2,7 @@
 name: everyline-cli
 description: "为 EveryLine CLI 完成 CLI/Skill 安装校验与引导、首次配置、user/app 授权、Codex/豆包/WorkBuddy 运行时选择、状态检查、退出和鉴权恢复；合同审查及清单规则管理由对应业务 Skill 处理。"
 metadata:
-  version: "0.0.9"
+  version: "0.0.12"
   requires:
     bins: ["everyline-cli"]
   cliHelp: "everyline-cli --help;everyline-cli auth --help"

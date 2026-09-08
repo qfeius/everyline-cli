@@ -280,10 +280,8 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 	// 审查 Skill 的输出协议必须把签名 URL 当作原子值，文件准备则覆盖路径、stdin 与 URL 三种来源。
 	for _, expected := range []string{
 		"不可拆分的字符串",
-		"上下排列的两个图表",
-		"环形图",
-		"横向条形图",
-		"链接按钮",
+		"不展示图表",
+		"Markdown 文字链接“查看详情”",
 		"**基础信息**",
 		"**审查概览**",
 		"| 项目 | 内容 |",
