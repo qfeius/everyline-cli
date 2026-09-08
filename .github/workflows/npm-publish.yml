@@ -15,7 +15,6 @@ concurrency:
 
 jobs:
   publish:
-    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -35,13 +34,19 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
-      - name: Set package version from tag
+      - name: Set package version and dist-tag from tag
         id: metadata
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -eu
           version="${TAG_NAME#v}"
+          if [[ "$version" == *-* ]]; then
+            dist_tag="${version#*-}"
+            dist_tag="${dist_tag%%.*}"
+          else
+            dist_tag="latest"
+          fi
           node - "$version" <<'NODE'
           const { readFileSync, writeFileSync } = require("node:fs");
 
@@ -51,6 +56,7 @@ jobs:
           writeFileSync(path, `${JSON.stringify(packageData, null, 2)}\n`);
           NODE
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'dist_tag=%s\n' "$dist_tag" >> "$GITHUB_OUTPUT"
 
       - name: Run release checks and build platform assets
         env:
@@ -58,4 +64,6 @@ jobs:
         run: make release-check VERSION="$VERSION"
 
       - name: Publish to npm with OIDC
-        run: npm publish --provenance --access public
+        env:
+          NPM_DIST_TAG: ${{ steps.metadata.outputs.dist_tag }}
+        run: npm publish --provenance --access public --tag "$NPM_DIST_TAG"
