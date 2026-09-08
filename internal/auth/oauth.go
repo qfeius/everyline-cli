@@ -22,6 +22,7 @@ import (
 )
 
 const oauthCallbackMessage = "用户授权已完成，可以返回终端。"
+const oauthCallbackTimeoutMessage = "授权链接已超时，请重新生成授权链接"
 
 // OAuthCallback 接收 OAuth authorization server 回调中的授权码。
 type OAuthCallback interface {
@@ -275,10 +276,13 @@ func OpenBrowser(rawURL string) error {
 }
 
 type loopbackOAuthCallback struct {
-	server   *http.Server
-	listener net.Listener
-	results  chan oauthCallbackResult
-	once     sync.Once
+	server         *http.Server
+	listener       net.Listener
+	results        chan oauthCallbackResult
+	once           sync.Once
+	mu             sync.RWMutex
+	waitContext    context.Context // 登录期限供 HTTP 回调判断，受 mu 保护。
+	timeoutPageTTL time.Duration   // 超时页面额外保留时长，不延长授权有效期。
 }
 
 type oauthCallbackResult struct {
@@ -287,7 +291,11 @@ type oauthCallbackResult struct {
 	err   error
 }
 
-// StartOAuthCallbackServer 在 loopback 地址启动一次性 OAuth callback server。
+/*
+StartOAuthCallbackServer 在 loopback 地址启动一次性 OAuth callback server。
+入参：rawURL string 为本机回调地址。
+返回值：OAuthCallback 为回调服务；error 为地址或监听错误。
+*/
 func StartOAuthCallbackServer(rawURL string) (OAuthCallback, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Scheme != "http" || !isLoopbackHost(parsed.Hostname()) || parsed.Port() == "" || parsed.Path == "" {
@@ -298,8 +306,9 @@ func StartOAuthCallbackServer(rawURL string) (OAuthCallback, error) {
 		return nil, fmt.Errorf("启动 OAuth callback server: %w", err)
 	}
 	callback := &loopbackOAuthCallback{
-		listener: listener,
-		results:  make(chan oauthCallbackResult, 1),
+		listener:       listener,
+		results:        make(chan oauthCallbackResult, 1),
+		timeoutPageTTL: 3 * time.Minute,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(parsed.Path, callback.handle)
@@ -316,6 +325,17 @@ func StartOAuthCallbackServer(rawURL string) (OAuthCallback, error) {
 // 入参：writer http.ResponseWriter 为浏览器响应；request *http.Request 携带授权码或错误参数。
 // 返回值：无；通过 HTTP 响应展示结果，通过 results 通知登录流程。
 func (callback *loopbackOAuthCallback) handle(writer http.ResponseWriter, request *http.Request) {
+	callback.mu.RLock()
+	waitContext := callback.waitContext
+	callback.mu.RUnlock()
+	// 超时回调只展示固定文案，任何迟到授权码都不进入兑换流程。
+	if waitContext != nil && errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		writer.WriteHeader(http.StatusGone)
+		_, _ = io.WriteString(writer, oauthCallbackTimeoutMessage)
+		callback.send(oauthCallbackResult{err: context.DeadlineExceeded})
+		return
+	}
 	query := request.URL.Query()
 	// 拒绝回调可能没有 state；沿用错误直接结束登录的语义，成功授权仍由 Wait 校验 state。
 	result := oauthCallbackResult{state: query.Get("state")}
@@ -345,11 +365,32 @@ func (callback *loopbackOAuthCallback) send(result oauthCallbackResult) {
 	callback.once.Do(func() { callback.results <- result })
 }
 
+/*
+Wait 等待有效回调；超时后短暂保留页面，让迟到的浏览器看到超时提示。
+入参：ctx context.Context 为登录期限；expectedState string 为本次授权的校验值。
+返回值：string 为有效授权码；error 为超时、取消或回调错误。
+*/
 func (callback *loopbackOAuthCallback) Wait(ctx context.Context, expectedState string) (string, error) {
+	callback.mu.Lock()
+	callback.waitContext = ctx
+	callback.mu.Unlock()
 	select {
 	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			// 最多保留三分钟，收到迟到回调后立即结束；此时授权已经失效。
+			timer := time.NewTimer(callback.timeoutPageTTL)
+			defer timer.Stop()
+			select {
+			case <-callback.results:
+			case <-timer.C:
+			}
+		}
 		return "", fmt.Errorf("等待 OAuth callback: %w", ctx.Err())
 	case result := <-callback.results:
+		// 回调与期限同时到达时仍以期限为准，避免兑换已超时的授权码。
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("等待 OAuth callback: %w", err)
+		}
 		if result.err != nil {
 			return "", result.err
 		}
