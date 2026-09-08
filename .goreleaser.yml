@@ -27,3 +27,6 @@ checksum:
 changelog:
   sort: asc
 
+
+release:
+  prerelease: auto

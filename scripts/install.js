@@ -57,7 +57,7 @@ function isEverylineSkillSource(source) {
   }
   try {
     const manifest = JSON.parse(readFileSync(join(dirname(dirname(source)), "package.json"), "utf8"));
-    return manifest?.name === "everyline-cli" && manifest.bin?.["everyline-cli"] === "scripts/run.js";
+    return ["everyline-cli", "@qfeius/everyline-cli"].includes(manifest?.name) && manifest.bin?.["everyline-cli"] === "scripts/run.js";
   } catch (error) {
     if (error.code === "ENOENT" || error.code === "ENOTDIR" || error instanceof SyntaxError) {
       return false;
