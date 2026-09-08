@@ -312,7 +312,7 @@ func TestVersionCheckFailureIsNonBlockingAndUnknown(t *testing.T) {
 // 返回值：无；更新命令遗漏包级脚本许可时通过 t.Fatal 报告。
 func TestVersionUpdateCommandForNPMIncludesSkillInstaller(t *testing.T) {
 	t.Setenv("EVERYLINE_CLI_WRAPPER", "1")
-	const expected = "npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@latest --registry https://registry.npmjs.org"
+	const expected = "npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org"
 	if actual := versionUpdateCommand("https://updates.example.test/manifest.json", false); actual != expected {
 		t.Fatalf("updateCommand=%q，期望 %q", actual, expected)
 	}

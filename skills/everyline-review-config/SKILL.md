@@ -2,7 +2,7 @@
 name: everyline-review-config
 description: "使用 EveryLine CLI 查询或管理审查清单、审查规则和规则分组，包括新增、修改、调整归属和删除；仅在合同审查中选择已有清单时不使用本 Skill。"
 metadata:
-  version: "0.0.7"
+  version: "0.0.9"
   requires:
     bins: ["everyline-cli"]
     skills: ["everyline-cli"]

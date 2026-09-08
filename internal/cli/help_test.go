@@ -280,9 +280,17 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 	// 审查 Skill 的输出协议必须把签名 URL 当作原子值，文件准备则覆盖路径、stdin 与 URL 三种来源。
 	for _, expected := range []string{
 		"不可拆分的字符串",
-		"只包含以下三项",
-		"`审查结果概要`",
-		"[审查结果详情](<REVIEW_DETAIL_URL>)",
+		"上下排列的两个图表",
+		"环形图",
+		"横向条形图",
+		"链接按钮",
+		"**基础信息**",
+		"**审查概览**",
+		"| 项目 | 内容 |",
+		"| 合同文件名称 | <实际文件名> |",
+		"| 审查立场 | <实际立场> |",
+		"有效期提示：审查结果详情链接默认有效期为两小时，请及时查看。",
+		"[查看详情](<REVIEW_DETAIL_URL>)",
 		"不得单独展示 `taskId`",
 		"不追加“已完成”",
 		"references/review-flow.md",
@@ -321,9 +329,9 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"`0. 通用审查清单（系统内置）`",
 		"review task result --profile <profile> --as <identity>",
 		"服务端原始终态对象",
-		"链接文字固定为“审查结果详情”",
+		"链接文字固定为“查看详情”",
 		"其他服务端参数",
-		"成功回复保持固定三项",
+		"成功回复保持统一结构",
 	} {
 		if !strings.Contains(contents["reviewFlow"], expected) {
 			t.Fatalf("everyline-review 流程缺少 %q", expected)
@@ -368,9 +376,11 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 	}
 }
 
-// TestEverylineSkillGuideKeepsInstallScope 验证多宿主移除与 npm 全局卸载分离，并保留自定义 prefix。
-// 入参：t *testing.T 为 Go 测试上下文。
-// 返回值：无；安装手册重新混淆宿主登记、全局包或自定义 prefix 时通过测试失败报告差异。
+/*
+TestEverylineSkillGuideKeepsInstallScope 验证多宿主移除与 npm 全局卸载分离，并保留自定义 prefix。
+入参：t *testing.T 为 Go 测试上下文。
+返回值：无；安装手册重新混淆宿主登记、全局包或自定义 prefix 时通过测试失败报告差异。
+*/
 func TestEverylineSkillGuideKeepsInstallScope(t *testing.T) {
 	guideContent, err := os.ReadFile("../../docs/everyline-cli-skill-guide.md")
 	if err != nil {
@@ -381,7 +391,7 @@ func TestEverylineSkillGuideKeepsInstallScope(t *testing.T) {
 		"EVERYLINE_NPM_PREFIX",
 		"只从某一个宿主移除 Skill",
 		"确认 Codex、WorkBuddy 和豆包都不再使用",
-		`npm uninstall -g --prefix "$EVERYLINE_NPM_PREFIX" everyline-cli`,
+		`npm uninstall -g --prefix "$EVERYLINE_NPM_PREFIX" @qfeius/everyline-cli`,
 	} {
 		if !strings.Contains(guideText, expected) {
 			t.Fatalf("EveryLine Skill 安装手册缺少 %q", expected)

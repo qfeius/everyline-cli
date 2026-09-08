@@ -337,7 +337,7 @@ func TestCheckNPM(t *testing.T) {
 	} {
 		t.Run(tc.body+http.StatusText(tc.status), func(t *testing.T) {
 			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.String() != "https://registry.npmjs.org/everyline-cli/latest" {
+				if r.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/latest" {
 					t.Fatalf("unexpected URL: %s", r.URL)
 				}
 				return response(tc.status, tc.body), nil
