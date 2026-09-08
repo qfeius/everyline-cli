@@ -241,7 +241,7 @@ export PATH=<WORKBUDDY_NODE_BIN>:$PATH && everyline-cli auth login --profile <pr
 - 未授权或凭据过期：原身份已经由用户在本次流程中明确选择时继续该身份；否则先完成 user/app 单选再重新授权，成功后只重试原业务操作一次。
 - user Token 明确过期且未刷新成功时，保留当前 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录。Codex 执行一次 `auth login --profile <profile> --as user --no-open-browser --timeout 3m`，按上节方式保留进程并及时展示链接；豆包/WorkBuddy 执行一次 `auth init --profile <profile> --as user --output json`，按本 Skill 的授权入口规则展示新返回的完整 URL，待用户在新消息中确认完成后执行一次 `auth complete`。
 - 用户已明确要求“过期后重新生成授权链接手动登录”时直接按该策略恢复，不重复确认重新授权意愿。`auth init` 已有待完成事务时复用原链接；只有该事务明确为 `expired`、`denied` 或 `invalid_grant` 时才执行一次 `auth init --restart`，不因状态复查反复生成链接。新链接使用 CLI 的本次输出，不复用历史 `user_code` 或 OAuth URL。
-- 手动重新授权后执行 `auth status --profile <profile> --as user --output json`，确认 `authenticated=true` 后只恢复原业务步骤一次；授权期间暂停业务操作。仅刷新失败而 Token 尚未到期时沿用 CLI 返回的有效凭证，不提前要求用户重新登录。
+- 手动重新授权后执行 `auth status --profile <profile> --as user --output json`，确认 `authenticated=true` 后只恢复原业务步骤一次；授权期间暂停业务操作。进入到期前五分钟窗口后，缺少 refresh token 或刷新失败时，按 CLI 提示手动重新授权。
 - 身份不匹配：展示当前身份，由用户决定是否切换。
 - 权限不足：保留 CLI 返回的缺失范围和 request ID，不改换身份或绕过检查。
 - 网络或服务错误：保留真实错误码和 request ID，不包装为授权成功。

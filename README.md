@@ -83,7 +83,7 @@ everyline-cli auth status \
   --output json
 ~~~
 
-`auth status` 默认读取当前身份对应的安全缓存。OAuth metadata 声明 refresh grant 时，CLI 会在过期前五分钟尝试刷新；业务请求收到可信 `code=110004` 时只刷新并重放一次。服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token；并发写入的新 token 会保留。
+`auth status` 默认读取当前身份对应的安全缓存。OAuth metadata 声明 refresh grant 时，CLI 会在过期前五分钟尝试刷新；进入该窗口后缺少 refresh token 或刷新失败时提示手动重新授权，不回退使用旧 token；业务请求收到可信 `code=110004` 时只刷新并重放一次。服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token；并发写入的新 token 会保留。
 
 prod 预设已包含正式 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env prod` 创建 user Profile 后，每次显式 Codex user 登录都会通过 metadata 声明的注册端点动态获取浏览器 client ID。prod 已内置 Device client `zscli_bc60fee4de9913ae`，豆包/WorkBuddy 可直接使用该预设。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
 
