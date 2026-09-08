@@ -315,3 +315,40 @@ func TestRunRejectsNPMWrapperWithoutNetwork(t *testing.T) {
 		t.Fatal("npm wrapper 模式不应访问 manifest")
 	}
 }
+
+/*
+TestCheckNPM 验证 npm 版本比较及失败边界。
+入参：t *testing.T 为测试上下文。
+返回值：无，响应解析或版本判断错误时报告失败。
+*/
+func TestCheckNPM(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		status int
+		latest bool
+		fail   bool
+	}{
+		{`{"version":"1.1.0"}`, 200, false, false},
+		{`{"version":"1.0.0"}`, 200, true, false},
+		{`{"version":"0.9.0"}`, 200, true, false},
+		{`{}`, 200, false, true},
+		{`invalid`, 200, false, true},
+		{`{}`, 404, false, true},
+	} {
+		t.Run(tc.body+http.StatusText(tc.status), func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/latest" {
+					t.Fatalf("unexpected URL: %s", r.URL)
+				}
+				return response(tc.status, tc.body), nil
+			})}
+			got, err := CheckNPM(t.Context(), "1.0.0", client)
+			if (err != nil) != tc.fail {
+				t.Fatalf("err=%v", err)
+			}
+			if !tc.fail && got.IsLatest != tc.latest {
+				t.Fatalf("result=%+v", got)
+			}
+		})
+	}
+}

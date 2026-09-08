@@ -74,7 +74,7 @@ flowchart TD
 | ENTRY-03 | 已支持 | `帮我操作普通智书 contract-cli` | 根据 Skill 边界不接管 | 交由其他能力处理 |
 | READY-01 | 已支持 | 新会话首次调用 | 执行 `command -v`、`version --output json` 和根帮助；解析首次安装授权字段 | 命令和版本可读取 |
 | READY-02 | 已支持 | CLI 已安装 | 使用现有版本，不主动升级 | 继续读取目标命令帮助 |
-| READY-03 | 已支持 | 已要求安装 CLI/Skill，CLI 未安装 | 优先安装用户指定版本或 `.tgz`，否则执行 `npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@latest` | 安装校验后在回复正文展示统一文案 |
+| READY-03 | 已支持 | 已要求安装 CLI/Skill，CLI 未安装 | 优先安装用户指定版本或 `.tgz`，否则执行 `npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest` | 安装校验后在回复正文展示统一文案 |
 | READY-04 | 受限 | 宿主只完成静态 Skill 导入 | 首次运行时验证 CLI；用户已要求安装时补做 CLI 安装，安装失败报告真实原因 | CLI 和 Skill 就绪后在回复正文展示统一文案 |
 | READY-05 | 受限 | 目标命令或参数在实时帮助中缺失 | 列出缺口，不模拟或猜测接口 | 停止该业务操作 |
 | READY-06 | 受限 | 旧版 `reviewStrength` 只接受 `0/1/2` | 不维护数字映射，不上传合同 | 停止合同审查；只读能力仍可继续 |
@@ -220,7 +220,7 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | TASK-01 | 已支持 | 创建成功并取得 task ID | 记录唯一 task ID，调用 `review task result` | 等待终态 |
 | TASK-02 | 已支持 | 任务仍在运行 | 告知“任务已创建并正在等待”，不称为完成 | 继续查询同一任务 |
-| TASK-03 | 已支持 | 成功且返回签名 `reviewDetailUrl` | 只返回结果概要、指向完整免登录 URL 的“审查结果详情”可点击链接和默认两小时有效期提示；不展示 task ID、终态字段或其他服务端参数 | 审查完成 |
+| TASK-03 | 已支持 | 成功且返回签名 `reviewDetailUrl` | 统一返回基础信息表、审查概览、横排的风险等级饼图与风险类别条形图，以及“审查结果：[查看详情]”完整签名链接和两小时有效期提示；不展示 task ID、终态字段或其他服务端参数 | 审查完成 |
 | TASK-04 | 已支持 | 成功但链接缺失 | 仅在结果链接项说明缺失，保留结果概要和有效期提示 | 不自行拼接地址或展开原始终态 |
 | TASK-05 | 已支持 | 任务失败、取消或结果查询超时 | 返回真实阶段、原因及已有 ID | 停止查询 |
 | TASK-06 | 受限 | 发起请求超时且没有 task ID | 说明结果不确定，不自动重试创建 | 停止，避免重复任务或扣点 |

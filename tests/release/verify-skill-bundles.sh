@@ -33,9 +33,9 @@ unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'EVERYLINE_DOU
 unzip -p "$output_dir/everyline-cli-skill.zip" SKILL.md | grep -F 'nextAction=reload_skills' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F -- '--stdin --name <filename>' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F '0. 通用审查清单（系统内置）' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '只包含以下三项' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不展示图表' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不得单独展示 `taskId`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不追加“已完成”' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '[审查结果详情](<REVIEW_DETAIL_URL>)' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '[查看详情](<REVIEW_DETAIL_URL>)' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F '服务端原始终态对象' >/dev/null
 unzip -p "$output_dir/everyline-review-config-skill.zip" references/management.md | grep -F '规则分组' >/dev/null

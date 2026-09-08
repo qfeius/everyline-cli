@@ -65,10 +65,10 @@ everyline-cli version --output json
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-如果拿到发布制品 `everyline-cli-<版本>.tgz`，可以直接安装：
+如果拿到发布制品 `qfeius-everyline-cli-<版本>.tgz`，可以直接安装：
 
 ```bash
-curl -fL '<TGZ_DOWNLOAD_URL>' -o 'everyline-cli-<版本>.tgz'
+curl -fL '<TGZ_DOWNLOAD_URL>' -o 'qfeius-everyline-cli-<版本>.tgz'
 npm install -g './everyline-cli-<版本>.tgz'
 everyline-cli version --output json
 ```

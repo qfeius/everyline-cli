@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -289,4 +290,94 @@ func requestOAuthCallback(callbackURL string, query url.Values) error {
 		time.Sleep(5 * time.Millisecond)
 	}
 	return fmt.Errorf("callback request failed: %s", parsed.String())
+}
+
+/*
+TestOAuthCallbackTimeoutPage 验证登录期限后回调展示准确文案且不返回授权码。
+入参：t *testing.T 为测试上下文。
+返回值：无；迟到授权被接受、响应错误或服务未释放时报错。
+*/
+func TestOAuthCallbackTimeoutPage(t *testing.T) {
+	server, callbackURL := newTestOAuthCallback(t)
+	callback := server.(*loopbackOAuthCallback)
+	defer callback.Close()
+	callback.timeoutPageTTL = time.Second
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() {
+		code, err := callback.Wait(ctx, "expected-state")
+		if code != "" {
+			finished <- fmt.Errorf("late code accepted: %s", code)
+			return
+		}
+		callback.Close()
+		finished <- err
+	}()
+	// 等待登录线程登记期限，再模拟浏览器迟到的真实 HTTP 回调。
+	readyDeadline := time.Now().Add(time.Second)
+	for {
+		callback.mu.RLock()
+		ready := callback.waitContext != nil
+		callback.mu.RUnlock()
+		if ready {
+			break
+		}
+		if time.Now().After(readyDeadline) {
+			t.Fatal("callback wait did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	response, err := (&http.Client{Timeout: time.Second}).Get(callbackURL + "?code=late-code&state=expected-state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusGone || string(body) != "授权链接已超时，请重新生成授权链接" {
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+	if response.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Fatal("incorrect content type")
+	}
+	select {
+	case err := <-finished:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err=%v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("late callback did not finish login")
+	}
+}
+
+/*
+TestOAuthCallbackTimeoutPageRetention 验证没有浏览器回调时页面保留有上限，取消不进入保留期。
+入参：t *testing.T 为测试上下文。
+返回值：无；等待未结束或返回错误类型不正确时报错。
+*/
+func TestOAuthCallbackTimeoutPageRetention(t *testing.T) {
+	for _, expired := range []bool{true, false} {
+		callback := &loopbackOAuthCallback{results: make(chan oauthCallbackResult, 1), timeoutPageTTL: 20 * time.Millisecond}
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Hour))
+		wantError := context.Canceled
+		if expired {
+			cancel()
+			ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			wantError = context.DeadlineExceeded
+		} else {
+			cancel()
+		}
+		started := time.Now()
+		_, err := callback.Wait(ctx, "expected-state")
+		cancel()
+		if !errors.Is(err, wantError) {
+			t.Fatalf("err=%v", err)
+		}
+		if expired && time.Since(started) < callback.timeoutPageTTL {
+			t.Fatal("timeout page closed too early")
+		}
+	}
 }

@@ -288,14 +288,14 @@ func TestProviderDeviceRefreshReusesConcurrentResult(t *testing.T) {
 }
 
 /*
-TestProviderExpiredUserTokenOffersManualLogin 验证已过期且刷新失败的 user 凭证提供原运行时的手动授权入口。
+TestProviderExpiredUserTokenOffersManualLogin 验证进入刷新窗口且刷新失败的 user 凭证提供原运行时的手动授权入口。
 入参：t *testing.T 为测试上下文。
-返回值：无；未过期凭证提前失效、原错误丢失或重新授权入口错误时通过测试失败报告。
+返回值：无；窗口内凭证回退使用、原错误丢失或重新授权入口错误时通过测试失败报告。
 */
 func TestProviderExpiredUserTokenOffersManualLogin(t *testing.T) {
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 	for _, device := range []bool{false, true} {
-		for _, expired := range []bool{false, true} {
+		for _, remaining := range []time.Duration{6 * time.Minute, 5 * time.Minute, time.Minute, 0} {
 			for _, scenario := range []struct {
 				name         string
 				refreshToken string
@@ -306,7 +306,7 @@ func TestProviderExpiredUserTokenOffersManualLogin(t *testing.T) {
 				{name: "refresh_routed_to_code", refreshToken: "fixture-refresh", status: http.StatusBadRequest, body: `{"error":"invalid_request","error_description":"缺少 code/redirect_uri/code_verifier"}`},
 				{name: "temporary_failure", refreshToken: "fixture-refresh", status: http.StatusServiceUnavailable, body: `{"error":"temporarily_unavailable"}`},
 			} {
-				t.Run(fmt.Sprintf("device=%t/expired=%t/%s", device, expired, scenario.name), func(t *testing.T) {
+				t.Run(fmt.Sprintf("device=%t/remaining=%s/%s", device, remaining, scenario.name), func(t *testing.T) {
 					var refreshCalls atomic.Int32
 					var server *httptest.Server
 					server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -323,10 +323,7 @@ func TestProviderExpiredUserTokenOffersManualLogin(t *testing.T) {
 						}
 					}))
 					t.Cleanup(server.Close)
-					token := Token{AccessToken: "fixture-user-token", OAuthClientID: "issuing-client", RefreshToken: scenario.refreshToken, ExpiresAt: now.Add(time.Minute)}
-					if expired {
-						token.ExpiresAt = now
-					}
+					token := Token{AccessToken: "fixture-user-token", OAuthClientID: "issuing-client", RefreshToken: scenario.refreshToken, ExpiresAt: now.Add(remaining)}
 					fileStore := NewFileTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
 					provider := NewProvider(fileStore, server.Client(), func() time.Time { return now })
 					profile := config.Profile{Name: "test-user", OAuthMetadataURL: server.URL + "/metadata"}
@@ -342,17 +339,17 @@ func TestProviderExpiredUserTokenOffersManualLogin(t *testing.T) {
 						t.Fatal(err)
 					}
 					got, err := provider.TokenForIdentity(context.Background(), profile, config.IdentityUser)
-					if !expired {
-						if err != nil || got.AccessToken != token.AccessToken {
-							t.Fatalf("有效 token 不应因刷新失败提前登出: token=%q err=%v", got.AccessToken, err)
+					if remaining > userTokenRefreshWindow {
+						if err != nil || got.AccessToken != token.AccessToken || refreshCalls.Load() != 0 {
+							t.Fatalf("刷新窗口外应直接使用有效凭证: token=%q err=%v calls=%d", got.AccessToken, err, refreshCalls.Load())
 						}
-					} else {
-						if !errors.Is(err, ErrUserSessionExpired) || !strings.Contains(err.Error(), loginCommand) || got.AccessToken != "" {
-							t.Fatalf("过期后未提供正确的手动授权入口: token=%q err=%v", got.AccessToken, err)
-						}
-						if scenario.name == "refresh_routed_to_code" && !IsDeviceGrantError(err, "invalid_request") {
-							t.Fatalf("原始刷新错误未保留: %v", err)
-						}
+						return
+					}
+					if !errors.Is(err, ErrUserSessionExpired) || !strings.Contains(err.Error(), loginCommand) || got.AccessToken != "" {
+						t.Fatalf("刷新窗口内未提供正确的手动授权入口: token=%q err=%v", got.AccessToken, err)
+					}
+					if scenario.name == "refresh_routed_to_code" && !IsDeviceGrantError(err, "invalid_request") {
+						t.Fatalf("原始刷新错误未保留: %v", err)
 					}
 					wantRefreshCalls := int32(0)
 					if scenario.refreshToken != "" {
