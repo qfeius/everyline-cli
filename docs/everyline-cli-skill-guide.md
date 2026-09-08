@@ -327,7 +327,7 @@ WorkBuddy 在第一次 `auth init` 前固定一个非敏感的 `CODEBUDDY_SESSIO
 
 user Token 过期且未刷新成功后，保持原 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录：Codex 重新执行上面的 `auth login --no-open-browser` 并保持进程等待回调；豆包/WorkBuddy 执行一次 `auth init`，过期 Token 会生成新的完整 Device 链接。若已有待完成事务则复用；只有该事务明确过期、拒绝或失效时才执行一次 `auth init --restart`。用户已要求过期后重新生成链接时直接执行该策略，不重复确认意愿，也不复用历史链接中的授权码。
 
-用户完成手动登录后，Device 流程执行一次 `auth complete`，再用 `auth status` 确认 `authenticated=true`，只恢复原业务步骤一次。尚未过期的 Token 仍可继续使用，不因提前刷新失败要求用户重新登录。
+用户完成手动登录后，Device 流程执行一次 `auth complete`，再用 `auth status` 确认 `authenticated=true`，只恢复原业务步骤一次。进入到期前五分钟窗口后，缺少 refresh token 或刷新失败时，按 CLI 提示手动重新授权。
 
 只有 `status=succeeded` 才继续。dev/test/prod 环境预设提供 `contract-review` metadata、回调地址和 `contract-review:full` scope。Codex 每次显式 `auth login --as user` 会读取 metadata 的 `registration_endpoint`，动态注册浏览器 client 并执行 OAuth Authorization Code + PKCE。豆包/WorkBuddy 的 `auth init` 只走 Device Grant：dev/test 使用独立 Device client `zscli_c77221e810ce3977`，不动态注册也不复用浏览器 client；prod 或自定义环境需显式配置平台确认的 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
 
