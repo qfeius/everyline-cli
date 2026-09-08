@@ -11,13 +11,13 @@
 
 本文描述的是当前 CLI 实际发送的请求。所有路径均为相对路径，运行时会拼接 `--profile` 对应身份的 `base_url`。
 
-推荐公共参数：
+本文示例默认使用 prod 环境的 `prod-app` Profile；其他环境需显式指定自定义 Profile。推荐公共参数：
 
 ```bash
---profile test --as app --output json
+--profile prod-app --as app --output json
 ```
 
-示例中的资源 ID 均为占位值，应替换为测试环境实际返回值：
+示例中的资源 ID 均为占位值，应替换为prod 环境实际返回值：
 
 ```text
 <GROUP_ID>  规则分组 ID
@@ -123,7 +123,7 @@ CLI 调用：
 
 ```bash
 everyline-cli review file upload-url \
-  --profile test --as app \
+  --profile prod-app --as app \
   --file-url 'https://files.example.com/采购合同.pdf' \
   --name '采购合同.pdf' \
   --output json
@@ -200,7 +200,7 @@ CLI 调用：
 
 ```bash
 everyline-cli checklist create \
-  --profile test --as app \
+  --profile prod-app --as app \
   --data '{"name":"采购合同审查清单","contractCategory":["采购合同"],"reviewStage":[1],"enabled":true,"reviewRuleIds":["<RULE_ID>"]}' \
   --output json
 ```
@@ -223,7 +223,7 @@ HTTP 请求体与 `--data` 对象一致。成功结果为服务端 `data` 原样
 
 ```bash
 everyline-cli checklist batch-create \
-  --profile test --as app \
+  --profile prod-app --as app \
   --data '[{"name":"采购合同审查清单","reviewRuleIds":["<RULE_ID>"]},{"name":"销售合同审查清单","reviewRuleIds":["<RULE_ID>"]}]' \
   --output json
 ```
@@ -253,7 +253,7 @@ CLI 调用：
 
 ```bash
 everyline-cli checklist list \
-  --profile test --as app \
+  --profile prod-app --as app \
   --name '采购合同审查清单' \
   --enabled=true \
   --page-index 1 --page-size 20 \
@@ -292,7 +292,7 @@ Query 参数：
 }
 ```
 
-`items/pageIndex/pageSize/total` 仅为示例字段，测试应以 test 环境实际 `data` 为准。
+`items/pageIndex/pageSize/total` 仅为示例字段，测试应以 prod 环境实际 `data` 为准。
 
 ### 5.5 `updateReviewChecklist`
 
@@ -302,7 +302,7 @@ CLI 调用：
 
 ```bash
 everyline-cli checklist update \
-  --profile test --as app \
+  --profile prod-app --as app \
   --id '<CHECK_ID>' \
   --data '{"name":"采购合同审查清单-更新","enabled":false,"reviewRuleIds":["<RULE_ID>"]}' \
   --output json
@@ -338,7 +338,7 @@ everyline-cli checklist update \
 
 ```bash
 everyline-cli checklist batch-update \
-  --profile test --as app \
+  --profile prod-app --as app \
   --data '[{"id":"<CHECK_ID>","name":"采购合同审查清单-批量更新","reviewRuleIds":["<RULE_ID>"]}]' \
   --output json
 ```
@@ -365,7 +365,7 @@ CLI 调用：
 
 ```bash
 everyline-cli checklist delete \
-  --profile test --as app \
+  --profile prod-app --as app \
   --id '<CHECK_ID>' --yes \
   --output json
 ```
@@ -388,7 +388,7 @@ CLI 调用：
 
 ```bash
 everyline-cli checklist batch-delete \
-  --profile test --as app \
+  --profile prod-app --as app \
   --id '<CHECK_ID>' --id '<ANOTHER_CHECK_ID>' \
   --yes --output json
 ```
@@ -443,7 +443,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule group create \
-  --profile test --as app \
+  --profile prod-app --as app \
   --data '{"name":"付款规则分组","sourceType":0}' \
   --output json
 ```
@@ -466,7 +466,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule group list \
-  --profile test --as app \
+  --profile prod-app --as app \
   --page-index 1 --page-size 20 \
   --output json
 ```
@@ -499,7 +499,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule group update \
-  --profile test --as app \
+  --profile prod-app --as app \
   --id '<GROUP_ID>' \
   --data '{"name":"付款规则分组-更新","sourceType":0}' \
   --output json
@@ -532,7 +532,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule group delete \
-  --profile test --as app \
+  --profile prod-app --as app \
   --id '<GROUP_ID>' --yes \
   --output json
 ```
@@ -581,7 +581,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule create \
-  --profile test --as app \
+  --profile prod-app --as app \
   --group-id '<GROUP_ID>' \
   --data '{"name":"付款期限规则","riskLevel":2,"riskTips":"付款期限过长","content":"付款期限不得超过约定上限","sourceType":0}' \
   --output json
@@ -634,7 +634,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule list \
-  --profile test --as app \
+  --profile prod-app --as app \
   --group-id '<GROUP_ID>' \
   --page-index 1 --page-size 20 \
   --output json
@@ -669,7 +669,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule update \
-  --profile test --as app \
+  --profile prod-app --as app \
   --group-id '<GROUP_ID>' --rule-id '<RULE_ID>' \
   --data '{"name":"付款期限规则-更新","riskLevel":2,"riskTips":"付款期限超过约定上限","content":"付款期限不得超过 60 天","sourceType":0}' \
   --output json
@@ -706,7 +706,7 @@ everyline-cli rule update \
 
 ```bash
 everyline-cli rule batch-update \
-  --profile test --as app \
+  --profile prod-app --as app \
   --group-id '<GROUP_ID>' \
   --data '[{"id":"<RULE_ID>","name":"付款期限规则-批量更新","riskLevel":2,"content":"付款期限不得超过 60 天"}]' \
   --output json
@@ -735,7 +735,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule delete \
-  --profile test --as app \
+  --profile prod-app --as app \
   --group-id '<GROUP_ID>' --rule-id '<RULE_ID>' \
   --yes --output json
 ```
@@ -758,7 +758,7 @@ CLI 调用：
 
 ```bash
 everyline-cli rule batch-delete \
-  --profile test --as app \
+  --profile prod-app --as app \
   --group-id '<GROUP_ID>' \
   --id '<RULE_ID>' --id '<ANOTHER_RULE_ID>' \
   --yes --output json

@@ -63,7 +63,7 @@ func TestProfileRejectsUnusableURLs(t *testing.T) {
 	}
 }
 
-// TestProfileUsesConfiguredDeviceClient 验证 Device Grant 优先使用显式值，并为旧 dev/test Profile 恢复平台专用 client。
+// TestProfileUsesConfiguredDeviceClient 验证 Device Grant 优先使用显式值，并为旧 prod Profile 恢复平台专用 client。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；环境预设失效、发生跨授权方式复用或显式值失效时通过 t.Fatal 报告。
 func TestProfileUsesConfiguredDeviceClient(t *testing.T) {
@@ -71,8 +71,17 @@ func TestProfileUsesConfiguredDeviceClient(t *testing.T) {
 		OAuthMetadataURL: "https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
 		OAuthClientID:    "browser-client",
 	}
-	if got := profile.EffectiveOAuthDeviceClientID(); got != "zscli_c77221e810ce3977" {
+	if got := profile.EffectiveOAuthDeviceClientID(); got != "" {
 		t.Fatalf("deviceClientID=%q", got)
+	}
+	// 正式环境旧 Profile 按 metadata 恢复专用 client，并保留浏览器 client。
+	profile.OAuthMetadataURL = "https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review"
+	profile.OAuthScopes = []string{"contract-review:full"}
+	if got := profile.EffectiveOAuthDeviceClientID(); got != "zscli_bc60fee4de9913ae" {
+		t.Fatalf("prod deviceClientID=%q", got)
+	}
+	if !profile.HasDeviceOAuthConfiguration() || profile.OAuthClientID != "browser-client" {
+		t.Fatal("prod 旧 Profile 应支持 Device Grant 且保留浏览器 client")
 	}
 	profile.OAuthDeviceClientID = "explicit-device-client"
 	if got := profile.EffectiveOAuthDeviceClientID(); got != "explicit-device-client" {

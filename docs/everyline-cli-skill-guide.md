@@ -262,7 +262,7 @@ $everyline-cli 使用当前 prod-user Profile 和 user 身份检查 CLI 版本�
 
 所有 Agent 在发起授权前都先让用户选择身份。同次授权已有用户明确的 `user` 或 `app` 选择时直接复用；尚未明确时，WorkBuddy 使用 `AskUserQuestion` 单选并设置 `multiSelect=false`，Codex 在 `request_user_input` 可用时使用互斥单选，豆包在原生单选组件可用时使用该组件。没有原生组件时统一显示 `1. user（个人账号授权）` 和 `2. app（应用授权）`，等待用户回复 `1/2` 或 `user/app`。收到选择前不匹配或创建 Profile，也不执行身份相关的状态查询或授权命令。Profile 名称、默认身份、唯一候选、历史 token 和 CLI `nextAction` 都不作为用户选择的依据；笼统的“开始授权”或“继续授权”也不等于选择了身份。
 
-身份明确后，用户本轮没有指定 Profile 或环境时，Codex、WorkBuddy 和豆包统一默认 test：user 复用或创建 `test-user`，app 复用 `test-app`，缺少时在取得非敏感 app ID 后创建。当前 dev、blue、prod Profile 不会被默认继承；用户本轮显式指定的 Profile 或环境优先。宿主差异只影响 user 的授权协议：Codex 本地使用 OAuth/PKCE，豆包和 WorkBuddy 使用 Device Grant。
+身份明确后，用户本轮没有指定 Profile 或环境时，Codex、WorkBuddy 和豆包统一默认 prod：user 复用或创建 `prod-user`，app 复用 `prod-app`，缺少时在取得非敏感 app ID 后创建。当前 dev、test、blue Profile 不会被默认继承；用户本轮显式指定的 Profile 或环境优先。宿主差异只影响 user 的授权协议：Codex 本地使用 OAuth/PKCE，豆包和 WorkBuddy 使用 Device Grant。
 
 user 流程取得 CLI 返回的完整授权 URL 后，优先生成宿主原生链接按钮，按钮文字固定为“点击授权”；没有链接按钮时显示 `[点击授权](<FULL_AUTHORIZATION_URL>)`。链接目标逐字保留 CLI 返回值及全部 query 参数，由用户主动点击，Agent 不自动打开浏览器，也不为改变展示方式创建第二笔授权事务。app 流程没有此链接，继续使用下方隐藏输入 app secret 的方式。
 
@@ -270,21 +270,21 @@ user 流程取得 CLI 返回的完整授权 URL 后，优先生成宿主原生�
 
 ### user 身份：推荐用于人工交互验证
 
-默认 test Profile 可由 Agent 自动创建；手工等价命令为：
+默认 prod Profile 可由 Agent 自动创建；手工等价命令为：
 
 ```bash
-everyline-cli config add test-user \
-  --env test \
+everyline-cli config add prod-user \
+  --env prod \
   --default-identity user
 
-everyline-cli config use test-user
+everyline-cli config use prod-user
 ```
 
 Codex 本地交互可完成浏览器 OAuth 登录：
 
 ```bash
 everyline-cli auth login \
-  --profile test-user \
+  --profile prod-user \
   --as user \
   --no-open-browser \
   --timeout 3m
@@ -302,7 +302,7 @@ everyline-cli auth login \
 
 ```bash
 everyline-cli auth status \
-  --profile test-user \
+  --profile prod-user \
   --as user \
   --output json
 ```
@@ -312,13 +312,13 @@ everyline-cli auth status \
 豆包（含“本地电脑”模式）和 WorkBuddy 统一使用 Device Grant。豆包在首次 `auth status` 前固定 `SESSION_ID` 和初始工作目录；宿主未提供时只生成一次 UUID，所有命令显式注入相同值，并由执行工具设置相同工作目录。下面的豆包命令应带 `SESSION_ID=<same-session-id>` 前缀；AgentKit 仍使用平台工作区与注入密钥。完成这些准备后执行：
 
 ```bash
-everyline-cli auth init --profile test-user --as user --output json
+everyline-cli auth init --profile prod-user --as user --output json
 ```
 
 把 `verification_uri_complete` 从 `https://` 到最后一个 query 参数逐字保留为链接目标，并展示 `[点击授权](<verification_uri_complete>)`。用户主动点击并完成授权后只检查一次：
 
 ```bash
-everyline-cli auth complete --profile test-user --as user --output json
+everyline-cli auth complete --profile prod-user --as user --output json
 ```
 
 WorkBuddy 在第一次 `auth init` 前固定一个非敏感的 `CODEBUDDY_SESSION_ID`，上面两条命令和随后的 `auth status` 都添加相同的 `CODEBUDDY_SESSION_ID=<same-session-id>` 前缀。若 `auth complete` 提示本地没有待完成事务，先恢复首次命令使用的原值并重试 `auth complete`；此时不要执行 `auth init --restart`。只有 CLI 明确返回 `denied`、`expired` 或 `invalid_grant`，并经用户同意后，才创建新的授权事务。
@@ -329,7 +329,7 @@ user Token 过期且未刷新成功后，保持原 Profile、user 身份和宿�
 
 用户完成手动登录后，Device 流程执行一次 `auth complete`，再用 `auth status` 确认 `authenticated=true`，只恢复原业务步骤一次。尚未过期的 Token 仍可继续使用，不因提前刷新失败要求用户重新登录。
 
-只有 `status=succeeded` 才继续。dev/test/prod 环境预设提供 `contract-review` metadata、回调地址和 `contract-review:full` scope。Codex 每次显式 `auth login --as user` 会读取 metadata 的 `registration_endpoint`，动态注册浏览器 client 并执行 OAuth Authorization Code + PKCE。豆包/WorkBuddy 的 `auth init` 只走 Device Grant：dev/test 使用独立 Device client `zscli_c77221e810ce3977`，不动态注册也不复用浏览器 client；prod 或自定义环境需显式配置平台确认的 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
+只有 `status=succeeded` 才继续。prod 环境预设提供 `contract-review` metadata、回调地址和 `contract-review:full` scope。Codex 每次显式 `auth login --as user` 会读取 metadata 的 `registration_endpoint`，动态注册浏览器 client 并执行 OAuth Authorization Code + PKCE。豆包/WorkBuddy 的 `auth init` 只走 Device Grant：prod 使用独立 Device client `zscli_bc60fee4de9913ae`，不动态注册也不复用浏览器 client；自定义环境需显式配置平台确认的 Device client。metadata 未声明 `device_authorization_endpoint` 时由认证服务补齐对应业务的 Device Grant；远端沙箱不回退到 `auth login`。豆包 AgentKit 还需注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`。
 
 ### app 身份：适合无浏览器设备
 
@@ -341,16 +341,16 @@ macOS 或 Linux：
 export EVERYLINE_APP_ID='<APP_ID>'
 export EVERYLINE_APP_SECRET='<APP_SECRET>'
 
-everyline-cli config add test-app \
-  --env test \
+everyline-cli config add prod-app \
+  --env prod \
   --default-identity app \
   --app-id "$EVERYLINE_APP_ID"
 
-everyline-cli config use test-app
+everyline-cli config use prod-app
 
 printf '%s' "$EVERYLINE_APP_SECRET" | \
   everyline-cli auth login \
-    --profile test-app \
+    --profile prod-app \
     --as app \
     --app-secret-stdin \
     --output json

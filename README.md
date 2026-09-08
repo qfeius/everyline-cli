@@ -2,7 +2,7 @@
 
 EveryLine 命令行工具，支持合同审查工作流、审查清单和审查规则管理。
 
-公开版本只提供 prod 环境预设。其他部署环境应通过自定义 Profile 配置，不在公开文档和安装包中暴露内部环境地址。
+公开版本默认使用 prod，且只提供 prod 环境预设。其他部署环境应通过自定义 Profile 配置，不在公开文档和安装包中暴露内部环境地址。
 
 ## 安装
 
@@ -59,16 +59,16 @@ CLI 会先读取 OAuth metadata 的 `registration_endpoint` 并动态注册浏�
 
 user Token 过期且未刷新成功后，通过新的授权链接手动登录：Codex 重新执行 `auth login --profile <profile> --as user --no-open-browser --timeout 3m`；豆包/WorkBuddy 在原会话中执行 `auth init --profile <profile> --as user --output json`，展示本次返回的完整授权链接，用户完成后执行一次 `auth complete`。以 `auth status` 的 `authenticated=true` 确认恢复，再继续原业务操作。
 
-豆包（含本地电脑）和 WorkBuddy 统一使用 Device Grant；dev/test Profile 已内置独立 Device client。执行下面的命令前先按后文准备并固定对应宿主的会话变量：
+豆包（含本地电脑）和 WorkBuddy 统一使用 Device Grant；prod Profile 已内置各环境对应的独立 Device client。执行下面的命令前先按后文准备并固定对应宿主的会话变量：
 
 ~~~bash
-everyline-cli config add test-user --env test --default-identity user
-everyline-cli auth init --profile test-user --as user --output json
+everyline-cli config add prod-user --env prod --default-identity user
+everyline-cli auth init --profile prod-user --as user --output json
 # 用户打开 verification_uri_complete 并完成授权后：
-everyline-cli auth complete --profile test-user --as user --output json
+everyline-cli auth complete --profile prod-user --as user --output json
 ~~~
 
-`auth init` 不监听 `127.0.0.1`，不动态注册 client，也不复用 Codex 浏览器 client。dev/test 预设使用独立 Device client `zscli_c77221e810ce3977`；prod 或自定义环境使用 Device Grant 时，通过 `--oauth-device-client-id` 配置平台确认的 client。dev/test/prod 均不内置浏览器 client ID；Codex 本地每次显式 user 登录会调用 metadata 声明的 `registration_endpoint`，保存返回值后启动 OAuth Authorization Code + PKCE，且不覆盖 Device client。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
+`auth init` 不监听 `127.0.0.1`，不动态注册 client，也不复用 Codex 浏览器 client。prod 预设使用独立 Device client `zscli_bc60fee4de9913ae`；自定义环境使用 Device Grant 时，通过 `--oauth-device-client-id` 配置平台确认的 client。prod 不内置浏览器 client ID；Codex 本地每次显式 user 登录会调用 metadata 声明的 `registration_endpoint`，保存返回值后启动 OAuth Authorization Code + PKCE，且不覆盖 Device client。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
 
 WorkBuddy 必须在第一次 `auth init` 前固定一个 `CODEBUDDY_SESSION_ID`，并在 `auth init`、用户回复“已授权”后的 `auth complete` 以及后续 `auth status` 中复用同一值。`auth complete` 本地提示没有待完成事务时，先用原值重试 `auth complete`；只有服务端状态明确为 `denied`、`expired` 或 `invalid_grant` 后才开始新的授权事务，避免让用户重复打开授权链接。
 
@@ -85,7 +85,7 @@ everyline-cli auth status \
 
 `auth status` 默认读取当前身份对应的安全缓存。OAuth metadata 声明 refresh grant 时，CLI 会在过期前五分钟尝试刷新；业务请求收到可信 `code=110004` 时只刷新并重放一次。服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token；并发写入的新 token 会保留。
 
-prod 预设已包含正式 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env prod` 创建 user Profile 后，每次显式 Codex user 登录都会通过 metadata 声明的注册端点动态获取浏览器 client ID。prod 当前不内置 Device client，豆包/WorkBuddy 使用 prod 时需显式配置 `--oauth-device-client-id`。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
+prod 预设已包含正式 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env prod` 创建 user Profile 后，每次显式 Codex user 登录都会通过 metadata 声明的注册端点动态获取浏览器 client ID。prod 已内置 Device client `zscli_bc60fee4de9913ae`，豆包/WorkBuddy 可直接使用该预设。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
 
 ## app 应用授权
 

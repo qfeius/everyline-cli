@@ -1,20 +1,20 @@
 # everyline-cli Profile 模式：CLI 接口入参与响应
 
-> 文档性质：目标态接口说明。目标是公开构建只内置 `prod` 环境，其他部署环境通过自定义 Profile 注入连接配置。
+> 文档性质：当前接口说明。公开构建仅内置 `prod`，省略环境和自定义地址时默认使用 `prod`；其他部署环境通过显式自定义 Profile 注入连接配置。
 >
-> 代码基线：`20260817-zss-everyline-cli` 分支，整理日期：2026-08-24。
+> 代码基线：`20260817-zss-everyline-cli` 分支，更新日期：2026-09-07。
 
 ## 1. 目标与边界
 
-目标态采用以下规则：
+当前采用以下规则：
 
-1. `--env` 只接受公开的 `prod` 预设。
+1. `--env` 只接受公开的 `prod` 预设；创建 Profile 时省略 `--env`、`--base-url` 和 `--token-url` 则默认使用 prod。
 2. 其他环境创建 Profile 时不传 `--env`，必须显式提供 `--base-url` 和 `--token-url`。
 3. Profile 负责选择 API 地址、身份和输出格式，不作为业务字段发送给服务端。
 4. 所有业务命令通过公共参数 `--profile <name>` 选择 Profile；未传时使用 `config use` 选中的当前 Profile。
 5. app secret、access token、OAuth code 和 PKCE verifier 不进入 Profile。
 
-当前源码仍内置 `dev/test/blue/prod` 四个预设。本文描述的是删除非 prod 预设后的目标行为；自定义 Profile 的命令入口已经存在。
+Agent 在用户未指定环境或 Profile 时统一选择 prod，个人身份使用 `prod-user`，应用身份使用 `prod-app`；用户明确指定的自定义 Profile 优先。CLI 业务命令仍按显式 `--profile` 或当前 Profile 执行。
 
 ### 1.1 准确性边界
 
@@ -32,12 +32,12 @@ Profile 保存在 `~/.everyline-cli/config.json`。可以通过 `EVERYLINE_CONFI
 | `base_url` | `--base-url` | 自定义 Profile 必填 | app 业务 API 基址；user 未配置独立基址时也复用它 |
 | `user_base_url` | `--user-base-url` | 可选 | user 身份业务 API 基址 |
 | `auth_url` | `--auth-url` | 可选 | OAuth 配置缺失时提供给用户的认证页面 |
-| `token_url` | `--token-url` | 当前实现始终必填 | app tenant token 完整地址 |
+| `token_url` | `--token-url` | prod 预设自动填充；自定义 Profile 必填 | app tenant token 完整地址 |
 | `app_id` | `--app-id` | 默认身份为 app 时必填 | 非敏感 app ID；也可在登录时由 flag/环境变量覆盖 |
 | `oauth_metadata_url` | `--oauth-metadata-url` | user OAuth 登录时必填 | OAuth authorization server metadata URL |
 | `oauth_business_type` | `--oauth-business-type` | user OAuth 登录时必填 | OAuth 业务类型 |
 | `oauth_client_id` | `--oauth-client-id` | 可选；每次显式 Codex user 登录动态注册并替换 | 浏览器 public client ID |
-| `oauth_device_client_id` | `--oauth-device-client-id` | dev/test 由预设提供；其他环境使用 Device Grant 时必填 | Device Grant client ID；`auth init` 不动态注册且不复用浏览器 client |
+| `oauth_device_client_id` | `--oauth-device-client-id` | prod 由预设提供；其他环境使用 Device Grant 时必填 | Device Grant client ID；`auth init` 不动态注册且不复用浏览器 client |
 | `oauth_redirect_url` | `--oauth-redirect-url` | user OAuth 登录时必填 | 本机 loopback callback；当前应使用 HTTP |
 | `oauth_scopes` | `--oauth-scope` | 可选 | OAuth scope；参数可重复或使用逗号分隔 |
 | `oauth_device_authorization_url` | `--oauth-device-authorization-url` | metadata 未发布对应端点时可选 | 平台确认的 Device Authorization endpoint |
@@ -57,7 +57,7 @@ everyline-cli config add prod-user \
   --default-output json
 ```
 
-目标态中 `--env test`、`--env dev`、`--env blue` 等输入应返回参数错误，不在二进制或公开文档内包含对应地址。
+非 prod 的 `--env` 值会返回参数错误；其他部署环境使用下方显式自定义配置。
 
 ### 2.2 自定义 app Profile
 
@@ -99,72 +99,28 @@ everyline-cli config add custom-user \
   --default-output json
 ```
 
-当前实现即使只使用 user 身份，也要求 `--token-url`。若产品目标允许纯 user Profile，应另行决定是否放宽这一约束。
+自定义 user Profile 也需显式提供 `--token-url`；prod 预设自动填充该地址。
 
-### 2.4 当前四套环境配置
+### 2.4 prod 环境配置
 
-以下内容按当前源码 `internal/config/environment.go` 整理。迁移到目标态后，只有 `prod` 保留为 `--env` 预设；`dev`、`test`、`blue` 使用本节参数创建自定义 Profile。
+以下配置来自 `internal/config/environment.go`。其他部署环境的地址和 Device client 由用户显式提供，参见自定义 Profile 示例。
 
-| Profile 字段 | dev | test | blue | prod |
-|---|---|---|---|---|
-| `base_url` | `https://dev-open.qtech.cn` | `https://test-open.qtech.cn` | `https://blue-open.qtech.cn` | `https://open.qfei.cn` |
-| `user_base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` | 未单独配置，复用 `base_url` |
-| `auth_url` | `https://dev-contract-agent.qtech.cn` | `https://test-contract-agent.qtech.cn` | `https://blue-contract-agent.qtech.cn` | `https://contract-agent.qfei.cn` |
-| `token_url` | `https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` |
-| `oauth_metadata_url` | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | 当前未配置 | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
-| `oauth_business_type` | `contract-review` | `contract-review` | 当前未配置 | `contract-review` |
-| `oauth_client_id` | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 | 当前未配置 | 每次显式 Codex user 登录动态注册并替换 |
-| `oauth_device_client_id` | `zscli_c77221e810ce3977` | `zscli_c77221e810ce3977` | 当前未配置 | 当前未配置；Device Grant 需显式提供 |
-| `oauth_redirect_url` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | 当前未配置 | `http://127.0.0.1:8000/login` |
-| `oauth_scopes` | `contract-review:full` | `contract-review:full` | 当前未配置 | `contract-review:full` |
-
-#### dev user Profile
-
-```bash
-everyline-cli config add dev-user \
-  --base-url 'https://dev-open.qtech.cn' \
-  --token-url 'https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal' \
-  --auth-url 'https://dev-contract-agent.qtech.cn' \
-  --oauth-metadata-url 'https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review' \
-  --oauth-business-type 'contract-review' \
-  --oauth-redirect-url 'http://127.0.0.1:8000/login' \
-  --oauth-scope 'contract-review:full' \
-  --default-identity user \
-  --default-output json
-```
-
-#### test user Profile
-
-```bash
-everyline-cli config add test-user \
-  --base-url 'https://test-open.qtech.cn' \
-  --token-url 'https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal' \
-  --auth-url 'https://test-contract-agent.qtech.cn' \
-  --oauth-metadata-url 'https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review' \
-  --oauth-business-type 'contract-review' \
-  --oauth-redirect-url 'http://127.0.0.1:8000/login' \
-  --oauth-scope 'contract-review:full' \
-  --default-identity user \
-  --default-output json
-```
-
-#### blue app Profile
-
-```bash
-everyline-cli config add blue-app \
-  --base-url 'https://blue-open.qtech.cn' \
-  --token-url 'https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal' \
-  --auth-url 'https://blue-contract-agent.qtech.cn' \
-  --app-id '<BLUE_APP_ID>' \
-  --default-identity app \
-  --default-output json
-```
-
-blue 当前没有内置 OAuth metadata、business type、redirect URL 或 scope。配置这些字段前需要由对应环境提供确认值；Codex 浏览器 client ID 在每次显式 user 登录时动态注册。
+| Profile 字段 | prod |
+|---|---|
+| `base_url` | `https://open.qfei.cn` |
+| `user_base_url` | 未单独配置，复用 `base_url` |
+| `auth_url` | `https://contract-agent.qfei.cn` |
+| `token_url` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` |
+| `oauth_metadata_url` | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
+| `oauth_business_type` | `contract-review` |
+| `oauth_client_id` | 每次显式 Codex user 登录动态注册并替换 |
+| `oauth_device_client_id` | `zscli_bc60fee4de9913ae` |
+| `oauth_redirect_url` | `http://127.0.0.1:8000/login` |
+| `oauth_scopes` | `contract-review:full` |
 
 #### prod Profile
 
-prod 可以继续使用预设：
+prod 为默认环境，也可以显式指定预设：
 
 ```bash
 everyline-cli config add prod-app \
@@ -195,7 +151,7 @@ everyline-cli config add prod-app-explicit \
   --default-output json
 ```
 
-prod 已内置 user OAuth metadata、business type、redirect URL 和 scope，但不内置浏览器或 Device client ID。Codex 浏览器 client 在显式登录时动态注册；豆包/WorkBuddy 使用 prod Device Grant 时需显式配置平台确认的 `oauth_device_client_id`。
+prod 已内置 user OAuth metadata、business type、redirect URL、scope 和 Device client `zscli_bc60fee4de9913ae`。Codex 浏览器 client 在显式登录时动态注册；豆包/WorkBuddy 使用独立的预设 Device client。
 
 ## 3. Profile 解析与请求流程
 
@@ -314,7 +270,7 @@ GET 请求在网络错误、HTTP 429 或 5xx 时最多尝试 3 次；写请求�
 
 | CLI 命令 | 入参 | stdout 响应 |
 |---|---|---|
-| `config add <name>` | `--env prod`，或 `--base-url` + `--token-url`；其余见 Profile 字段表 | 完整非敏感 Profile 对象 |
+| `config add <name>` | 省略环境和自定义地址时默认 prod；可显式 `--env prod` 或提供 `--base-url` + `--token-url`；其余见 Profile 字段表 | 完整非敏感 Profile 对象 |
 | `config list` | 无 | Profile 摘要数组：`name/current/base_url/user_base_url/auth_url/token_url/app_id/default_identity/default_output` |
 | `config use <name>` | Profile 名称 | `{"profile":"<name>","current":true}` |
 | `config show [name]` | 位置参数、公共 `--profile` 或当前 Profile | 完整非敏感 Profile 对象 |
@@ -400,7 +356,7 @@ user OAuth 使用 Profile 中的动态端点，不计入固定的 25 个 operati
 
 CLI 缓存 token，但 stdout 仍只输出登录状态对象。metadata 声明 `refresh_token` grant 时，CLI 在 token 到期前五分钟刷新；临时失败时保留尚未真正过期的旧 token。业务请求收到服务端可信 `code=110004` 时强制刷新并只重放一次；服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token。如果缓存已由并发重新登录更新，CLI 会保留新 token。
 
-豆包（含“本地电脑”模式）和 WorkBuddy 使用 `auth init` 和 `auth complete`。dev/test 预设使用独立 Device client `zscli_c77221e810ce3977`；`auth init` 不动态注册，也不复用 Codex 浏览器 client。`auth init` 输出 `status=pending`、完整 `verification_uri_complete` 与 `expires_at`，不输出 device code；同一 Profile 的并发初始化会串行化，同一首次安装 `eventId` 重放 `--restart` 时复用已有事务并额外输出 `reused=true`。`auth complete` 一次检查返回 `succeeded/pending/denied/expired/uncertain/invalid_grant`，成功后把 access/refresh token 写入会话隔离的安全存储。豆包 AgentKit 使用 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` 加密工作区凭证，豆包工作任务按 `SESSION_ID` 派生隔离密钥，WorkBuddy 按固定的 `CODEBUDDY_SESSION_ID` 使用系统凭证库。豆包首次 `auth status` 前固定 `SESSION_ID` 和初始目录，缺失时由 Agent 只生成一次 UUID，所有 user 命令显式复用；WorkBuddy 从 `auth init` 到 `auth complete` 及后续状态检查必须复用同一标识。本地找不到待完成事务时恢复原标识及目录后重试 `auth complete`，避免生成第二条授权链接。Device 会话没有 token 时不回退到本机 OAuth 缓存。加密 Profile 快照支持沙箱重建后通过显式 `--profile` 恢复。
+豆包（含“本地电脑”模式）和 WorkBuddy 使用 `auth init` 和 `auth complete`。prod 预设使用独立 Device client `zscli_bc60fee4de9913ae`；`auth init` 不动态注册，也不复用 Codex 浏览器 client。`auth init` 输出 `status=pending`、完整 `verification_uri_complete` 与 `expires_at`，不输出 device code；同一 Profile 的并发初始化会串行化，同一首次安装 `eventId` 重放 `--restart` 时复用已有事务并额外输出 `reused=true`。`auth complete` 一次检查返回 `succeeded/pending/denied/expired/uncertain/invalid_grant`，成功后把 access/refresh token 写入会话隔离的安全存储。豆包 AgentKit 使用 `EVERYLINE_CLI_CREDENTIAL_KEY_V1` 加密工作区凭证，豆包工作任务按 `SESSION_ID` 派生隔离密钥，WorkBuddy 按固定的 `CODEBUDDY_SESSION_ID` 使用系统凭证库。豆包首次 `auth status` 前固定 `SESSION_ID` 和初始目录，缺失时由 Agent 只生成一次 UUID，所有 user 命令显式复用；WorkBuddy 从 `auth init` 到 `auth complete` 及后续状态检查必须复用同一标识。本地找不到待完成事务时恢复原标识及目录后重试 `auth complete`，避免生成第二条授权链接。Device 会话没有 token 时不回退到本机 OAuth 缓存。加密 Profile 快照支持沙箱重建后通过显式 `--profile` 恢复。
 
 `auth status` 字段：
 
@@ -869,15 +825,16 @@ CLI 内部保留：
 
 ## 11. 从多环境预设迁移到 Profile
 
-| 原调用 | 目标调用 |
+| 使用场景 | 当前调用 |
 |---|---|
-| `config add dev-user --env dev ...` | `config add dev-user --base-url ... --token-url ... --oauth-* ...` |
-| `config add test-app --env test ...` | `config add test-app --base-url ... --token-url ... --app-id ...` |
+| 默认个人账号 | `config add prod-user --default-identity user` |
+| 默认应用账号 | `config add prod-app --app-id <APP_ID> --default-identity app` |
+| 显式自定义环境 | `config add custom-app --base-url <BASE_URL> --token-url <TOKEN_URL> --app-id <APP_ID>` |
 | 业务命令不传 Profile，依赖当前环境 | CI/Agent 推荐始终显式 `--profile <name> --as <identity>` |
 
 迁移不改变业务命令 JSON，也不改变 24 个业务 API 的 method/path。变化只发生在调用前的 Profile 解析、基址选择和凭证来源。
 
-目标态代码与发布检查：
+代码与发布检查要求（发布前逐项验证）：
 
 1. `environmentPresets` 只保留 `prod`。
 2. `--env` 帮助和错误文本只声明 `prod`。

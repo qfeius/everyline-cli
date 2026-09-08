@@ -93,8 +93,8 @@ flowchart TD
 | ID | 状态 | 用户示例或条件 | Skill 处理 | 结束条件 |
 | --- | --- | --- | --- | --- |
 | PROFILE-01 | 已支持 | 用户明确提供 Profile | 先明确 user/app 选择，再使用 `config show <profile> --output json` 校验、读取并固定该 Profile；Profile 名称和默认身份不代替选择 | 后续命令显式传递 Profile |
-| PROFILE-02 | 已支持 | 用户未提供 Profile 和环境 | 先明确 user/app 选择，Codex、WorkBuddy、豆包统一选择 test 环境；复用身份兼容的 test Profile，没有时创建 `test-user` 或取得 app ID 后创建 `test-app` | 固定 test Profile，不继承 dev/blue/prod 当前 Profile |
-| PROFILE-02A | 已支持 | 用户本轮明确指定 Profile 或环境 | 校验并采用用户选择 | 显式选择覆盖默认 test |
+| PROFILE-02 | 已支持 | 用户未提供 Profile 和环境 | 先明确 user/app 选择，Codex、WorkBuddy、豆包统一选择 prod 环境；复用身份兼容的 prod Profile，没有时创建 `prod-user` 或取得 app ID 后创建 `prod-app` | 固定 prod Profile，不继承 dev/test/blue 当前 Profile |
+| PROFILE-02A | 已支持 | 用户本轮明确指定 Profile 或环境 | 校验并采用用户选择 | 显式选择覆盖默认 prod |
 | PROFILE-02B | 已支持 | 默认名称已被其他环境占用 | 不覆盖同名 Profile，展示冲突并请求显式 Profile | 防止静默改写环境配置 |
 | PROFILE-03 | 受限 | 用户显式指定的 Profile 缺失或与显式环境不一致 | 不猜测或覆盖该 Profile | 用户修正后重新调用 |
 | AUTH-01 | 已支持 | `使用 user 身份审查` | 直接选择 user，不再询问身份 | 查询 user 授权状态 |
@@ -106,7 +106,7 @@ flowchart TD
 | AUTH-07 | 受限 | user 取消、失败或授权失效 | 返回 CLI 真实原因 | 停止业务调用 |
 | AUTH-08 | 已支持 | app 需要 secret | 只通过 stdin 或等价安全凭证源提供 | 登录后重新查询状态 |
 | AUTH-09 | 受限 | app 或 user 授权失败 | 不自动切换到另一身份 | 返回真实失败并停止 |
-| AUTH-10 | 受限 | 默认 test Profile 创建失败，或 app 身份缺少 app ID | 返回真实配置错误；app ID 只作为非敏感输入单独取得 | 配置条件补齐后重新调用 |
+| AUTH-10 | 受限 | 默认 prod Profile 创建失败，或 app 身份缺少 app ID | 返回真实配置错误；app ID 只作为非敏感输入单独取得 | 配置条件补齐后重新调用 |
 | AUTH-11 | 已支持 | Profile 与身份已确定 | 每条授权、查询和写入命令都携带相同 `--profile/--as` | 不回退默认上下文 |
 | AUTH-12 | 受限 | app 授权需要重新输入 secret | 只让用户在自己的终端或平台密钥入口通过安全 stdin 输入，不在对话中索取内容 | 用户完成终端操作后回读状态 |
 | AUTH-13 | 受限 | 服务端返回 `http=200 code=10003 msg=invalid param` | 原样报告通用参数错误；CLI 未指出具体字段时不推断 app ID/secret 失效、变更或轮换 | 保持原 Profile 和 app 身份，等待用户重试或主动指定变更 |
@@ -121,13 +121,13 @@ flowchart TD
 | AUTH-22 | 已支持 | WorkBuddy 发起授权且用户未指定身份 | 调用 `AskUserQuestion`，设置 `multiSelect=false`，选项为 user/app | 用户单选后才查询对应身份状态 |
 | AUTH-23 | 已支持 | 豆包发起授权且用户未指定身份 | 优先使用原生单选组件；组件不可用时展示稳定编号 `1. user`、`2. app` | 用户回复有效编号或身份后继续 |
 | AUTH-24 | 已支持 | user 授权入口已生成 | 用户自己点击“点击授权”；Agent 不自动打开浏览器，不在展示切换时重启授权 | 保持唯一授权事务 |
-| AUTH-25 | 已支持 | 仅有一个 `test-user` Profile，默认身份为 user，且存在历史 token | 仍先让用户单选 user/app；不从 Profile 或 token 推断选择 | 用户选择后才匹配 Profile 和查询状态 |
+| AUTH-25 | 已支持 | 仅有一个 `prod-user` Profile，默认身份为 user，且存在历史 token | 仍先让用户单选 user/app；不从 Profile 或 token 推断选择 | 用户选择后才匹配 Profile 和查询状态 |
 | AUTH-26 | 已支持 | 用户只说“开始授权”或“继续授权”，同次授权尚未选择身份 | 将其作为继续授权意图，仍先单选 user/app；已有明确选择时复用 | 身份明确后按对应流程继续 |
 | AUTH-27 | 已支持 | 豆包并发调用 `auth init`，或同一首次安装 `eventId` 重放 `auth init --restart` | CLI 通过 Profile 级锁只创建一笔 Device 事务；重放返回原授权入口及 `reused=true`，Skill 不重复展示 | 用户只打开一个授权页面 |
 | AUTH-28 | 已支持 | 豆包“本地电脑”模式没有宿主会话变量 | 首次 `auth status` 前只生成一次 `SESSION_ID` 并固定初始目录；所有授权和业务命令显式复用，执行 `auth init` / `auth complete` | 与 WorkBuddy 一样展示 `/device` 链接，不进入 loopback OAuth |
 | AUTH-29 | 已支持 | 豆包本地存在同名 Profile 的旧 OAuth token，但当前 Device 会话未授权 | 状态返回 `authenticated=false/source=device`；业务取 token 和刷新引导到 `auth init`，Device 失效操作保留浏览器缓存 | 当前 Device 会话独立完成授权 |
 
-当前 Skill 只自动创建缺失的默认 test Profile；其他环境的 Profile 仍由用户显式管理。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
+当前 Skill 只自动创建缺失的默认 prod Profile；其他环境的 Profile 仍由用户显式管理。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
 
 ## 6. 合同来源交互
 
@@ -289,7 +289,7 @@ flowchart TD
 
 | ID | 状态 | 当前范围 |
 | --- | --- | --- |
-| GAP-01 | 未定义 | 默认 test 以外的自动 Profile 创建、更新或切换 |
+| GAP-01 | 未定义 | 默认 prod 以外的自动 Profile 创建、更新或切换 |
 | GAP-02 | 未定义 | 自动升级现有 CLI |
 | GAP-03 | 未定义 | 创建或更新规则分组 |
 | GAP-04 | 未定义 | 清单、规则或分组的批量删除交互 |
@@ -306,10 +306,10 @@ flowchart TD
 
 以下最小集合可覆盖主要分支：
 
-1. `$everyline-cli 使用 test-user Profile 和 user 身份检查授权状态，先不要上传文件。`
-2. 在消息中附加一份合同并发送：`$everyline-cli 使用 test-user Profile 和 user 身份审查这个附件；强度中立。`
-3. `$everyline-cli 使用 test-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
-4. `$everyline-cli 使用 test-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
+1. `$everyline-cli 使用 prod-user Profile 和 user 身份检查授权状态，先不要上传文件。`
+2. 在消息中附加一份合同并发送：`$everyline-cli 使用 prod-user Profile 和 user 身份审查这个附件；强度中立。`
+3. `$everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
+4. `$everyline-cli 使用 prod-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
 5. `$everyline-cli 列出我可用的自定义审查清单和其中的规则。`
 6. `$everyline-cli 创建一个采购合同审查清单。`
 7. `$everyline-cli 给“采购合同清单”增加“付款条件风险”规则。`

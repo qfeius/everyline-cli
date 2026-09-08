@@ -104,7 +104,7 @@ func TestConfigAddDefaultsToJSONAndPreservesExplicitOutput(t *testing.T) {
 	}
 }
 
-// TestConfigAddEnvironmentPreset 验证 config add 可创建四套预设，Codex 保留动态注册参数，dev/test 同时内置专用 Device client。
+// TestConfigAddEnvironmentPreset 验证 config add 可创建生产预设并保留两类授权参数。
 // 入参：t *testing.T 为测试上下文。
 // 返回值：无；失败通过 t.Fatal 报告。
 func TestConfigAddEnvironmentPreset(t *testing.T) {
@@ -114,9 +114,6 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		baseURL  string
 		tokenURL string
 	}{
-		{name: "dev", baseURL: "https://dev-open.qtech.cn", tokenURL: "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
-		{name: "test", baseURL: "https://test-open.qtech.cn", tokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
-		{name: "blue", baseURL: "https://blue-open.qtech.cn", tokenURL: "https://blue-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
 		{name: "prod", baseURL: "https://open.qfei.cn", tokenURL: "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal"},
 	} {
 		if err := Execute(context.Background(), runtime, []string{
@@ -143,14 +140,33 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 			t.Fatalf("environment=%s 不应内置浏览器 client_id: %#v", test.name, profile)
 		}
 		expectedDeviceClientID := ""
-		if test.name == "dev" || test.name == "test" {
-			expectedDeviceClientID = "zscli_c77221e810ce3977"
+		if test.name == "prod" {
+			expectedDeviceClientID = "zscli_bc60fee4de9913ae"
 		}
 		if profile.OAuthDeviceClientID != expectedDeviceClientID {
 			t.Fatalf("environment=%s deviceClientID=%q", test.name, profile.OAuthDeviceClientID)
 		}
 		if expectedDeviceClientID != "" && !profile.HasDeviceOAuthConfiguration() {
 			t.Fatalf("environment=%s 缺少 Device Grant 预设: %#v", test.name, profile)
+		}
+	}
+}
+
+// TestConfigAddDefaultsToProd 验证省略环境时使用生产地址，并拒绝已移除的环境预设。
+// 入参：t *testing.T 为测试上下文。
+// 返回值：无；默认地址错误或旧预设仍可创建时报告失败。
+func TestConfigAddDefaultsToProd(t *testing.T) {
+	runtime, _, _ := testRuntime(t)
+	if err := Execute(context.Background(), runtime, []string{"config", "add", "prod-user", "--default-identity", "user"}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := runtime.Profiles.Get("prod-user")
+	if err != nil || profile.BaseURL != "https://open.qfei.cn" || profile.OAuthMetadataURL != "https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review" {
+		t.Fatalf("profile=%#v err=%v", profile, err)
+	}
+	for _, env := range []string{"dev", "test", "blue"} {
+		if err := Execute(context.Background(), runtime, []string{"config", "add", env, "--env", env, "--default-identity", "user"}); err == nil {
+			t.Fatalf("已移除的预设 %s 不应创建成功", env)
 		}
 	}
 }
@@ -408,7 +424,7 @@ func TestConfigAddUserProfileDoesNotRequireAppID(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
 	if err := Execute(context.Background(), runtime, []string{
 		"config", "add", "user-dev",
-		"--env", "dev",
+		"--env", "prod",
 		"--default-identity", "user",
 	}); err != nil {
 		t.Fatal(err)
@@ -427,7 +443,7 @@ func TestConfigAddAppProfileStillRequiresAppID(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
 	err := Execute(context.Background(), runtime, []string{
 		"config", "add", "app-dev",
-		"--env", "dev",
+		"--env", "prod",
 		"--default-identity", "app",
 	})
 	if err == nil || !strings.Contains(err.Error(), "app-id 不能为空") {
