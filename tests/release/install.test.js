@@ -110,7 +110,7 @@ test("豆包本地 Skill 随安装同步并可重复更新", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
   const skillRoot = join(fixture.root, "workspace", ".user_skills");
-  const reference = join(fixture.packageRoot, "skills", "everyline-review", "references", "review-flow.md");
+  const reference = join(fixture.packageRoot, "skills", "everyline-review", "references", "review-config.md");
   mkdirSync(join(reference, ".."), { recursive: true });
   writeFileSync(reference, "最新审查流程");
   const oldSkill = join(skillRoot, "everyline-review");
@@ -129,7 +129,7 @@ test("豆包本地 Skill 随安装同步并可重复更新", (t) => {
   assert.equal(result.skills.doubao[0].status, "updated");
   assert.equal(lstatSync(oldSkill).isSymbolicLink(), false);
   assert.equal(readFileSync(join(oldSkill, "SKILL.md"), "utf8"), readFileSync(join(fixture.packageRoot, "skills", "everyline-review", "SKILL.md"), "utf8"));
-  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-flow.md"), "utf8"), "最新审查流程");
+  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-config.md"), "utf8"), "最新审查流程");
   assert.equal(readFileSync(join(unrelated, "SKILL.md"), "utf8"), "用户技能");
   assert.equal(result.skills.doubao[0].backupPath.startsWith(skillRoot + sep), false);
   assert.match(readFileSync(join(result.skills.doubao[0].backupPath, "SKILL.md"), "utf8"), /旧文案/);
@@ -142,7 +142,7 @@ test("豆包本地 Skill 随安装同步并可重复更新", (t) => {
   const revised = installPackage(options);
   assert.equal(revised.updated, false);
   assert.equal(revised.doubaoSkillReloadRequired, true);
-  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-flow.md"), "utf8"), "同版本修订后的流程");
+  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-config.md"), "utf8"), "同版本修订后的流程");
   const events = formatInstallOutput(revised).split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
   assert.equal(events.some((event) => event.event === "skills_updated" && event.nextAction === "reload_skills"), true);
 });
