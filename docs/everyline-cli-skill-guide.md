@@ -641,3 +641,13 @@ Windows PowerShell 使用自定义 prefix 时：
 $EverylineNpmPrefix = Join-Path $HOME ".local"
 npm uninstall -g --prefix $EverylineNpmPrefix @qfeius/everyline-cli
 ```
+
+### 恢复缺失的命令入口
+
+macOS/Linux 全局包仍存在但 `everyline-cli` 命令入口缺失时，使用原安装 prefix 执行：
+
+```bash
+npm rebuild -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli
+```
+
+安装脚本会按包实际所在 prefix 检查并恢复缺失链接；显式设置 `--bin-links=false` 时跳过恢复。已有文件或链接保持原样；Windows 的命令 shim 由 npm rebuild 管理。入口后来再次被删除时，需要重新执行恢复命令，不会在后台自动重建。

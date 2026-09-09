@@ -51,6 +51,11 @@ doubao_skills_dir="$temporary_dir/doubao-workspace/.user_skills"
 global_config_dir="$temporary_dir/global-config"
 EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" EVERYLINE_DOUBAO_SKILLS_DIR="$doubao_skills_dir" npm install --silent --global --allow-scripts=@qfeius/everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
 global_package_root=$(npm root --global --prefix "$global_prefix")
+# 删除隔离安装入口后直接重跑 postinstall，验证包内恢复逻辑而非 npm 自身 bin-link 行为。
+rm "$global_prefix/bin/everyline-cli"
+npm_config_global=true EVERYLINE_SKIP_SKILL_INSTALL=1 node "$global_package_root/@qfeius/everyline-cli/scripts/install.js"
+test -x "$global_prefix/bin/everyline-cli"
+
 for skill_name in everyline-review everyline-review-config; do
   codex_skill_target="$codex_skills_dir/$skill_name"
   workbuddy_skill_target="$workbuddy_skills_dir/$skill_name"

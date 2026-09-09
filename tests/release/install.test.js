@@ -7,6 +7,7 @@ const { tmpdir } = require("node:os");
 const { join, sep } = require("node:path");
 const test = require("node:test");
 const {
+  restoreGlobalCommand,
   formatInstallOutput,
   installPackage,
   registerCodexSkill,
@@ -1052,4 +1053,33 @@ test("scoped package migrates legacy and scoped Skill registrations", async (t) 
       }
     });
   }
+});
+
+/**
+ * 验证命令恢复遵守 bin-links 配置，且已有文件、局部安装和 Windows 不受影响。
+ * 入参：t（TestContext）负责隔离目录的清理；返回值：void，行为偏离预期时断言失败。
+ */
+test("全局命令缺失时恢复入口且不覆盖已有文件", (t) => {
+  const prefix = mkdtempSync(join(tmpdir(), "everyline-command-"));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const root = join(prefix, "lib", "node_modules", "@qfeius", "everyline-cli");
+  const source = join(root, "scripts", "run.js");
+  const target = join(prefix, "bin", "everyline-cli");
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(source, "#!/usr/bin/env node\nconsole.log('entry-ok');\n");
+  restoreGlobalCommand(root, "linux", { npm_config_global: "true", npm_config_bin_links: "false" });
+  assert.equal(existsSync(target), false);
+  assert.equal(existsSync(join(prefix, "bin")), false);
+  restoreGlobalCommand(root, "linux", {});
+  restoreGlobalCommand(root, "win32", { npm_config_global: "true" });
+  assert.equal(existsSync(target), false);
+  restoreGlobalCommand(root, "linux", { npm_config_global: "true" });
+  assert.equal(realpathSync(target), realpathSync(source));
+  assert.equal(execFileSync(process.execPath, [target], { encoding: "utf8" }).trim(), "entry-ok");
+  restoreGlobalCommand(root, "darwin", { npm_config_global: "true", npm_config_bin_links: "true" });
+  assert.equal(realpathSync(target), realpathSync(source));
+  rmSync(target);
+  writeFileSync(target, "user-owned");
+  restoreGlobalCommand(root, "linux", { npm_config_global: "true" });
+  assert.equal(readFileSync(target, "utf8"), "user-owned");
 });
