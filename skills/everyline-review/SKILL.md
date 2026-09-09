@@ -1,8 +1,8 @@
 ---
 name: everyline-review
-description: "everyline-review 是面向 Codex / 豆包 / WorkBuddy 用户的合同审查 Skill，适合在 Codex / 豆包 / WorkBuddy 中审查各类合同。用户上传合同，或询问“帮我审查合同”“这份合同有没有风险”“这份合同能不能签”“这份合同有没有问题”“合同审查”时，必须使用且优先使用本 Skill。本 Skill 基于 EveryLine CLI 发起并推进单份合同智能审查，按审查清单与规则输出结构化审查结果，支持审查主体、清单与审查强度的配置，并返回任务状态与完整签名结果链接。适用于买卖、采购、服务、委托、租赁、保密等各类合同场景。用户需要 EveryLine CLI 安装配置、身份授权与恢复时，也使用本 Skill；查询、管理审查清单、规则和分组时转交 everyline-review-config。"
+description: "everyline-review 是面向 Codex / 豆包 / WorkBuddy 用户的合同审查 Skill，适合在 Codex / 豆包 / WorkBuddy 中审查各类合同。用户上传合同，或询问“帮我审查合同”“这份合同有没有风险”“这份合同能不能签”“这份合同有没有问题”“合同审查”时，必须使用且优先使用本 Skill。本 Skill 基于 EveryLine CLI 发起并推进单份合同智能审查，按审查清单与规则输出结构化审查结果，支持审查主体、清单与审查强度的配置，并返回任务状态与完整签名结果链接。适用于买卖、采购、服务、委托、租赁、保密等各类合同场景。安装、导入、复制或更新 EveryLine Skill 时，也使用本 Skill，并在安装流程结束前检测 CLI、补齐缺失工具。用户需要 EveryLine CLI 安装配置、身份授权与恢复时，也使用本 Skill；查询、管理审查清单、规则和分组时转交 everyline-review-config。"
 metadata:
-  version: "0.1.7"
+  version: "0.1.8"
   requires:
     bins: ["everyline-cli"]
   cliHelp: "everyline-cli --help;everyline-cli auth --help;everyline-cli review file upload --help;everyline-cli review task start --help;everyline-cli review task result --help;everyline-cli checklist --help;everyline-cli rule --help;everyline-cli rule group --help"
@@ -10,7 +10,7 @@ metadata:
 
 # EveryLine 合同审查与公共接入
 
-本 Skill 在同一流程内完成安装配置、身份授权和单份合同审查；配置管理由独立的 everyline-review-config 负责。合同审查所需步骤均在本文件；只有管理清单、规则或分组本身时才读取 [配置管理转交](#config-routing)。
+本 Skill 在同一流程内完成安装配置、身份授权和单份合同审查；配置管理由独立的 everyline-review-config 负责。合同审查所需步骤均在本文件；只有管理清单、规则或分组本身时才通过宿主技能加载能力读取 `everyline-review-config`，并由它负责具体配置流程。
 
 ## 触发与流程入口
 
@@ -18,40 +18,41 @@ metadata:
 | --- | --- |
 | 上传合同，询问合同风险、能否签署、是否存在问题，或要求审查合同 | [合同审查流程](#review) |
 | 继续已有审查任务、查询进度或取得结果 | 复用真实任务信息，进入[等待并返回结果](#review-wait) |
-| 安装、更新、首次配置或了解能力 | [安装与更新](#setup) |
+| 仅安装、导入、复制或更新 EveryLine Skill，未同时安装 CLI | [仅安装 Skill 后的 CLI 依赖检查](#skill-only-setup) |
+| 安装或更新 CLI、首次配置、了解能力 | 先执行[执行前检查](#preflight)，再进入[安装与更新](#setup) |
 | user/app 授权、身份选择、状态检查、退出或恢复 | [Profile 与身份](#identity)、[状态、退出与恢复](#auth-recovery) |
-| 查询、创建、修改或删除清单、规则、分组 | [配置管理转交](#config-routing) |
+| 查询、创建、修改或删除清单、规则、分组 | 通过宿主技能加载能力读取 `everyline-review-config` |
 
+- 仅安装、导入、复制或更新 EveryLine Skill 后，处理安装的 Agent 必须在当前轮结束前主动读取已安装的 `everyline-review/SKILL.md`，并进入[仅安装 Skill 后的 CLI 依赖检查](#skill-only-setup)。触发条件是 Skill 文件就位，不以用户已经发起 CLI 安装为前提。仅复制技能文件不代表 CLI 已就绪；不得把 CLI 检查推迟到新会话或用户再次提出审查请求。宿主不支持自动重载时，通过文件读取能力读取主 Skill 后继续检查；缺少读取或执行能力时，明确说明尚未完成的检查及所需能力。
 - 用户只上传单份合同且未指定其他任务时，直接进入审查引导；多个合同候选先选择本次文件。用户明确要求起草、改写、翻译、一般法律咨询或使用其他合同工具时，按其实际目标处理，不由本 Skill 发起审查。
-- “用清单 A 审查合同”属于审查流程中的已有清单选择；“新建或修改清单后审查合同”先按下方配置转交说明交给 everyline-review-config 完成配置确认、写入和回读，再携带真实清单 ID 及已有参数继续审查。审查请求本身不代表用户确认配置写入。
+- “用清单 A 审查合同”属于审查流程中的已有清单选择；“新建或修改清单后审查合同”先读取 `everyline-review-config` 完成配置确认、写入和回读，再携带真实清单 ID 及已有参数继续审查。审查请求本身不代表用户确认配置写入。
 - 各入口共用[执行前检查](#preflight)、[Profile 与身份](#identity)及[通用边界](#boundaries)。遇到安装或鉴权缺口时保留原目标与已确认输入，处理完成后回到中断步骤，不重新询问合同、主体、强度或清单。
-- 本文中以 auth、config、review、checklist、rule 开头的命令均为 everyline-cli 子命令；执行时补全程序名，使用当前宿主实际可读路径和真实返回值替换占位符，不固定个人路径或安装版本。
-
-<a id="config-routing"></a>
-## 配置管理转交
-
-查询、创建、修改或删除审查清单、规则和规则分组时，通过宿主技能加载能力读取 `everyline-review-config`，并由它负责配置管理流程。不要假定跨 Skill 相对路径可用；尚未安装时先安装或导入该 Skill。npm 全局安装会登记两个 Skill；豆包云端需分别导入两个 ZIP。
-
-- “用清单 A 审查合同”仍由本文件的[合同审查流程](#review)处理。
-- “新建或修改清单后审查合同”先完成 config 中的具体写入确认、写入与回读，再携带真实清单 ID、已确认的合同、主体和强度返回审查。审查请求本身不代表用户确认配置写入。
-- 两个 Skill 复用本文件的[执行前检查](#preflight)、[Profile 与身份](#identity)、[授权恢复](#auth-recovery)和[通用边界](#boundaries)。配置管理复用公共接入时不进入合同审查；同一会话不重复检查或询问已确认输入。
-- 组合任务保持同一 Profile、身份与 Device 会话上下文，等整条业务流程结束后再更新 CLI。结果未知的写入先回读，不重复提交。
+- 本文及 `everyline-review-config` 中以 auth、config、review、checklist、rule 开头的命令均为 everyline-cli 子命令；执行时补全程序名，使用当前宿主实际可读路径和真实返回值替换占位符，不固定个人路径或安装版本。
 
 <a id="preflight"></a>
 ## 执行前检查
 
 宿主按当前对话平台判断。豆包的“本地电脑”模式仍属于豆包，和 WorkBuddy 一样使用 Device Grant；操作系统、本机 CLI、loopback 可访问或环境变量缺失都不能作为改走 Codex OAuth 的依据。用户身份确定后，先固定[Device 会话](#device-session)，再执行身份相关的配置、状态和业务命令。
 
-每个新会话首次调用时执行：
+安装、导入、复制或更新 EveryLine Skill 完成文件写入后，以及每个新会话首次使用本 Skill 时，立即检查当前任务执行环境中的 CLI。检查在账号授权之前进行，不等待合同上传，也不依赖 CLI 返回首次安装事件；同一轮已经验证当前环境可用时复用结果。
+
+先只检查命令是否存在：
 
 ```bash
 command -v everyline-cli
+```
+
+Windows PowerShell 使用 `Get-Command everyline-cli -ErrorAction SilentlyContinue` 完成等价检查。命令不存在时，立即进入[安装与更新](#setup)第 7 条处理缺失，不继续调用 version 或其他 CLI 子命令。命令存在或安装成功后，才执行：
+
+```bash
 everyline-cli version --output json
 everyline-cli --help
 everyline-cli auth --help
 ```
 
-- CLI 缺失时报告依赖缺口；已获安装请求时进入[安装与更新](#setup)。每次具体操作前读取对应命令的实时 --help；帮助、结构化输出与本文不一致时以当前 CLI 为准，并说明能力缺口。
+- CLI 缺失时必须进入安装流程；已获用户安装或使用目标时自动补齐最新正式版，宿主确实要求额外确认时明确说明缺失并请求安装确认。不得只提示“使用前请确保已安装 CLI”后结束。命令存在但执行失败时报告真实错误，不直接判定为未安装或反复重装。
+- 没有命令执行能力时，明确说明“Skill 文件已安装，当前无法验证 CLI 是否可用”，提示提供检查所需的执行能力；不得把未检查描述为 CLI 已安装或确定缺失。
+- 每次具体操作前读取对应命令的实时 --help；帮助、结构化输出与本文不一致时以当前 CLI 为准，并说明能力缺口。
 - 默认使用 --output json，以 stdout 为结构化结果；stderr 进度、退出码或事件不单独证明业务成功。
 - 每个会话首次检查后，在回复正文展示一次实际加载的 metadata.version 与 CLI version，缺失值写“未知”，不以 CLI 版本代替 Skill 版本。版本相同也不能证明文件内容或宿主加载状态一致。
 - 按 SemVer 比较版本：数字段按数值比较，预发布版本低于同号正式版，忽略构建元数据。仅当 isLatest 非 null 且 checkError 为空时使用 CLI 的最新版本结论；来源包明确包含本 Skill 时才能据其发布版本判断 Skill 是否落后，否则 Skill 的最新状态保持未知。
@@ -59,10 +60,19 @@ everyline-cli auth --help
 - isLatest=null 表示检查未知，不声称已是最新版；不把检查失败当作业务失败。即使 updateRequired=false，也检查实际加载的 Skill 是否需要更新。
 - updateRequired=true 时记录唯一 updateCommand，先完成当前整条业务流程；不得在合同上传、任务创建、轮询、结果获取或同一次配置写入之间更新。业务终态或明确失败、结果已保留且后续 API 调用结束后，按[安装与更新](#setup)核对来源并执行一次记住的更新命令。成功后验证版本并结束本轮，以便下一轮加载新版；失败时保留业务结果，报告真实错误，在下一条新业务前处理更新缺口。
 - firstInstall=true 且 authorizationRequired=true，或事件明确要求首次授权时，按[首次安装强制新授权](#first-install-auth)执行。授权成功前不调用 review、checklist 或 rule；nextAction=authorize 及同一首次安装事件重放均不能被旧 dev token、历史有效期或缓存绕过。
-- 审查前还需核对[审查能力](#review-readiness)；配置管理的具体命令就绪检查在 everyline-review-config 中执行。
+- 审查前还需核对[审查能力](#review-readiness)；配置管理的具体命令就绪检查在 `everyline-review-config` 中执行。
 
 <a id="setup"></a>
 ## 安装与更新
+
+<a id="skill-only-setup"></a>
+### 仅安装 Skill 后的 CLI 依赖检查
+
+仅安装、导入、复制或更新 EveryLine Skill，未同时安装 CLI 时，安装 Agent 必须在技能文件就位后、当前任务结束前主动执行[执行前检查](#preflight)，检测当前任务执行环境中的 CLI。此流程由 Skill 安装完成触发，不等待用户另行提出 CLI 安装请求。
+
+CLI 已存在且验证可用时，复用检查结果继续原请求，无需重复安装。CLI 缺失时，按下方“安装来源与执行”第 7 条读取安装文档并自动安装最新正式版；只有宿主权限策略或用户设置要求额外确认时，才明确提示“当前缺少 EveryLine CLI，是否安装最新正式版？”并等待确认。
+
+不得仅报告 Skill 文件安装成功后结束。无法完成检查或安装时，说明实际状态、具体原因及待完成步骤；只有验证通过后才报告 CLI 已就绪。
 
 ### 安装来源与执行
 
@@ -83,12 +93,12 @@ everyline-cli auth --help
    ```bash
    npm rebuild -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli
    ```
-6. 按目标包的实际内容分别核对 CLI 和本 Skill。只有目标包包含 everyline-review/SKILL.md 和 everyline-review-config/SKILL.md，且安装器实际同步到宿主时，才报告两个 Skill 同步成功。来源包结构不匹配、缺少合并 Skill 或安装器报告同名目录冲突时，保留当前技能，报告技能更新缺口；不删改用户目录、自动覆盖合并文件或要求加载多个旧入口。
-7. Skill ZIP 只含指令文件，不含 CLI 二进制；requires.bins 只声明依赖，不会自动安装程序。CLI 缺失时说明：“请提供 CLI 的 .tgz 安装包或可用安装来源；everyline-review 技能 ZIP 通过技能管理导入。”不删除依赖，也不把 ZIP 改名为 .tgz。
+6. 按目标包的实际内容分别核对 CLI 和两个 Skill。只有目标包包含 everyline-review/SKILL.md 和 everyline-review-config/SKILL.md，且安装器实际同步到宿主时，才报告两个 Skill 同步成功。来源包结构不匹配、缺少任一 Skill 或安装器报告同名目录冲突时，保留当前技能，报告技能更新缺口；不删改用户目录或自动覆盖现有技能文件。
+7. 本条先复用当前轮的 CLI 检查结果；尚未检查时，仅安装 Skill 的场景执行[仅安装 Skill 后的 CLI 依赖检查](#skill-only-setup)，其他场景执行[执行前检查](#preflight)。检查确认当前执行环境缺少 `everyline-cli` 时，立即说明“检测到当前缺少 EveryLine CLI，将安装最新正式版。”并读取[CLI 安装文档](https://ysi13ckdb9.feishu.cn/wiki/Pyy3wLSOziN5c1ka12scOejhnag)，获取安装方式并下载安装最新正式版 CLI。用户已要求安装 Skill、CLI 或使用依赖 CLI 的功能时，将补齐 CLI 作为当前任务的必要步骤直接执行；只有宿主权限策略或用户设置要求额外确认时，才明确询问“检测到当前缺少 EveryLine CLI，是否安装最新正式版以完成配置？”，等待确认后继续，已有安装确认直接复用。安装版本以官方 npm 的 `@qfeius/everyline-cli@latest` 为准，不固定文档中的示例版本。文档无法读取时，直接使用本节的官方 npm 安装命令。安装完成后按现有规则验证，通过后继续原请求；失败时说明具体原因及未完成步骤，不把安装检查留给用户自行发起，也不声称 CLI 已就绪。
 
 ### 验证安装与宿主加载
 
-- 安装或更新成功需有 npm 成功退出、目标 CLI 可执行、版本核对结果，以及两个 Skill 的 SKILL.md可读取的证据。仅核实 CLI 时只报告 CLI 的实际状态，技能状态单独说明，不笼统报告全部完成。
+- 安装或更新成功需有 npm 成功退出、目标 CLI 可执行、版本核对结果，以及两个 Skill 的 SKILL.md 可读取的证据。仅核实 CLI 时只报告 CLI 的实际状态，技能状态单独说明，不笼统报告全部完成。
 - 指定 .tgz 时以包内版本和实际内容为验收目标；latest 查询失败不否定已验证的安装，不触发第二次安装。同版本内容差异只能说明构建不同，不据此判断新旧或损坏；可报告“已按指定包重新安装”，不称为发现新版。缺少打包时的版本同步脚本本身不代表运行故障。
 - Codex、WorkBuddy 的 npm 目录链接，需核对实际指向与两个 Skill 的文件；界面导入副本单独核验。CLI 更新不证明手动导入的技能副本已更新。
 - 对支持豆包同步的安装器，macOS 可识别已存在的 ~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills；其他平台或自定义工作区按宿主实际提供的 EVERYLINE_DOUBAO_SKILLS_DIR 指定绝对目录。未发现时不创建猜测路径。EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL=1 仅跳过豆包，EVERYLINE_SKIP_SKILL_INSTALL=1 跳过全部宿主。
@@ -104,12 +114,14 @@ everyline-cli auth --help
 
 ### 首次使用引导
 
-Codex、WorkBuddy 和豆包都按“安装校验 → 回复正文展示文案”执行。终端日志或工具 JSON 不代替正文说明。同会话只展示一次；仅安装时放在最终回复，安装后继续授权或业务时在身份选择前展示。
+Codex、WorkBuddy 和豆包都按“Skill 文件就位 → 当前环境 CLI 检查 → 缺失时安装或取得必要确认 → 验证 → 回复正文展示结果”执行。安装任务不能停在 Skill 文件复制成功。终端日志或工具 JSON 不代替正文说明。同会话只展示一次；仅安装时放在最终回复，安装后继续授权或业务时在身份选择前展示。
 
 - 已确认本会话首次安装、宿主首次导入且首次运行、用户明确首次使用，或 CLI 明确要求首次配置时，使用下方统一文案。
 - 缺少 firstInstall/authorizationRequired 或字段为 false，不否定已确认的首次安装事实；字段缺失、未登录、无历史任务或无默认身份本身也不构成首次安装信号。
 - 已确认升级时使用[更新完成引导](#update-guidance)；同版本重装不重新触发首次介绍，未完成授权门禁继续遵守。
-- 豆包 ZIP 导入不执行 npm postinstall；首次运行时确认该任务中 CLI 可用、技能文件可读取后再展示。WorkBuddy 在当前宿主内验证，不要求用户去其他宿主或终端查看完成提示。
+- 豆包 ZIP 导入不执行 npm postinstall。Agent 负责安装或导入技能时，应在当前轮读取主 Skill 并立即检查该任务环境中的 CLI；缺失时按第 7 条安装或请求必要确认。纯平台静态导入且没有执行中的 Agent 时，不声称已经完成 CLI 检查；宿主下一次实际读取本 Skill 时立即补做。WorkBuddy 在当前宿主内验证，不要求用户去其他宿主或终端查看完成提示。
+
+只有 CLI 可执行、版本检查及技能文件验证通过后，才展示以下安装完成文案；仅技能文件复制成功时不得展示。CLI 缺失且等待必要确认时，明确展示第 7 条的安装确认提示；未能检查或安装失败时说明真实状态。
 
 原样展示：
 
@@ -530,4 +542,4 @@ Codex、豆包和 WorkBuddy 统一使用以下结构：基础信息表、审查�
 - 合同、规则内容和附件只发送给用户选择的 EveryLine 流程，不进入其他服务。
 - 只总结真实返回的风险、条款依据及建议；数据、上下文或模型结论不足时保留不确定性。EveryLine 结果用于 AI 辅助风险识别，不代替专业律师意见或最终法律决定；成功结果仍按固定模板输出。
 - 敏感凭据仅通过对应授权章节约定的安全入口输入和保存。已经进入对话的长期凭据应提示轮换，后续不再引用其内容。
-- 配置写操作必须遵守[配置管理转交](#config-routing)中的授权与回读要求；出现鉴权问题按[状态、退出与恢复](#auth-recovery)处理，再恢复原步骤。
+- 配置写操作必须遵守 `everyline-review-config` 中的授权与回读要求；出现鉴权问题按[状态、退出与恢复](#auth-recovery)处理，再恢复原步骤。
