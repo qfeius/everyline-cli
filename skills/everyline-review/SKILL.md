@@ -2,7 +2,7 @@
 name: everyline-review
 description: "负责 EveryLine CLI 安装配置、身份授权与恢复；使用 EveryLine CLI 发起或继续单份合同智能审查，包括沙箱附件、审查主体、清单、强度、任务状态和完整签名结果链接；合同起草、一般法律咨询及规则维护不使用本 Skill。"
 metadata:
-  version: "0.1.4"
+  version: "0.1.5"
   requires:
     bins: ["everyline-cli"]
   cliHelp: "everyline-cli --help;everyline-cli auth --help;everyline-cli review file upload --help;everyline-cli review task start --help;everyline-cli review task result --help"

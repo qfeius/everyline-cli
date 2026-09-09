@@ -8,7 +8,7 @@ on:
 permissions:
   contents: write
 
-# 同一标签串行处理，避免两个发布任务争抢同一个 npm 版本。
+# 同一标签的 GitHub 制品串行发布；npm 由 npm-publish.yml 的 OIDC 流程独立发布。
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -48,13 +48,6 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nchannel=${channel}\n`);
           NODE
 
-      - name: Check npm publishing credential
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          test -n "$NODE_AUTH_TOKEN" || { echo '请在仓库 Actions Secrets 中配置 NPM_TOKEN'; exit 1; }
-          npm whoami --registry "$NPM_REGISTRY_URL"
-
       - name: Test, build and verify installation
         run: make release-check
 
@@ -77,18 +70,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.package.outputs.version }}
         run: gh release upload "$GITHUB_REF_NAME" "everyline-cli-${RELEASE_VERSION}.tgz" dist/*-skill.zip --clobber
-
-      - name: Publish npm package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          RELEASE_VERSION: ${{ steps.package.outputs.version }}
-          NPM_TAG: ${{ steps.package.outputs.channel }}
-        run: npm publish "everyline-cli-${RELEASE_VERSION}.tgz" --registry "$NPM_REGISTRY_URL" --access public --tag "$NPM_TAG"
-
-      - name: Verify npm channel
-        env:
-          RELEASE_VERSION: ${{ steps.package.outputs.version }}
-          NPM_TAG: ${{ steps.package.outputs.channel }}
-        run: |
-          published_version=$(npm view "@qfeius/everyline-cli@$NPM_TAG" version --registry "$NPM_REGISTRY_URL")
-          test "$published_version" = "$RELEASE_VERSION"

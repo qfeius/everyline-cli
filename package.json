@@ -1,6 +1,6 @@
 {
   "name": "@qfeius/everyline-cli",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "EveryLine CLI 工具的 npm/npx 薄包装",
   "license": "UNLICENSED",
   "repository": {
