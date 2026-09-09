@@ -212,7 +212,7 @@ func TestFirstInstallStatusRejectsExistingToken(t *testing.T) {
 			t.Fatalf("stdout=%s，缺少 %s", stdout.String(), expected)
 		}
 	}
-	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) || !strings.Contains(stderr.String(), `"recommendedSkill":"everyline-cli"`) || !strings.Contains(stderr.String(), `"message":"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。"`) {
+	if !strings.Contains(stderr.String(), `"event":"first_install"`) || !strings.Contains(stderr.String(), `"eventId":"first-install-test"`) || !strings.Contains(stderr.String(), `"recommendedSkill":"everyline-review"`) || !strings.Contains(stderr.String(), `"message":"EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。"`) {
 		t.Fatalf("stderr=%s，缺少首次安装 NDJSON 事件", stderr.String())
 	}
 	stdout.Reset()
@@ -227,9 +227,11 @@ func TestFirstInstallStatusRejectsExistingToken(t *testing.T) {
 	}
 }
 
-// TestFirstInstallBlocksBusinessCommands 验证完成新授权前不会调用任何业务 API。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；业务请求穿透门禁或退出类型错误时通过 t.Fatal 报告。
+/*
+TestFirstInstallBlocksBusinessCommands 验证完成新授权前不会调用任何业务 API。
+入参：t *testing.T 为测试上下文。
+返回值：无；业务请求穿透门禁或退出类型错误时通过 t.Fatal 报告。
+*/
 func TestFirstInstallBlocksBusinessCommands(t *testing.T) {
 	businessCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -252,7 +254,7 @@ func TestFirstInstallBlocksBusinessCommands(t *testing.T) {
 	if businessCalls != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"authorizationRequired":true`) {
 		t.Fatalf("businessCalls=%d stdout=%q stderr=%q", businessCalls, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(err.Error(), "everyline-cli Skill") {
+	if !strings.Contains(err.Error(), "everyline-review Skill") {
 		t.Fatalf("err=%v，首次安装提示未指向合并后的 Skill", err)
 	}
 }

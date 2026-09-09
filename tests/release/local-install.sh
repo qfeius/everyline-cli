@@ -30,8 +30,8 @@ npm install --silent --prefix "$temporary_dir/install" "$temporary_dir/$package_
 output=$(EVERYLINE_CONFIG_DIR="$temporary_dir/local-config" "$temporary_dir/install/node_modules/.bin/everyline-cli" version --output json)
 package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$temporary_dir/install/node_modules/@qfeius/everyline-cli/package.json")
 
-# 外部消费者应能从 npm 包中取得合并后的三项职责分离 Skill。
-test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-cli/SKILL.md"
+# 外部消费者应能从 npm 包中取得合并后的两项职责分离 Skill。
+test ! -e "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-cli"
 test ! -e "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-shared"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/SKILL.md"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/references/review-flow.md"
@@ -51,7 +51,7 @@ doubao_skills_dir="$temporary_dir/doubao-workspace/.user_skills"
 global_config_dir="$temporary_dir/global-config"
 EVERYLINE_CONFIG_DIR="$global_config_dir" EVERYLINE_CODEX_SKILLS_DIR="$codex_skills_dir" EVERYLINE_WORKBUDDY_SKILLS_DIR="$workbuddy_skills_dir" EVERYLINE_DOUBAO_SKILLS_DIR="$doubao_skills_dir" npm install --silent --global --allow-scripts=@qfeius/everyline-cli --prefix "$global_prefix" "$temporary_dir/$package_file"
 global_package_root=$(npm root --global --prefix "$global_prefix")
-for skill_name in everyline-cli everyline-review everyline-review-config; do
+for skill_name in everyline-review everyline-review-config; do
   codex_skill_target="$codex_skills_dir/$skill_name"
   workbuddy_skill_target="$workbuddy_skills_dir/$skill_name"
   test -L "$codex_skill_target"
@@ -73,7 +73,8 @@ NODE
 done
 test -f "$global_config_dir/install-state.json"
 grep -F '"authorizationRequired": true' "$global_config_dir/install-state.json" >/dev/null
-global_output=$(EVERYLINE_CONFIG_DIR="$global_config_dir" "$global_prefix/bin/everyline-cli" version --output json)
+global_output=$(EVERYLINE_CONFIG_DIR="$global_config_dir" "$global_prefix/bin/everyline-cli" version --output json 2> "$temporary_dir/first-install-event.json")
+grep -F '"recommendedSkill":"everyline-review"' "$temporary_dir/first-install-event.json" >/dev/null
 printf '%s' "$global_output" | grep -F '"firstInstall": true' >/dev/null
 printf '%s' "$global_output" | grep -F '"authorizationRequired": true' >/dev/null
 
@@ -84,7 +85,7 @@ const { unlinkSync, symlinkSync, writeFileSync } = require("node:fs");
 const [configDirectory, codexRoot, workBuddyRoot, packageRoot] = process.argv.slice(2);
 unlinkSync(join(configDirectory, "install-state.json"));
 for (const skillRoot of [codexRoot, workBuddyRoot]) {
-  unlinkSync(join(skillRoot, "everyline-cli"));
+  unlinkSync(join(skillRoot, "everyline-review"));
   symlinkSync(join(packageRoot, "skills", "everyline-shared"), join(skillRoot, "everyline-shared"), "dir");
 }
 writeFileSync(join(configDirectory, "config.json"), JSON.stringify({

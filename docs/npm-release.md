@@ -1,6 +1,6 @@
 # EveryLine Cli npm 发布
 
-npm 包名为 `@qfeius/everyline-cli`，终端命令和三项 Skill 名称保持不变。公共源固定为 `https://registry.npmjs.org/`。生成 `.tgz`、推送源码与发布 npm 是三个独立步骤，只有发布成功后才能通过包名安装。
+npm 包名为 `@qfeius/everyline-cli`，终端命令和两项 Skill 名称保持不变。公共源固定为 `https://registry.npmjs.org/`。生成 `.tgz`、推送源码与发布 npm 是三个独立步骤，只有发布成功后才能通过包名安装。
 
 ## 一次性配置
 
@@ -13,7 +13,7 @@ Token 权限说明：[npm CI/CD 文档](https://docs.npmjs.com/using-private-pac
 ## 发布步骤
 
 1. 在准备发布的分支更新 `package.json.version`。正式版如 `0.0.8`，预发布版如 `0.0.8-beta.1`。已发布版本不能覆盖。
-2. 执行 `make release-check`。构建脚本会同步三项 Skill 的版本；提交版本及相关改动。
+2. 执行 `make release-check`。构建脚本会同步两项 Skill 的版本；提交版本及相关改动。
 3. 创建并推送与包版本完全一致的标签，例如：
 
 ```bash
@@ -24,7 +24,7 @@ git push github v0.0.8
 
 上例中的版本须替换为本次版本。`github` 为本仓库指向 GitHub 的远端名称。
 
-标签触发的工作流依次校验版本与 npm 登录、运行测试和安装校验、发布 GitHub 原生二进制制品、上传 npm 安装包和三项 Skill ZIP、发布 npm 包，最后回查 npm 渠道版本。正式版发布到 `latest`；含预发布后缀的版本发布到 `beta`，不覆盖 `latest`。
+标签触发的工作流依次校验版本与 npm 登录、运行测试和安装校验、发布 GitHub 原生二进制制品、上传 npm 安装包和两项 Skill ZIP、发布 npm 包，最后回查 npm 渠道版本。正式版发布到 `latest`；含预发布后缀的版本发布到 `beta`，不覆盖 `latest`。
 
 GitLab 流水线继续负责测试、构建和保存 `.tgz`，不重复发布 npm。
 
@@ -46,7 +46,7 @@ make package
 npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli "./dist/everyline-cli-<版本>.tgz"
 ```
 
-`make package` 每次先将补丁版本递增一位（例如 `0.0.7 → 0.0.8`），再同步三项 Skill、重新构建六个平台的二进制并生成 `.tgz`；不会提交代码、创建 Git 标签或发布到 npm。若当前是预发布版本，按 npm 的 patch 规则转为对应正式版本。文件名中的版本以实际产物为准。日常交付使用 `make package`；`npm pack` 仅用于 CI 已固定版本的发布和内部校验，不自动升版。三个 `*-skill.zip` 是 Skill 导入包，不替代 CLI 安装包。
+`make package` 每次先将补丁版本递增一位（例如 `0.0.7 → 0.0.8`），再同步两项 Skill、重新构建六个平台的二进制并生成 `.tgz`；不会提交代码、创建 Git 标签或发布到 npm。若当前是预发布版本，按 npm 的 patch 规则转为对应正式版本。文件名中的版本以实际产物为准。日常交付使用 `make package`；`npm pack` 仅用于 CI 已固定版本的发布和内部校验，不自动升版。两个 `*-skill.zip` 是 Skill 导入包，不替代 CLI 安装包。
 
 ## 从旧包名迁移
 

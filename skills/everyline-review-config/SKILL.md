@@ -2,16 +2,16 @@
 name: everyline-review-config
 description: "使用 EveryLine CLI 查询或管理审查清单、审查规则和规则分组，包括新增、修改、调整归属和删除；仅在合同审查中选择已有清单时不使用本 Skill。"
 metadata:
-  version: "0.0.12"
+  version: "0.1.3"
   requires:
     bins: ["everyline-cli"]
-    skills: ["everyline-cli"]
+    skills: ["everyline-review"]
   cliHelp: "everyline-cli checklist --help;everyline-cli rule --help;everyline-cli rule group --help"
 ---
 
 # EveryLine 审查配置管理
 
-处理审查清单、审查规则和规则分组的查询与管理。执行具体操作前必须读取 [references/management.md](references/management.md)，并遵守 `everyline-cli` 公共 Skill 的 Profile、身份、授权、结构化输出和故障恢复约定。
+处理审查清单、审查规则和规则分组的查询与管理。执行具体操作前必须读取 [references/management.md](references/management.md)，并遵守 `everyline-review` 的公共接入流程 的 Profile、身份、授权、结构化输出和故障恢复约定。
 
 ## 触发与路由
 
@@ -21,6 +21,10 @@ metadata:
 - “新建或修改清单后审查合同”拆分为两个连续阶段：先按本 Skill 的写入门槛完成单独确认、写入与回读，再把已确认的业务上下文交回 `everyline-review`；发起审查的请求本身不代表用户确认配置写入。
 - 发起、继续或查询合同审查任务不使用本 Skill。
 - 查询不授权写入；浏览过对象不表示同意修改，一次确认不沿用到其他目标或操作。
+
+## 公共接入依赖
+
+通过宿主技能加载能力读取 `everyline-review` 的「公共接入与授权」部分，保持当前配置管理目标。不要假定跨技能相对路径可用；依赖未安装时先安装或导入 `everyline-review`。npm 全局安装会同时登记两个 Skill；豆包云端需分别导入两个 ZIP。只加载公共接入部分，不执行合同审查流程。
 
 ## 运行时就绪门
 
@@ -34,7 +38,7 @@ everyline-cli rule --help
 everyline-cli rule group --help
 ```
 
-先按 `everyline-cli` 公共 Skill 的首次使用引导处理已确认的首次安装、导入上下文和授权门禁，在回复正文展示统一文案，同次对话已展示时复用。再记录 `version` 的 `updateRequired`；完整完成当前查询或单次已确认写入及回读后，再执行延迟更新，不在写入链路中途替换 CLI。
+先按 `everyline-review` 的公共接入流程 的首次使用引导处理已确认的首次安装、导入上下文和授权门禁，在回复正文展示统一文案，同次对话已展示时复用。再记录 `version` 的 `updateRequired`；完整完成当前业务流程后（组合任务还须等待后续审查终态与结果），再执行延迟更新，不在写入链路中途替换 CLI。
 
 每条 user 命令复用公共 Skill 已固定的 Device 会话上下文：豆包普通工作任务（含本地电脑）每次注入同一 `SESSION_ID` 并使用同一初始工作目录，WorkBuddy 每次注入同一 `CODEBUDDY_SESSION_ID`，AgentKit 保留平台工作区与注入密钥。
 
@@ -61,4 +65,4 @@ everyline-cli rule group --help
 - 不在用户确认前写入，不把预检、退出码或中间进度描述为写入成功。
 - 合同、规则内容和附件只发送给用户选择的 EveryLine 流程，不进入其他服务。
 
-首次使用本 Skill 时，将当前实际加载的 `metadata.version` 交给 `everyline-cli` 公共 Skill，统一执行版本检查和面向客户的更新提示；同一会话不重复提示。
+首次使用本 Skill 时，将当前实际加载的 `metadata.version` 交给 `everyline-review` 的公共接入流程，统一执行版本检查和面向客户的更新提示；同一会话不重复提示。
