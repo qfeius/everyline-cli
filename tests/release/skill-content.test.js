@@ -30,7 +30,8 @@ test("two skills preserve review triggers and resolve local references", () => {
   for (const name of ["everyline-review", "everyline-review-config"]) {
     assert.deepEqual(readdirSync(join(root, name)), ["SKILL.md"], "两个 Skill 各自仅保留平级入口文件");
   }
-  assert.ok(review.includes('[配置管理转交](#config-routing)'));
+  // 配置入口由宿主加载独立 Skill，文内锚点继续由下方通用链接检查覆盖。
+  assert.ok(review.includes('通过宿主技能加载能力读取 `everyline-review-config`'));
   for (const name of paths) {
     const path = join(root, name);
     const content = readFileSync(path, "utf8");
