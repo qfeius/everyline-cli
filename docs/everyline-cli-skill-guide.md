@@ -202,7 +202,7 @@ dist/everyline-review-skill.zip
 dist/everyline-review-config-skill.zip
 ```
 
-每个 ZIP 根目录都直接包含自己的 `SKILL.md`；review ZIP 还包含配置路由参考页 `references/review-config.md`，config 的完整操作流程在其 `SKILL.md` 中。构建过程会清理旧的 `dist/everyline-shared-skill.zip` 和 `dist/everyline-cli-skill.zip`，避免重复导入公共授权入口。
+两个 Skill 目录平级，各自仅包含一个 `SKILL.md`；每个 ZIP 根目录也仅包含该文件。review 主文件包含配置转交说明，config 主文件包含完整配置操作流程。构建过程会清理旧的 `dist/everyline-shared-skill.zip` 和 `dist/everyline-cli-skill.zip`，避免重复导入公共授权入口。
 
 在豆包中安装：
 
@@ -652,4 +652,4 @@ npm rebuild -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeiu
 
 安装脚本会按包实际所在 prefix 检查并恢复缺失链接；显式设置 `--bin-links=false` 时跳过恢复。已有文件或链接保持原样；Windows 的命令 shim 由 npm rebuild 管理。入口后来再次被删除时，需要重新执行恢复命令，不会在后台自动重建。
 
-两个 Skill 的主文件以提供的附件为内容基准：review 主文件包含完整公共接入及审查流程，配置操作全文放在 config 主文件；review 的配置参考页仅负责转交 config。配置入口按宿主技能名称加载 review 的公共接入章节，不依赖跨 ZIP 的相对路径。
+两个 Skill 的主文件以提供的附件为内容基准：review 主文件包含完整公共接入及审查流程，配置操作全文放在 config 主文件；review 主文件中的配置转交章节负责衔接 config。配置入口按宿主技能名称加载 review 的公共接入章节，不依赖跨 ZIP 的相对路径。

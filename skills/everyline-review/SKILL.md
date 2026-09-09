@@ -10,7 +10,7 @@ metadata:
 
 # EveryLine 合同审查与公共接入
 
-本 Skill 在同一流程内完成安装配置、身份授权和单份合同审查；配置管理由独立的 everyline-review-config 负责。合同审查所需步骤均在本文件；只有管理清单、规则或分组本身时才读取 [references/review-config.md](references/review-config.md)。
+本 Skill 在同一流程内完成安装配置、身份授权和单份合同审查；配置管理由独立的 everyline-review-config 负责。合同审查所需步骤均在本文件；只有管理清单、规则或分组本身时才读取 [配置管理转交](#config-routing)。
 
 ## 触发与流程入口
 
@@ -20,12 +20,22 @@ metadata:
 | 继续已有审查任务、查询进度或取得结果 | 复用真实任务信息，进入[等待并返回结果](#review-wait) |
 | 安装、更新、首次配置或了解能力 | [安装与更新](#setup) |
 | user/app 授权、身份选择、状态检查、退出或恢复 | [Profile 与身份](#identity)、[状态、退出与恢复](#auth-recovery) |
-| 查询、创建、修改或删除清单、规则、分组 | [配置管理](references/review-config.md) |
+| 查询、创建、修改或删除清单、规则、分组 | [配置管理转交](#config-routing) |
 
 - 用户只上传单份合同且未指定其他任务时，直接进入审查引导；多个合同候选先选择本次文件。用户明确要求起草、改写、翻译、一般法律咨询或使用其他合同工具时，按其实际目标处理，不由本 Skill 发起审查。
-- “用清单 A 审查合同”属于审查流程中的已有清单选择；“新建或修改清单后审查合同”先按配置参考文件转交 everyline-review-config 完成配置确认、写入和回读，再携带真实清单 ID 及已有参数继续审查。审查请求本身不代表用户确认配置写入。
+- “用清单 A 审查合同”属于审查流程中的已有清单选择；“新建或修改清单后审查合同”先按下方配置转交说明交给 everyline-review-config 完成配置确认、写入和回读，再携带真实清单 ID 及已有参数继续审查。审查请求本身不代表用户确认配置写入。
 - 各入口共用[执行前检查](#preflight)、[Profile 与身份](#identity)及[通用边界](#boundaries)。遇到安装或鉴权缺口时保留原目标与已确认输入，处理完成后回到中断步骤，不重新询问合同、主体、强度或清单。
-- 本文及参考文件中以 auth、config、review、checklist、rule 开头的命令均为 everyline-cli 子命令；执行时补全程序名，使用当前宿主实际可读路径和真实返回值替换占位符，不固定个人路径或安装版本。
+- 本文中以 auth、config、review、checklist、rule 开头的命令均为 everyline-cli 子命令；执行时补全程序名，使用当前宿主实际可读路径和真实返回值替换占位符，不固定个人路径或安装版本。
+
+<a id="config-routing"></a>
+## 配置管理转交
+
+查询、创建、修改或删除审查清单、规则和规则分组时，通过宿主技能加载能力读取 `everyline-review-config`，并由它负责配置管理流程。不要假定跨 Skill 相对路径可用；尚未安装时先安装或导入该 Skill。npm 全局安装会登记两个 Skill；豆包云端需分别导入两个 ZIP。
+
+- “用清单 A 审查合同”仍由本文件的[合同审查流程](#review)处理。
+- “新建或修改清单后审查合同”先完成 config 中的具体写入确认、写入与回读，再携带真实清单 ID、已确认的合同、主体和强度返回审查。审查请求本身不代表用户确认配置写入。
+- 两个 Skill 复用本文件的[执行前检查](#preflight)、[Profile 与身份](#identity)、[授权恢复](#auth-recovery)和[通用边界](#boundaries)。配置管理复用公共接入时不进入合同审查；同一会话不重复检查或询问已确认输入。
+- 组合任务保持同一 Profile、身份与 Device 会话上下文，等整条业务流程结束后再更新 CLI。结果未知的写入先回读，不重复提交。
 
 <a id="preflight"></a>
 ## 执行前检查
@@ -49,7 +59,7 @@ everyline-cli auth --help
 - isLatest=null 表示检查未知，不声称已是最新版；不把检查失败当作业务失败。即使 updateRequired=false，也检查实际加载的 Skill 是否需要更新。
 - updateRequired=true 时记录唯一 updateCommand，先完成当前整条业务流程；不得在合同上传、任务创建、轮询、结果获取或同一次配置写入之间更新。业务终态或明确失败、结果已保留且后续 API 调用结束后，按[安装与更新](#setup)核对来源并执行一次记住的更新命令。成功后验证版本并结束本轮，以便下一轮加载新版；失败时保留业务结果，报告真实错误，在下一条新业务前处理更新缺口。
 - firstInstall=true 且 authorizationRequired=true，或事件明确要求首次授权时，按[首次安装强制新授权](#first-install-auth)执行。授权成功前不调用 review、checklist 或 rule；nextAction=authorize 及同一首次安装事件重放均不能被旧 dev token、历史有效期或缓存绕过。
-- 审查前还需核对[审查能力](#review-readiness)；配置管理的具体命令就绪检查在参考文件中执行。
+- 审查前还需核对[审查能力](#review-readiness)；配置管理的具体命令就绪检查在 everyline-review-config 中执行。
 
 <a id="setup"></a>
 ## 安装与更新
@@ -73,16 +83,16 @@ everyline-cli auth --help
    ```bash
    npm rebuild -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli
    ```
-6. 按目标包的实际内容分别核对 CLI 和本 Skill。只有目标包包含 everyline-review/SKILL.md、everyline-review/references/review-config.md 和 everyline-review-config/SKILL.md，且安装器实际同步到宿主时，才报告两个 Skill 同步成功。来源包结构不匹配、缺少合并 Skill 或安装器报告同名目录冲突时，保留当前技能，报告技能更新缺口；不删改用户目录、自动覆盖合并文件或要求加载多个旧入口。
-7. Skill ZIP 只含指令与参考文件，不含 CLI 二进制；requires.bins 只声明依赖，不会自动安装程序。CLI 缺失时说明：“请提供 CLI 的 .tgz 安装包或可用安装来源；everyline-review 技能 ZIP 通过技能管理导入。”不删除依赖，也不把 ZIP 改名为 .tgz。
+6. 按目标包的实际内容分别核对 CLI 和本 Skill。只有目标包包含 everyline-review/SKILL.md 和 everyline-review-config/SKILL.md，且安装器实际同步到宿主时，才报告两个 Skill 同步成功。来源包结构不匹配、缺少合并 Skill 或安装器报告同名目录冲突时，保留当前技能，报告技能更新缺口；不删改用户目录、自动覆盖合并文件或要求加载多个旧入口。
+7. Skill ZIP 只含指令文件，不含 CLI 二进制；requires.bins 只声明依赖，不会自动安装程序。CLI 缺失时说明：“请提供 CLI 的 .tgz 安装包或可用安装来源；everyline-review 技能 ZIP 通过技能管理导入。”不删除依赖，也不把 ZIP 改名为 .tgz。
 
 ### 验证安装与宿主加载
 
-- 安装或更新成功需有 npm 成功退出、目标 CLI 可执行、版本核对结果，以及两个 Skill 的 SKILL.md 和 review 配置路由参考文件可读取的证据。仅核实 CLI 时只报告 CLI 的实际状态，技能状态单独说明，不笼统报告全部完成。
+- 安装或更新成功需有 npm 成功退出、目标 CLI 可执行、版本核对结果，以及两个 Skill 的 SKILL.md可读取的证据。仅核实 CLI 时只报告 CLI 的实际状态，技能状态单独说明，不笼统报告全部完成。
 - 指定 .tgz 时以包内版本和实际内容为验收目标；latest 查询失败不否定已验证的安装，不触发第二次安装。同版本内容差异只能说明构建不同，不据此判断新旧或损坏；可报告“已按指定包重新安装”，不称为发现新版。缺少打包时的版本同步脚本本身不代表运行故障。
 - Codex、WorkBuddy 的 npm 目录链接，需核对实际指向与两个 Skill 的文件；界面导入副本单独核验。CLI 更新不证明手动导入的技能副本已更新。
 - 对支持豆包同步的安装器，macOS 可识别已存在的 ~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills；其他平台或自定义工作区按宿主实际提供的 EVERYLINE_DOUBAO_SKILLS_DIR 指定绝对目录。未发现时不创建猜测路径。EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL=1 仅跳过豆包，EVERYLINE_SKIP_SKILL_INSTALL=1 跳过全部宿主。
-- 同版本也核对内容；需保留的旧副本应放在技能扫描目录外。安装器返回 event=skills_updated、host=doubao、nextAction=reload_skills 时，核对事件目标并重新读取本 Skill 的 SKILL.md 及参考文件。实际文件同步不证明当前会话已加载；没有即时加载入口时提示新建任务。
+- 同版本也核对内容；需保留的旧副本应放在技能扫描目录外。安装器返回 event=skills_updated、host=doubao、nextAction=reload_skills 时，核对事件目标并重新读取两个 Skill 的 SKILL.md。实际文件同步不证明当前会话已加载；没有即时加载入口时提示新建任务。
 - 豆包云端 ZIP 副本通过技能管理重新导入两个独立 Skill ZIP（每个 ZIP 包含对应技能的完整目录）。CLI .tgz 和含额外发布材料的外层包不作为技能导入包；尚待导入或重载的步骤明确列为未完成。
 - npm 包装版通过 version --output json 查询官方 npm latest，无需额外 manifest；独立二进制安装使用 HTTPS manifest。只采用真实返回的更新信息。
 
@@ -520,4 +530,4 @@ Codex、豆包和 WorkBuddy 统一使用以下结构：基础信息表、审查�
 - 合同、规则内容和附件只发送给用户选择的 EveryLine 流程，不进入其他服务。
 - 只总结真实返回的风险、条款依据及建议；数据、上下文或模型结论不足时保留不确定性。EveryLine 结果用于 AI 辅助风险识别，不代替专业律师意见或最终法律决定；成功结果仍按固定模板输出。
 - 敏感凭据仅通过对应授权章节约定的安全入口输入和保存。已经进入对话的长期凭据应提示轮换，后续不再引用其内容。
-- 配置写操作必须遵守[配置管理](references/review-config.md)中的授权与回读要求；出现鉴权问题按[状态、退出与恢复](#auth-recovery)处理，再恢复原步骤。
+- 配置写操作必须遵守[配置管理转交](#config-routing)中的授权与回读要求；出现鉴权问题按[状态、退出与恢复](#auth-recovery)处理，再恢复原步骤。

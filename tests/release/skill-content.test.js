@@ -26,7 +26,11 @@ test("two skills preserve review triggers and resolve local references", () => {
     assert.ok(!content.includes("everyline-shared"));
     assert.ok(!content.includes("EVERYLINE_SKIP_SKILL_INSTALL=1 npm"), "默认安装示例应登记 Skill");
   }
-  const paths = ["everyline-review/SKILL.md", "everyline-review/references/review-config.md", "everyline-review-config/SKILL.md"];
+  const paths = ["everyline-review/SKILL.md", "everyline-review-config/SKILL.md"];
+  for (const name of ["everyline-review", "everyline-review-config"]) {
+    assert.deepEqual(readdirSync(join(root, name)), ["SKILL.md"], "两个 Skill 各自仅保留平级入口文件");
+  }
+  assert.ok(review.includes('[配置管理转交](#config-routing)'));
   for (const name of paths) {
     const path = join(root, name);
     const content = readFileSync(path, "utf8");

@@ -42,6 +42,8 @@ unzip -p "$output_dir/everyline-review-config-skill.zip" SKILL.md | grep -F '规
 
 test ! -e "$output_dir/everyline-cli-skill.zip"
 
-# 两份原文及路由页都要进入制品，避免再发布旧描述或缺失跨技能入口。
-unzip -p "$output_dir/everyline-review-skill.zip" references/review-config.md | cmp - skills/everyline-review/references/review-config.md
+# 两个平级 Skill 的原文都要进入制品，避免发布旧描述或遗留嵌套文件。
 unzip -p "$output_dir/everyline-review-config-skill.zip" SKILL.md | cmp - skills/everyline-review-config/SKILL.md
+for skill_name in everyline-review everyline-review-config; do
+  test "$(unzip -Z1 "$output_dir/$skill_name-skill.zip")" = "SKILL.md"
+done

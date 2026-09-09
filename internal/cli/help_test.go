@@ -293,7 +293,7 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"[查看详情](<REVIEW_DETAIL_URL>)",
 		"不得单独展示 `taskId`",
 		"不追加“已完成”",
-		"references/review-config.md",
+		"[配置管理转交](#config-routing)",
 		"审查请求本身不代表用户确认配置写入",
 		"不重新询问合同、主体、强度或清单",
 	} {

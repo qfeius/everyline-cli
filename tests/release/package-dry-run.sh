@@ -51,7 +51,6 @@ function requiredPackageFiles() {
     "scripts/run.js",
     "scripts/verify-package-version.js",
     "skills/everyline-review/SKILL.md",
-    "skills/everyline-review/references/review-config.md",
     "skills/everyline-review-config/SKILL.md",
     ...binaries,
   ];
@@ -68,6 +67,7 @@ if (missing.length > 0) {
   throw new Error(`npm pack 缺少文件: ${missing.join(", ")}`);
 }
 for (const obsolete of [
+  "skills/everyline-review/references/review-config.md",
   "skills/everyline-review/references/review-flow.md",
   "skills/everyline-review-config/references/management.md",
   "skills/everyline-cli/SKILL.md",

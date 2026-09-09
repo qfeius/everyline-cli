@@ -34,7 +34,6 @@ package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version
 test ! -e "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-cli"
 test ! -e "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-shared"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/SKILL.md"
-test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/references/review-config.md"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review-config/SKILL.md"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/docs/everyline-cli-skill-guide.md"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/docs/everyline-cli-skill-interaction-scenarios.md"
