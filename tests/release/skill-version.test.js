@@ -10,7 +10,7 @@ const { syncSkillVersions } = require("../../scripts/sync-skill-versions");
 test("skill versions follow package releases without changing body", () => {
   const root = mkdtempSync(join(tmpdir(), "everyline-skill-version-"));
   try {
-    const names = ["everyline-cli", "everyline-review", "everyline-review-config"];
+    const names = ["everyline-review", "everyline-review-config"];
     for (const name of names) {
       mkdirSync(join(root, "skills", name), { recursive: true });
       writeFileSync(join(root, "skills", name, "SKILL.md"), '---\nname: '+name+'\nmetadata:\n  requires:\n    bins: ["everyline-cli"]\n---\nBody\n');

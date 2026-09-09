@@ -18,8 +18,8 @@ const { basename, dirname, join, resolve } = require("node:path");
 const { resolvePlatformTarget } = require("./platform");
 const { buildDoubaoSkillPlans, inspectDoubaoSkillRegistration, installDoubaoSkill, finishDoubaoSkill } = require("./doubao-skills");
 
-// skillNames 是同一份 npm 包向 Codex、WorkBuddy 和豆包发布的三项职责分离 Skill。
-const skillNames = ["everyline-cli", "everyline-review", "everyline-review-config"];
+// skillNames 是同一份 npm 包向 Codex、WorkBuddy 和豆包发布的两项职责分离 Skill。
+const skillNames = ["everyline-review", "everyline-review-config"];
 const deprecatedSkillNames = ["everyline-shared"];
 const installStateSchema = "everyline.install-state.v1";
 // 安装提示与 Agent 事件共用文案；先说明可协助授权，用户要求登录后再选择 user/app。
@@ -211,7 +211,7 @@ function registerAgentSkill(source, target, platform = process.platform, hostNam
 }
 
 /**
- * buildSkillSetPlans 构造一个宿主下三项职责分离 Skill 的无副作用登记计划。
+ * buildSkillSetPlans 构造一个宿主下两项职责分离 Skill 的无副作用登记计划。
  * 入参：packageRoot（string）为 npm 包根目录；skillRoot（string）为宿主 Skill 根目录；hostName（string）为宿主名；hostKey（string）为返回结果分组键。
  * 返回值：Array<object>，每项包含来源、目标、Skill 名称和宿主分组。
  */
@@ -235,7 +235,7 @@ function registerCodexSkill(source, target, platform = process.platform) {
 }
 
 /**
- * registerSkillSet 将职责分离的三项 EveryLine Skill 登记到一个宿主根目录。
+ * registerSkillSet 将职责分离的两项 EveryLine Skill 登记到一个宿主根目录。
  * 入参：packageRoot（string）为 npm 包根目录；skillRoot（string）为宿主 Skill 根目录；platform（string）为 Node 平台名；hostName（string）为宿主名。
  * 返回值：Array<object>，每项包含 name、target 和 created/existing/updated 状态。
  */
@@ -453,7 +453,7 @@ function formatInstallOutput(result) {
     }
   }
   if (result.doubaoSkillReloadRequired) {
-    lines.push("豆包本地 Skill 已同步；请重新读取三项 SKILL.md，或新建任务加载新版。历史对话不会自动重载。");
+    lines.push("豆包本地 Skill 已同步；请重新读取两项 SKILL.md，或新建任务加载新版。历史对话不会自动重载。");
     lines.push(JSON.stringify({
       schema: "everyline.skill-event.v1", event: "skills_updated", host: "doubao",
       reloadRequired: true, nextAction: "reload_skills", skills: result.skills.doubao,
@@ -465,7 +465,7 @@ function formatInstallOutput(result) {
       event: "updated",
       authCheckRequired: true,
       nextAction: "auth_status",
-      recommendedSkill: "everyline-cli",
+      recommendedSkill: "everyline-review",
       message: updateMessage,
       authorizationRequiredMessage,
       authorizedMessage,
@@ -476,7 +476,7 @@ function formatInstallOutput(result) {
       event: "first_install",
       authorizationRequired: true,
       nextAction: "authorize",
-      recommendedSkill: "everyline-cli",
+      recommendedSkill: "everyline-review",
       message: firstInstallMessage,
     }));
   }

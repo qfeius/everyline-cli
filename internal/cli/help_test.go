@@ -44,7 +44,7 @@ TestEverylineSkillReadinessMatchesLiveHelp 验证交互 Skill 的授权引导、
 返回值：无；Skill 缺少指定的安装与授权提示、真实帮助命令或 dry-run 门时通过测试失败报告差异。
 */
 func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
-	skillContent, err := os.ReadFile("../../skills/everyline-cli/SKILL.md")
+	skillContent, err := os.ReadFile("../../skills/everyline-review/SKILL.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,12 +181,14 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 	}
 }
 
-// TestSplitEverylineSkillsMatchCurrentCLI 验证三项职责分离 Skill 覆盖三宿主授权、沙箱附件和签名结果链接。
-// 入参：t *testing.T 为 Go 测试上下文。
-// 返回值：无；任一 Skill 缺少当前 CLI 的关键命令、字段映射或宿主约束时通过测试失败报告差异。
+/*
+TestSplitEverylineSkillsMatchCurrentCLI 验证两项职责分离 Skill 覆盖三宿主授权、沙箱附件和签名结果链接。
+入参：t *testing.T 为 Go 测试上下文。
+返回值：无；任一 Skill 缺少当前 CLI 的关键命令、字段映射或宿主约束时通过测试失败报告差异。
+*/
 func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 	paths := map[string]string{
-		"cli":        "../../skills/everyline-cli/SKILL.md",
+		"cli":        "../../skills/everyline-review/SKILL.md",
 		"review":     "../../skills/everyline-review/SKILL.md",
 		"reviewFlow": "../../skills/everyline-review/references/review-flow.md",
 		"config":     "../../skills/everyline-review-config/SKILL.md",
@@ -254,7 +256,7 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"不为展示选项卡切换协作模式",
 	} {
 		if !strings.Contains(contents["cli"], expected) {
-			t.Fatalf("everyline-cli 公共 Skill 缺少 %q", expected)
+			t.Fatalf("everyline-review 公共接入 缺少 %q", expected)
 		}
 	}
 	// 授权失败回复不得索取 secret，也不得把通用参数错误包装成凭据轮换结论。
@@ -264,17 +266,17 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"凭据已变更或被轮换",
 	} {
 		if strings.Contains(contents["cli"], unexpected) {
-			t.Fatalf("everyline-cli 公共 Skill 仍包含不安全或无依据的 app 授权提示 %q", unexpected)
+			t.Fatalf("everyline-review 公共接入 仍包含不安全或无依据的 app 授权提示 %q", unexpected)
 		}
 	}
-	// 合并后只保留 everyline-cli、everyline-review、everyline-review-config 三项源码入口。
-	if _, err := os.Stat("../../skills/everyline-shared"); !os.IsNotExist(err) {
-		t.Fatalf("everyline-shared 旧 Skill 目录仍存在: %v", err)
-	}
-	for _, skillName := range []string{"review", "config"} {
-		if !strings.Contains(contents[skillName], `skills: ["everyline-cli"]`) {
-			t.Fatalf("%s Skill 未依赖合并后的 everyline-cli", skillName)
+	// 两个独立入口仅由配置技能依赖审查技能的公共接入部分。
+	for _, obsolete := range []string{"everyline-cli", "everyline-shared"} {
+		if _, err := os.Stat("../../skills/" + obsolete); !os.IsNotExist(err) {
+			t.Fatalf("旧 Skill 目录仍存在: %s: %v", obsolete, err)
 		}
+	}
+	if !strings.Contains(contents["config"], `skills: ["everyline-review"]`) || strings.Contains(contents["review"], "    skills:") {
+		t.Fatal("两个 Skill 的依赖方向错误")
 	}
 
 	// 审查 Skill 的输出协议必须把签名 URL 当作原子值，文件准备则覆盖路径、stdin 与 URL 三种来源。

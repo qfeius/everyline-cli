@@ -102,9 +102,11 @@ func NewRootCommand(runtime *Runtime) *cobra.Command {
 	return command
 }
 
-// enforceFirstInstallAuthorization 输出可重放的首次安装事件，并在新授权前阻止业务请求。
-// 入参：runtime *Runtime 为安装状态和 stderr；command *cobra.Command 为即将执行的叶子命令。
-// 返回值：error，状态损坏或首次安装仍尝试业务命令时非 nil。
+/*
+enforceFirstInstallAuthorization 输出可重放的首次安装事件，并在新授权前阻止业务请求。
+入参：runtime *Runtime 为安装状态和 stderr；command *cobra.Command 为即将执行的叶子命令。
+返回值：error，状态损坏或首次安装仍尝试业务命令时非 nil。
+*/
 func enforceFirstInstallAuthorization(runtime *Runtime, command *cobra.Command) error {
 	state, required, err := pendingFirstInstallAuthorization(runtime)
 	if err != nil {
@@ -117,7 +119,7 @@ func enforceFirstInstallAuthorization(runtime *Runtime, command *cobra.Command) 
 		return err
 	}
 	if isBusinessCommand(command) {
-		return fmt.Errorf("%w；首次安装需要完成一次新的授权，请先使用 everyline-cli Skill 执行授权流程", auth.ErrUserAuthentication)
+		return fmt.Errorf("%w；首次安装需要完成一次新的授权，请先使用 everyline-review Skill 执行授权流程", auth.ErrUserAuthentication)
 	}
 	return nil
 }
