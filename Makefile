@@ -32,7 +32,7 @@ release-assets: skill-assets
 package:
 	npm version patch --no-git-tag-version
 	$(MAKE) release-assets VERSION="$$(node -p 'require("./package.json").version')" PACKAGE_VERSION="$$(node -p 'require("./package.json").version')"
-	npm pack --pack-destination dist
+	node scripts/pack-release.js dist
 
 package-check: skill-assets
 	sh tests/release/verify-assets.sh

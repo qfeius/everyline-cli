@@ -52,13 +52,13 @@ npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeiu
 ### 从待发布的 tgz 安装
 
 ```bash
-npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli /absolute/path/qfeius-everyline-cli-RELEASE_VERSION.tgz
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli /absolute/path/everyline-cli-RELEASE_VERSION.tgz
 ```
 
 Windows PowerShell 同样可以使用：
 
 ```powershell
-npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli C:\absolute\path\qfeius-everyline-cli-RELEASE_VERSION.tgz
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli C:\absolute\path\everyline-cli-RELEASE_VERSION.tgz
 ```
 
 检查安装结果：
@@ -325,7 +325,7 @@ WorkBuddy 在第一次 `auth init` 前固定一个非敏感的 `CODEBUDDY_SESSIO
 
 豆包的恢复流程相同：先恢复原 `SESSION_ID` 和初始工作目录，再检查已有事务。豆包本地电脑也不执行 `auth login --as user`，Device 状态查询、业务取 token 和刷新均只使用当前 Device 会话，不回退到本机旧 OAuth 缓存。
 
-user Token 过期且未刷新成功后，保持原 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录：Codex 重新执行上面的 `auth login --no-open-browser` 并保持进程等待回调；豆包/WorkBuddy 执行一次 `auth init`，过期 Token 会生成新的完整 Device 链接。若已有待完成事务则复用；只有该事务明确过期、拒绝或失效时才执行一次 `auth init --restart`。用户已要求过期后重新生成链接时直接执行该策略，不重复确认意愿，也不复用历史链接中的授权码。
+user Token 过期且未刷新成功后，保持原 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录：Codex 重新执行上面的 `auth login --no-open-browser` 并保持进程等待回调；豆包/WorkBuddy 按登录失效错误提示执行一次 `auth init --restart`，包括进入五分钟刷新窗口但尚未实际到期的 Token，生成新的完整 Device 链接。若已有待完成事务则复用；只有该事务明确过期、拒绝或失效时才执行一次 `auth init --restart`。用户已要求过期后重新生成链接时直接执行该策略，不重复确认意愿，也不复用历史链接中的授权码。
 
 用户完成手动登录后，Device 流程执行一次 `auth complete`，再用 `auth status` 确认 `authenticated=true`，只恢复原业务步骤一次。进入到期前五分钟窗口后，缺少 refresh token 或刷新失败时，按 CLI 提示手动重新授权。
 
@@ -410,7 +410,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 5. 内置项与真实清单组成统一候选；即使超过 4 项也完整展示所有候选，不提供翻页或搜索导航。6 个真实清单加内置项时，完整展示编号 0、1、2、3、4、5、6。各宿主均复用提前明确且能唯一匹配的选择；编号选择中遇到无效输入时保留主体、强度和完整候选，重新提示编号格式，不只采用有效部分，不追加完成或开始确认。
 6. 四项业务输入完整后，Skill 使用同一输入执行 dry-run；失败时不发送正式请求。
 7. dry-run 通过后，Skill 使用同一 Profile 和身份自动发起一次任务并记录 task ID。
-8. Skill 只查询该 task ID；等待成功后统一返回基础信息表、审查概览、横排的风险等级饼图与风险类别条形图，以及“查看详情”链接和两小时有效期提示，不展示 task ID、终态字段或其他服务端参数。
+8. Skill 只查询该 task ID；等待成功后统一返回基础信息表、审查概览，以及“查看详情”链接和两小时有效期提示，不展示 task ID、终态字段或其他服务端参数。
 
 示例对话：
 
@@ -454,8 +454,6 @@ Agent：**基础信息**
 共发现<总数>处风险，红线风险：<红线数>项、高风险：<高风险数>项、中风险：<中风险数>项，低风险：<低风险数>项。
 问题主要集中在<基于真实结果简洁概括>。
 
-<同一行展示风险等级分布饼图（数量及占比）和风险类别分布条形图（每类数量），不显示图表编号>
-
 审查结果：[查看详情](<REVIEW_DETAIL_URL>)
 有效期提示：审查结果详情链接默认有效期为两小时，请及时查看。
 ```
@@ -488,7 +486,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 | 规则编号 | `0` 固定表示内置规则包，自定义清单从 `1` 开始，展示与解析使用同一映射 |
 | 正式请求门 | 同一输入的 dry-run 成功后才发起真实任务 |
 | 任务幂等 | 取得 task ID 后只查询该任务，不重复创建 |
-| 最终结果 | 统一返回基础信息表、审查概览、横排双图，以及指向完整签名 `reviewDetailUrl` 的“查看详情”链接和有效期提示；不展示 task ID、终态字段或其他服务端参数 |
+| 最终结果 | 统一返回基础信息表、审查概览，以及指向完整签名 `reviewDetailUrl` 的“查看详情”链接和有效期提示；不展示 task ID、终态字段或其他服务端参数 |
 | CLI 兼容 | 原有命令、参数和 JSON 接口保持不变 |
 
 ## 9. 常见问题
@@ -546,7 +544,7 @@ Skill 仅在“审查结果”一项说明链接缺失，不自行拼接 `review
 
 ### 预览链接包含 token 参数
 
-`reviewDetailUrl` 是后端签发的用户可访问免登录链接。Skill 把字段值作为不可拆分字符串，从 `https://` 到最后一个查询参数逐字写入“查看详情”的 Markdown 链接目标，保留完整 `token`；不解析、脱敏、重新编码或改写。URL 中的参数不在链接之外单独展示，最终回复遵循基础信息表、审查概览、横排双图和末尾两行的统一格式。
+`reviewDetailUrl` 是后端签发的用户可访问免登录链接。Skill 把字段值作为不可拆分字符串，从 `https://` 到最后一个查询参数逐字写入“查看详情”的 Markdown 链接目标，保留完整 `token`；不解析、脱敏、重新编码或改写。URL 中的参数不在链接之外单独展示，最终回复遵循基础信息表、审查概览和末尾两行的统一格式。
 
 ## 10. 更新与卸载
 
@@ -555,7 +553,7 @@ Skill 仅在“审查结果”一项说明链接缺失，不自行拼接 `review
 **按客户提供的 tgz 更新**（路径和版本替换为实际文件）：
 
 ```bash
-npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli ./qfeius-everyline-cli-<版本>.tgz
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli ./everyline-cli-<版本>.tgz
 everyline-cli version --output json
 ```
 
