@@ -34,14 +34,13 @@ package_version=$(node -e 'process.stdout.write(require(process.argv[1]).version
 test ! -e "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-cli"
 test ! -e "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-shared"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/SKILL.md"
-test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/references/review-flow.md"
+test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/references/review-config.md"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review-config/SKILL.md"
-test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review-config/references/management.md"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/docs/everyline-cli-skill-guide.md"
 test -f "$temporary_dir/install/node_modules/@qfeius/everyline-cli/docs/everyline-cli-skill-interaction-scenarios.md"
 # 安装包必须保留主体展示项到后端 name/role 的映射，避免发布后回退为两个字段都填写公司名称。
-grep -F '用户回复完整展示项 `猎聘123（乙方）`' "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/references/review-flow.md" >/dev/null
-grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/references/review-flow.md" >/dev/null
+grep -F '用户回复完整展示项 `猎聘123（乙方）`' "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/SKILL.md" >/dev/null
+grep -F '`selectedPosition=猎聘123`、`selectedAuditRole=乙方`' "$temporary_dir/install/node_modules/@qfeius/everyline-cli/skills/everyline-review/SKILL.md" >/dev/null
 
 # 全局安装必须在同一次 npm 生命周期中登记 Codex 与 WorkBuddy Skills；两个宿主目录都显式隔离。
 global_prefix="$temporary_dir/global"

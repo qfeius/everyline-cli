@@ -17,7 +17,7 @@ unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不得执�
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '豆包的“本地电脑”模式仍属于豆包' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'SESSION_ID=<same-session-id> everyline-cli auth init' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'SESSION_ID=<same-session-id> everyline-cli auth complete' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '`firstInstall=true` 且 `authorizationRequired=true`' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'firstInstall=true 且 authorizationRequired=true' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'auth init --restart --profile <profile> --as user --output json' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '`auth init` 返回 `reused=true`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '统一默认 `test` 环境' >/dev/null
@@ -31,13 +31,17 @@ unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | cmp - skills/everyl
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '`verification_link_text`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'EVERYLINE_DOUBAO_SKILLS_DIR' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'nextAction=reload_skills' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F -- '--stdin --name <filename>' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F '0. 通用审查清单（系统内置）' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F -- '--stdin --name <filename>' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '0. 通用审查清单（系统内置）' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不展示图表' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不得单独展示 `taskId`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不追加“已完成”' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '[查看详情](<REVIEW_DETAIL_URL>)' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" references/review-flow.md | grep -F '服务端原始终态对象' >/dev/null
-unzip -p "$output_dir/everyline-review-config-skill.zip" references/management.md | grep -F '规则分组' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不展开原始终态对象' >/dev/null
+unzip -p "$output_dir/everyline-review-config-skill.zip" SKILL.md | grep -F '规则分组' >/dev/null
 
 test ! -e "$output_dir/everyline-cli-skill.zip"
+
+# 两份原文及路由页都要进入制品，避免再发布旧描述或缺失跨技能入口。
+unzip -p "$output_dir/everyline-review-skill.zip" references/review-config.md | cmp - skills/everyline-review/references/review-config.md
+unzip -p "$output_dir/everyline-review-config-skill.zip" SKILL.md | cmp - skills/everyline-review-config/SKILL.md
