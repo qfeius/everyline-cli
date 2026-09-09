@@ -347,6 +347,40 @@ function ensureFirstInstallState(packageRoot, environment, userHome, platform, r
 }
 
 /**
+ * restoreGlobalCommand 恢复 macOS/Linux 全局包缺失的命令链接，保留已有入口。
+ * 入参：packageRoot（string）为包目录；platform（string）为平台；environment（object）为 npm 环境。
+ * 返回值：void；禁用命令链接、非全局、Windows 或非标准全局布局直接返回，文件系统错误向上传递。
+ */
+function restoreGlobalCommand(packageRoot, platform, environment) {
+  // 尊重 npm 显式禁用命令链接的选择，避免 postinstall 重新创建已被 npm 跳过的入口。
+  if (environment.npm_config_bin_links === "false" ||
+      environment.npm_config_global !== "true" || platform === "win32") return;
+  // 从包实际所在位置推导 prefix，避免使用另一个 Node/npm 的全局目录。
+  const root = resolve(packageRoot);
+  const modules = dirname(dirname(root));
+  if (basename(root) !== "everyline-cli" || basename(dirname(root)) !== "@qfeius" ||
+      basename(modules) !== "node_modules" || basename(dirname(modules)) !== "lib") return;
+  const source = join(root, "scripts", "run.js");
+  if (!existsSync(source)) throw new Error(`npm 包缺少命令入口: ${source}`);
+  const target = join(dirname(dirname(modules)), "bin", "everyline-cli");
+  try {
+    // lstat 也能识别失效链接；已有入口交给 npm 管理，绝不覆盖用户文件。
+    lstatSync(target);
+    return;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  mkdirSync(dirname(target), { recursive: true });
+  chmodSync(source, 0o755);
+  try {
+    symlinkSync(source, target);
+  } catch (error) {
+    // 并发 npm 已创建入口时保留其结果。
+    if (error.code !== "EEXIST") throw error;
+  }
+}
+
+/**
  * installPackage 保留首次安装意图，将三宿主同步、废弃入口迁出和最终安装状态提交放在同一恢复流程中。
  * 入参：options（object，可选），可注入 packageRoot、platform、architecture、environment 和 userHome 供安装与测试使用。
  * 返回值：object，包含 binary、Skill 登记结果及机器可读的首次安装、授权和更新状态。
@@ -367,6 +401,8 @@ function installPackage(options = {}) {
   if (platform !== "win32") {
     chmodSync(binary, 0o755);
   }
+
+  restoreGlobalCommand(packageRoot, platform, environment);
 
   if (!shouldInstallCodexSkill(environment)) {
     return {
@@ -492,6 +528,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  restoreGlobalCommand,
   formatInstallOutput,
   installPackage,
   ensureFirstInstallState,
