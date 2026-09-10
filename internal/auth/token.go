@@ -117,7 +117,7 @@ func (provider *Provider) userAuthenticationError(profileName string) error {
 // 返回值：error，保留 ErrUserSessionExpired 分类，并分别指向 Device Grant 或本机 OAuth。
 func (provider *Provider) UserSessionExpiredError(profileName string) error {
 	if provider.deviceStore != nil {
-		return fmt.Errorf("%w；请重新执行 auth init --profile %s --as user --output json", ErrUserSessionExpired, profileName)
+		return fmt.Errorf("%w；请重新执行 auth init --restart --profile %s --as user --output json", ErrUserSessionExpired, profileName)
 	}
 	return fmt.Errorf("%w；请重新执行 auth login --profile %s --as user", ErrUserSessionExpired, profileName)
 }

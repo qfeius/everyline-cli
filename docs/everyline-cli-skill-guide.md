@@ -1,6 +1,6 @@
 # EveryLine CLI 交互 Skill 安装与验证（Codex / WorkBuddy / 豆包）
 
-本文用于安装 `everyline-cli` CLI 及三项配套 Skill，并验证合同审查的多轮对话流程：`everyline-cli` Skill 负责接入与授权，`everyline-review` 负责单份合同审查，`everyline-review-config` 负责清单和规则管理。CLI 继续负责授权、上传、主体提取、查询和写入；全局 npm 安装默认同时登记 Codex 与 WorkBuddy Skills。
+本文用于安装 `everyline-cli` CLI 及两项配套 Skill，并验证合同审查的多轮对话流程：`everyline-review` 负责接入、授权和单份合同审查，`everyline-review-config` 负责清单和规则管理。CLI 继续负责授权、上传、主体提取、查询和写入；全局 npm 安装默认同时登记 Codex 与 WorkBuddy Skills。
 
 需要逐项评审或测试当前 Skill 的全部分支时，请结合 [EveryLine CLI Skill 全量交互场景](everyline-cli-skill-interaction-scenarios.md)。
 
@@ -8,9 +8,9 @@ Skill 的安装位置和验证入口由 Agent 宿主决定，不要跨宿主复�
 
 | 宿主 | 安装入口 | 用户级位置或管理方式 |
 | --- | --- | --- |
-| Codex | 本地 Skill 目录 | `$HOME/.agents/skills/everyline-{shared,review,review-config}` |
-| WorkBuddy | 「专家·技能·连接器」或本地 Skill 目录 | `$HOME/.workbuddy/skills/everyline-{shared,review,review-config}` |
-| 豆包 | 本地 npm 同步，或技能管理中的 ZIP 导入 | 本地使用已存在的 `workspace/.user_skills`；自定义目录用 `EVERYLINE_DOUBAO_SKILLS_DIR` 指定；云端仍分别导入三个 `*-skill.zip` |
+| Codex | 本地 Skill 目录 | `$HOME/.agents/skills/everyline-{review,review-config}` |
+| WorkBuddy | 「专家·技能·连接器」或本地 Skill 目录 | `$HOME/.workbuddy/skills/everyline-{review,review-config}` |
+| 豆包 | 本地 npm 同步，或技能管理中的 ZIP 导入 | 本地使用已存在的 `workspace/.user_skills`；自定义目录用 `EVERYLINE_DOUBAO_SKILLS_DIR` 指定；云端仍分别导入两个 `*-skill.zip` |
 
 OpenAI 官方文档将 Skill 定义为包含 `SKILL.md` 及可选 references、scripts、assets 的目录。Codex 支持显式 `$skill-name` 调用和按 description 自动触发，并扫描用户级 `$HOME/.agents/skills`。详见 [OpenAI Build skills](https://learn.chatgpt.com/docs/build-skills)。WorkBuddy 使用自己的 `$HOME/.workbuddy/skills`，可参考 [WorkBuddy 技能系统说明](https://cloud.tencent.com/developer/article/2693324)；豆包电脑版当前通过界面上传本地 Skill，可参考 [豆包工作任务自定义 Skill 说明](https://www.beating.news/flash/362784)，最终入口以客户端实际展示为准。
 
@@ -30,7 +30,7 @@ CLI 和 Skill 应来自同一个发布版本。每次 Skill 发布（包括纯�
 
 ## 2. 全局安装包同步 CLI、Codex、WorkBuddy 和豆包本地 Skills
 
-全局安装 `everyline-cli` npm 包时，`postinstall` 会校验原生 CLI，并把三项 Skill 分别链接到 `$HOME/.agents/skills` 和 `$HOME/.workbuddy/skills`：
+全局安装 `everyline-cli` npm 包时，`postinstall` 会校验原生 CLI，并把两项 Skill 分别链接到 `$HOME/.agents/skills` 和 `$HOME/.workbuddy/skills`：
 
 - 只有全局安装登记用户级 Skill；项目局部安装和 `npx` 临时执行不写入用户 Skill 目录。
 - 已存在并指向同一 npm 包的 Skill 链接会直接复用，重复安装不会嵌套目录。
@@ -46,19 +46,19 @@ CLI 和 Skill 应来自同一个发布版本。每次 Skill 发布（包括纯�
 ### 从 npm 仓库安装
 
 ```bash
-npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@RELEASE_VERSION
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@RELEASE_VERSION
 ```
 
 ### 从待发布的 tgz 安装
 
 ```bash
-npm install -g --foreground-scripts --allow-scripts=everyline-cli /absolute/path/everyline-cli-RELEASE_VERSION.tgz
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli /absolute/path/everyline-cli-RELEASE_VERSION.tgz
 ```
 
 Windows PowerShell 同样可以使用：
 
 ```powershell
-npm install -g --foreground-scripts --allow-scripts=everyline-cli C:\absolute\path\everyline-cli-RELEASE_VERSION.tgz
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli C:\absolute\path\everyline-cli-RELEASE_VERSION.tgz
 ```
 
 检查安装结果：
@@ -68,12 +68,12 @@ everyline-cli version --output json
 everyline-cli --help
 ```
 
-预期结果：命令可以执行，版本与待验证版本一致，stdout 返回 JSON 版本信息。首次安装时还应包含 `firstInstall=true`、`authorizationRequired=true` 和 `nextAction=authorize`，随后必须通过 `everyline-cli` Skill 完成一次新的 user 或 app 授权。
+预期结果：命令可以执行，版本与待验证版本一致，stdout 返回 JSON 版本信息。首次安装时还应包含 `firstInstall=true`、`authorizationRequired=true` 和 `nextAction=authorize`，随后必须通过 `everyline-review` Skill 完成一次新的 user 或 app 授权。
 
 同时检查 Codex 与 WorkBuddy Skills：
 
 ```bash
-for skill_name in everyline-cli everyline-review everyline-review-config; do
+for skill_name in everyline-review everyline-review-config; do
   test -f "$HOME/.agents/skills/$skill_name/SKILL.md"
   test -f "$HOME/.workbuddy/skills/$skill_name/SKILL.md"
 done
@@ -81,15 +81,14 @@ done
 
 ## 3. 按宿主安装 Skill
 
-npm 包内的三项 Skill 位于：
+npm 包内的两项 Skill 位于：
 
 ```text
-<npm-global-root>/everyline-cli/skills/everyline-cli/
-<npm-global-root>/everyline-cli/skills/everyline-review/
-<npm-global-root>/everyline-cli/skills/everyline-review-config/
+<npm-global-root>/@qfeius/everyline-cli/skills/everyline-review/
+<npm-global-root>/@qfeius/everyline-cli/skills/everyline-review-config/
 ```
 
-全局 npm 安装会自动登记 Codex、WorkBuddy，同步已发现或显式配置的豆包本地技能目录，并建立首次安装门禁。豆包云端独立 ZIP 的静态导入不执行 npm 安装脚本。三个宿主都在确认 CLI 可执行、三项 Skill 可读取或启用后，由 Agent 在回复正文展示首次安装提示；终端日志或 JSON 事件不代替面向用户的回复。安装过程不创建 Profile、不直接发起远端授权或业务请求，展示后等待用户确认开始授权，再选择身份、匹配或创建 Profile 并执行对应授权流程。
+全局 npm 安装会自动登记 Codex、WorkBuddy，同步已发现或显式配置的豆包本地技能目录，并建立首次安装门禁。豆包云端独立 ZIP 的静态导入不执行 npm 安装脚本。三个宿主都在确认 CLI 可执行、两项 Skill 可读取或启用后，由 Agent 在回复正文展示首次安装提示；终端日志或 JSON 事件不代替面向用户的回复。安装过程不创建 Profile、不直接发起远端授权或业务请求，展示后等待用户确认开始授权，再选择身份、匹配或创建 Profile 并执行对应授权流程。
 
 全局 npm 安装路径在本次安装任务完成时展示；豆包 ZIP 导入路径在首次运行 Skill 并确认当前任务中 CLI 可用时展示。豆包、WorkBuddy 界面导入或手工安装路径，按已确认的首次导入/安装上下文触发，不依赖全局 npm 状态文件；普通新会话不重复介绍，安装失败不展示完成文案。首次安装统一提示：
 
@@ -110,13 +109,13 @@ export EVERYLINE_NPM_ROOT="$(npm root -g --prefix "$EVERYLINE_NPM_PREFIX")"
 
 #### macOS 或 Linux
 
-正常情况下全局安装已经创建三项链接。跳过生命周期脚本或需要手工修复时执行：
+正常情况下全局安装已经创建两项链接。跳过生命周期脚本或需要手工修复时执行：
 
 ```bash
 npm_global_root="${EVERYLINE_NPM_ROOT:-$(npm root -g)}"
 mkdir -p "$HOME/.agents/skills"
-for skill_name in everyline-cli everyline-review everyline-review-config; do
-  skill_source="$npm_global_root/everyline-cli/skills/$skill_name"
+for skill_name in everyline-review everyline-review-config; do
+  skill_source="$npm_global_root/@qfeius/everyline-cli/skills/$skill_name"
   skill_target="$HOME/.agents/skills/$skill_name"
   test -f "$skill_source/SKILL.md"
   test ! -e "$skill_target"
@@ -134,8 +133,8 @@ done
 $NpmRoot = (npm root -g).Trim()
 $SkillTargetRoot = Join-Path $HOME ".agents\skills"
 New-Item -ItemType Directory -Force -Path $SkillTargetRoot | Out-Null
-foreach ($SkillName in @("everyline-cli", "everyline-review", "everyline-review-config")) {
-    $SkillSource = Join-Path $NpmRoot "everyline-cli\skills\$SkillName"
+foreach ($SkillName in @("everyline-review", "everyline-review-config")) {
+    $SkillSource = Join-Path $NpmRoot "@qfeius\everyline-cli\skills\$SkillName"
     $SkillTarget = Join-Path $SkillTargetRoot $SkillName
     if (-not (Test-Path (Join-Path $SkillSource "SKILL.md"))) {
         throw "npm 包中缺少 $SkillName Skill"
@@ -158,7 +157,7 @@ Windows 目录联接与 macOS/Linux 符号链接一样，会持续指向 npm 包
 
 #### 从源码目录验证
 
-从源码验证时，把 `skills/everyline-cli/`、`skills/everyline-review/` 和 `skills/everyline-review-config/` 分别复制或链接到：
+从源码验证时，把 `skills/everyline-review/` 和 `skills/everyline-review-config/` 分别复制或链接到：
 
 ```text
 $HOME/.agents/skills/<同名 Skill>/
@@ -175,8 +174,8 @@ macOS 或 Linux：
 ```bash
 npm_global_root="${EVERYLINE_NPM_ROOT:-$(npm root -g)}"
 mkdir -p "$HOME/.workbuddy/skills"
-for skill_name in everyline-cli everyline-review everyline-review-config; do
-  skill_source="$npm_global_root/everyline-cli/skills/$skill_name"
+for skill_name in everyline-review everyline-review-config; do
+  skill_source="$npm_global_root/@qfeius/everyline-cli/skills/$skill_name"
   skill_target="$HOME/.workbuddy/skills/$skill_name"
   test -f "$skill_source/SKILL.md"
   test ! -e "$skill_target"
@@ -188,31 +187,30 @@ done
 
 ### 3.3 豆包电脑版
 
-豆包工作支持本地普通技能文件夹。npm 全局安装时，macOS 自动发现已存在的 `~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills`，同步三项完整技能；安装器不替用户创建猜测的宿主路径。其他平台、不同用户配置或远端运行时，应使用当前豆包环境实际提供的目录：
+豆包工作支持本地普通技能文件夹。npm 全局安装时，macOS 自动发现已存在的 `~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills`，同步两项完整技能；安装器不替用户创建猜测的宿主路径。其他平台、不同用户配置或远端运行时，应使用当前豆包环境实际提供的目录：
 
 ```bash
-EVERYLINE_DOUBAO_SKILLS_DIR="<豆包实际技能根目录的绝对路径>" npm install -g --foreground-scripts --allow-scripts=everyline-cli <发布包.tgz>
+EVERYLINE_DOUBAO_SKILLS_DIR="<豆包实际技能根目录的绝对路径>" npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli <发布包.tgz>
 ```
 
 本地同步会比较内容而非只比较版本号，更新 `SKILL.md` 和全部 `references/`；旧目录保留在扫描目录外，出错时回滚本轮各宿主的变更。同名目录未声明对应 EveryLine 技能、含符号链接或特殊文件时，保留原目录并报告冲突。`EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL=1` 跳过豆包，`EVERYLINE_SKIP_SKILL_INSTALL=1` 跳过全部宿主。
 
-同步事件 `event=skills_updated / host=doubao / nextAction=reload_skills` 表示文件更新成功；Agent 应重新读取 `skills[].target` 下的三项 `SKILL.md`，或新建任务加载。历史对话不自动替换旧内容。云端导入副本尚未接入自动发布；该路径仍使用 ZIP。仓库执行 `make skill-assets` 后生成：
+同步事件 `event=skills_updated / host=doubao / nextAction=reload_skills` 表示文件更新成功；Agent 应重新读取 `skills[].target` 下的两项 `SKILL.md`，或新建任务加载。历史对话不自动替换旧内容。云端导入副本尚未接入自动发布；该路径仍使用 ZIP。仓库执行 `make skill-assets` 后生成：
 
 ```text
-dist/everyline-cli-skill.zip
 dist/everyline-review-skill.zip
 dist/everyline-review-config-skill.zip
 ```
 
-每个 ZIP 根目录都直接包含自己的 `SKILL.md`；审查和配置 ZIP 还包含对应 `references/`。构建过程会清理旧的 `dist/everyline-shared-skill.zip`，避免重复导入公共授权入口。
+两个 Skill 目录平级，各自仅包含一个 `SKILL.md`；每个 ZIP 根目录也仅包含该文件。review 主文件包含配置转交说明，config 主文件包含完整配置操作流程。构建过程会清理旧的 `dist/everyline-shared-skill.zip` 和 `dist/everyline-cli-skill.zip`，避免重复导入公共授权入口。
 
 在豆包中安装：
 
 1. 打开豆包工作任务的「技能·连接器·伙伴 → 我的技能 → 上传技能」。
-2. 依次上传三个 ZIP，确认解析名称分别为 `everyline-cli`、`everyline-review`、`everyline-review-config`。
-3. 启用三项 Skill 并新建任务验证；ZIP 应作为 Skill 导入，不作为普通聊天附件总结。
-4. 远端沙箱准备对应 Linux CLI，并按 `everyline-cli` 公共 Skill 提供 Device Grant 的会话变量；合同通过附件字节流、沙箱内路径或完整 URL 交付。
-5. 首次验证时发送「刚首次导入 EveryLine 的三项 Skill，请验证 CLI 和 Skill 已就绪并展示安装完成提示，先不要发起授权」。CLI 尚未安装时在同一请求中补充安装要求；确认 CLI 可执行后，豆包应在回复正文展示上述统一文案，即使 `version` 没有首次安装字段。
+2. 依次上传两个 ZIP，确认解析名称分别为 `everyline-review`、`everyline-review-config`。
+3. 启用两项 Skill 并新建任务验证；ZIP 应作为 Skill 导入，不作为普通聊天附件总结。
+4. 远端沙箱准备对应 Linux CLI，并按 `everyline-review` 的公共接入流程提供 Device Grant 的会话变量；合同通过附件字节流、沙箱内路径或完整 URL 交付。
+5. 首次验证时发送「刚首次导入 EveryLine 的两项 Skill，请验证 CLI 和 Skill 已就绪并展示安装完成提示，先不要发起授权」。CLI 尚未安装时在同一请求中补充安装要求；确认 CLI 可执行后，豆包应在回复正文展示上述统一文案，即使 `version` 没有首次安装字段。
 
 豆包的 Skill 功能和入口仍在快速更新；本手册以客户端存在“上传技能”为前提。当前客户端只有“对话新建技能”时，应等待或启用本地 Skill 上传入口，避免把 `SKILL.md` 正文复制成缺少 references 的不完整技能。
 
@@ -226,34 +224,34 @@ dist/everyline-review-config-skill.zip
 /skills
 ```
 
-预期列表中出现 `everyline-cli`、`everyline-review` 和 `everyline-review-config`。
+预期列表中出现 `everyline-review` 和 `everyline-review-config`。
 
 如果目录已经正确但列表尚未刷新，重启 Codex 后再检查。官方文档说明 Codex 支持自动检测 Skill 变化，未出现时可通过重启刷新。
 
 先运行一个不上传合同的冒烟验证：
 
 ```text
-$everyline-cli 使用当前 prod-user Profile 和 user 身份检查 CLI 版本和授权状态，先不要上传合同。
+$everyline-review 使用当前 prod-user Profile 和 user 身份检查 CLI 版本和授权状态，先不要上传合同。
 ```
 
 预期行为：Codex 检查 `everyline-cli` 路径、版本、两条任务命令的帮助信息和授权状态，解析当前 `prod-user` Profile，并在后续调用中固定传入该 Profile 与 user 身份；不要求填写 `businessId`、`fileHash` 等内部字段。
 
 ### 4.2 WorkBuddy
 
-重新打开 WorkBuddy 任务，在「专家·技能·连接器」中确认三项 EveryLine Skill 已启用。先发送：
+重新打开 WorkBuddy 任务，在「专家·技能·连接器」中确认两项 EveryLine Skill 已启用。先发送：
 
 ```text
-使用 everyline-cli 技能，检查 CLI 路径、版本和当前授权状态，先不要上传合同。
+使用 everyline-review 技能，检查 CLI 路径、版本和当前授权状态，先不要上传合同。
 ```
 
 预期 WorkBuddy 执行真实 CLI 命令并返回结构化检查结果，而不是只复述安装文档。WorkBuddy 中不需要前往 Codex 执行 `/skills`。
 
 ### 4.3 豆包电脑版
 
-在豆包「我的技能」中确认三项 EveryLine Skill 已启用，再新建工作任务并发送：
+在豆包「我的技能」中确认两项 EveryLine Skill 已启用，再新建工作任务并发送：
 
 ```text
-使用 everyline-cli 技能，执行 command -v everyline-cli 和 everyline-cli version --output json；再检查当前授权状态，先不要上传合同。
+使用 everyline-review 技能，执行 command -v everyline-cli 和 everyline-cli version --output json；再检查当前授权状态，先不要上传合同。
 ```
 
 继续条件：豆包实际返回命令路径和 CLI JSON 版本，不只是描述应该执行哪些命令。找不到命令时，先让豆包本地任务环境包含 npm 全局 bin 或 `$HOME/.local/bin`，然后重新打开任务。
@@ -325,7 +323,7 @@ WorkBuddy 在第一次 `auth init` 前固定一个非敏感的 `CODEBUDDY_SESSIO
 
 豆包的恢复流程相同：先恢复原 `SESSION_ID` 和初始工作目录，再检查已有事务。豆包本地电脑也不执行 `auth login --as user`，Device 状态查询、业务取 token 和刷新均只使用当前 Device 会话，不回退到本机旧 OAuth 缓存。
 
-user Token 过期且未刷新成功后，保持原 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录：Codex 重新执行上面的 `auth login --no-open-browser` 并保持进程等待回调；豆包/WorkBuddy 执行一次 `auth init`，过期 Token 会生成新的完整 Device 链接。若已有待完成事务则复用；只有该事务明确过期、拒绝或失效时才执行一次 `auth init --restart`。用户已要求过期后重新生成链接时直接执行该策略，不重复确认意愿，也不复用历史链接中的授权码。
+user Token 过期且未刷新成功后，保持原 Profile、user 身份和宿主会话，重新生成一次授权链接供用户手动登录：Codex 重新执行上面的 `auth login --no-open-browser` 并保持进程等待回调；豆包/WorkBuddy 按登录失效错误提示执行一次 `auth init --restart`，包括进入五分钟刷新窗口但尚未实际到期的 Token，生成新的完整 Device 链接。若已有待完成事务则复用；只有该事务明确过期、拒绝或失效时才执行一次 `auth init --restart`。用户已要求过期后重新生成链接时直接执行该策略，不重复确认意愿，也不复用历史链接中的授权码。
 
 用户完成手动登录后，Device 流程执行一次 `auth complete`，再用 `auth status` 确认 `authenticated=true`，只恢复原业务步骤一次。进入到期前五分钟窗口后，缺少 refresh token 或刷新失败时，按 CLI 提示手动重新授权。
 
@@ -410,7 +408,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 5. 内置项与真实清单组成统一候选；即使超过 4 项也完整展示所有候选，不提供翻页或搜索导航。6 个真实清单加内置项时，完整展示编号 0、1、2、3、4、5、6。各宿主均复用提前明确且能唯一匹配的选择；编号选择中遇到无效输入时保留主体、强度和完整候选，重新提示编号格式，不只采用有效部分，不追加完成或开始确认。
 6. 四项业务输入完整后，Skill 使用同一输入执行 dry-run；失败时不发送正式请求。
 7. dry-run 通过后，Skill 使用同一 Profile 和身份自动发起一次任务并记录 task ID。
-8. Skill 只查询该 task ID；等待成功后仅返回审查结果概要、以“审查结果详情”为文字的可点击链接和默认两小时的有效期提示，不展示 task ID、终态字段或其他服务端参数。
+8. Skill 只查询该 task ID；等待成功后统一返回基础信息表、审查概览，以及“查看详情”链接和两小时有效期提示，不展示 task ID、终态字段或其他服务端参数。
 
 示例对话：
 
@@ -443,9 +441,19 @@ Agent：第 3 步，以下为全部可用审查清单，请回复编号；多选
 
 Agent：参数 dry-run 已通过，任务已创建，正在等待审查结果……
 
-Agent：审查结果概要：发现 2 项主要风险，其中 1 项重大、1 项警示。
-审查结果链接：[审查结果详情](<REVIEW_DETAIL_URL>)
-有效期提示：该免登录链接默认有效期为两小时，请及时查看。
+Agent：**基础信息**
+
+| 合同文件名称 | 立场 | 强度 | 审查清单 |
+| --- | --- | --- | --- |
+| <实际文件名> | <实际立场> | <实际强度> | <全部已选清单名称> |
+
+**审查概览**
+
+共发现<总数>处风险，红线风险：<红线数>项、高风险：<高风险数>项、中风险：<中风险数>项，低风险：<低风险数>项。
+问题主要集中在<基于真实结果简洁概括>。
+
+审查结果：[查看详情](<REVIEW_DETAIL_URL>)
+有效期提示：审查结果详情链接默认有效期为两小时，请及时查看。
 ```
 
 候选主体、清单名称和最终链接必须来自当前身份下的真实 CLI 响应。示例名称仅用于说明对话形式。
@@ -462,7 +470,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 | 检查项 | 通过标准 |
 | --- | --- |
-| Skill 发现 | 三个宿主中均出现 `everyline-cli`、`everyline-review`、`everyline-review-config` |
+| Skill 发现 | 三个宿主中均出现 `everyline-review`、`everyline-review-config` |
 | CLI 发现 | `everyline-cli version --output json` 成功，版本符合预期 |
 | 调用上下文 | 所有授权和业务命令显式使用同一 `--profile/--as` |
 | 授权 | `auth status` 返回 `authenticated=true` |
@@ -476,14 +484,14 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 | 规则编号 | `0` 固定表示内置规则包，自定义清单从 `1` 开始，展示与解析使用同一映射 |
 | 正式请求门 | 同一输入的 dry-run 成功后才发起真实任务 |
 | 任务幂等 | 取得 task ID 后只查询该任务，不重复创建 |
-| 最终结果 | 只返回审查结果概要、指向完整签名 `reviewDetailUrl` 的“审查结果详情”可点击链接和有效期提示；不展示 task ID、终态字段或其他服务端参数 |
+| 最终结果 | 统一返回基础信息表、审查概览，以及指向完整签名 `reviewDetailUrl` 的“查看详情”链接和有效期提示；不展示 task ID、终态字段或其他服务端参数 |
 | CLI 兼容 | 原有命令、参数和 JSON 接口保持不变 |
 
 ## 9. 常见问题
 
 ### `/skills` 中缺少拆分后的 EveryLine Skill
 
-- 检查 `$HOME/.agents/skills/everyline-cli/SKILL.md`、`everyline-review/SKILL.md` 和 `everyline-review-config/SKILL.md`。
+- 检查 `$HOME/.agents/skills/everyline-review/SKILL.md` 和 `everyline-review-config/SKILL.md`。
 - 检查是否误生成同名双层目录。
 - 重启 Codex 后重新执行 `/skills`。
 
@@ -495,7 +503,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 ### 豆包上传技能后只解释文档，没有执行 CLI
 
-- 确认三个 ZIP 都通过上传入口安装成技能，而不是作为普通聊天附件。
+- 确认两个 ZIP 都通过上传入口安装成技能，而不是作为普通聊天附件。
 - 让豆包实际执行 `command -v everyline-cli` 和 `everyline-cli version --output json`。
 - 检查沙箱 Linux CLI、命令执行权限、Device Grant 会话变量和 PATH；通过后再上传合同。
 
@@ -509,7 +517,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 解析 `version --output json`。`updateRequired=true` 时先记住 `updateCommand`，继续完成当前完整业务流程；CLI 同时会在 stderr 输出 `code=UPDATE_PENDING`、当前版本、最新版本、更新命令和 `updateAfter=current_business_workflow`。全部业务 API 结束并保留结果后原样执行一次更新命令，再次检查版本；下一条新业务重新加载新版 Skill。
 
-CLI 与三项 Skill 更新并校验成功后展示“EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。”，复用同次授权中用户已选的身份；尚未选择时先单选 user/app，再对匹配的 Profile 和身份执行一次 `auth status`。只有 `authenticated=true` 时追加“当前已存在生效授权，可直接调用cli能力；”；`authenticated=false` 时追加“使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。”，已有继续授权请求时直接按已选身份继续，否则等待用户确认。状态查询报错时保留未知状态并报告原始错误，不从 token 文件或安装成功推断授权有效。
+CLI 与两项 Skill 更新并校验成功后展示“EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。”，复用同次授权中用户已选的身份；尚未选择时先单选 user/app，再对匹配的 Profile 和身份执行一次 `auth status`。只有 `authenticated=true` 时追加“当前已存在生效授权，可直接调用cli能力；”；`authenticated=false` 时追加“使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。”，已有继续授权请求时直接按已选身份继续，否则等待用户确认。状态查询报错时保留未知状态并报告原始错误，不从 token 文件或安装成功推断授权有效。
 
 ### 提示尚未选择 Profile
 
@@ -530,18 +538,41 @@ Codex 本地登录检查 Profile 是否具有 OAuth metadata、business type 和
 
 ### 成功状态没有预览链接
 
-Skill 仅在“审查结果链接”一项说明链接缺失，不自行拼接 `reviewDetailUrl`，也不向用户展开原始终态。
+Skill 仅在“审查结果”一项说明链接缺失，不自行拼接 `reviewDetailUrl`，也不向用户展开原始终态。
 
 ### 预览链接包含 token 参数
 
-`reviewDetailUrl` 是后端签发的用户可访问免登录链接。Skill 把字段值作为不可拆分字符串，从 `https://` 到最后一个查询参数逐字写入“审查结果详情”的 Markdown 链接目标，保留完整 `token`；不解析、脱敏、重新编码或改写。URL 中的参数不在链接之外单独展示，最终回复还必须仅包含审查结果概要和默认两小时的有效期提示。
+`reviewDetailUrl` 是后端签发的用户可访问免登录链接。Skill 把字段值作为不可拆分字符串，从 `https://` 到最后一个查询参数逐字写入“查看详情”的 Markdown 链接目标，保留完整 `token`；不解析、脱敏、重新编码或改写。URL 中的参数不在链接之外单独展示，最终回复遵循基础信息表、审查概览和末尾两行的统一格式。
 
 ## 10. 更新与卸载
+
+### 两种更新方式
+
+**按客户提供的 tgz 更新**（路径和版本替换为实际文件）：
+
+```bash
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli ./everyline-cli-<版本>.tgz
+everyline-cli version --output json
+```
+
+也可以将 tgz 作为工作任务附件提供，然后告诉 Agent：“使用 everyline-review 技能，按附件 tgz 更新 CLI 和两项 Skill，不从 npm 查询最新版。”即使包版本相同，也按指定包安装并同步可管理的 Skill 内容；无需该包先发布到 npm。
+
+**从 npm 更新到最新版**：
+
+```bash
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org
+everyline-cli version --output json
+```
+
+或告诉 Agent：“使用 everyline-review 技能，从 npm 更新 CLI 和两项 Skill。”此方式要求对应版本已经发布到 npm。两种方式都保留原安装 prefix 和账号配置，并在更新后核对 CLI 与两项 Skill 版本；自定义 prefix 复用下文命令。
+
+Codex、WorkBuddy 和已发现的豆包本地技能目录随 npm 安装同步，更新后新建任务加载。豆包云端手动导入版需重新导入两项 Skill ZIP；客户端提供的附件路径必须能被执行环境读取。
+
 
 使用 npm 标准全局目录时更新 CLI：
 
 ```bash
-npm install -g --allow-scripts=everyline-cli everyline-cli@NEW_RELEASE_VERSION
+npm install -g --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@NEW_RELEASE_VERSION
 ```
 
 使用自定义 prefix 时，必须复用安装时的原始 prefix：
@@ -549,19 +580,19 @@ npm install -g --allow-scripts=everyline-cli everyline-cli@NEW_RELEASE_VERSION
 ```bash
 export EVERYLINE_NPM_PREFIX="$HOME/.local"
 export EVERYLINE_NPM_ROOT="$(npm root -g --prefix "$EVERYLINE_NPM_PREFIX")"
-npm install -g --allow-scripts=everyline-cli --prefix "$EVERYLINE_NPM_PREFIX" everyline-cli@NEW_RELEASE_VERSION
+npm install -g --allow-scripts=@qfeius/everyline-cli --prefix "$EVERYLINE_NPM_PREFIX" @qfeius/everyline-cli@NEW_RELEASE_VERSION
 ```
 
 Windows PowerShell 使用自定义 prefix 时：
 
 ```powershell
 $EverylineNpmPrefix = Join-Path $HOME ".local"
-npm install -g --allow-scripts=everyline-cli --prefix $EverylineNpmPrefix everyline-cli@NEW_RELEASE_VERSION
+npm install -g --allow-scripts=@qfeius/everyline-cli --prefix $EverylineNpmPrefix @qfeius/everyline-cli@NEW_RELEASE_VERSION
 ```
 
-macOS/Linux 使用符号链接、Windows 使用目录联接时，Codex 与 WorkBuddy 的三项 Skill 都指向新 npm 包中的同名目录。已发现或显式配置的豆包本地目录同步完整文件夹，三项技能的引用文件也会更新。云端导入版仍通过 `make skill-assets` 生成并上传三个新 ZIP。
+macOS/Linux 使用符号链接、Windows 使用目录联接时，Codex 与 WorkBuddy 的两项 Skill 都指向新 npm 包中的同名目录。已发现或显式配置的豆包本地目录同步完整文件夹，两项技能的引用文件也会更新。云端导入版仍通过 `make skill-assets` 生成并上传两个新 ZIP。
 
-豆包更新后应区分“本地文件已同步”和“当前任务已重新加载”。以 `skills_updated` 事件的目标路径核对三项实际文件，再重新读取或新建任务；只查看 npm 包内文件或 CLI 版本不算验证加载成功。未发现豆包目录、云端导入版或内容尚未核实时，应报告仍待更新/验证，使用实际目录重装或通过三个独立 ZIP 更新，外层完整发布 ZIP 和 npm `.tgz` 不作为豆包 Skill 导入包。
+豆包更新后应区分“本地文件已同步”和“当前任务已重新加载”。以 `skills_updated` 事件的目标路径核对两项实际文件，再重新读取或新建任务；只查看 npm 包内文件或 CLI 版本不算验证加载成功。未发现豆包目录、云端导入版或内容尚未核实时，应报告仍待更新/验证，使用实际目录重装或通过两个独立 ZIP 更新，外层完整发布 ZIP 和 npm `.tgz` 不作为豆包 Skill 导入包。
 
 ### 只从某一个宿主移除 Skill
 
@@ -570,7 +601,7 @@ macOS/Linux 使用符号链接、Windows 使用目录联接时，Codex 与 WorkB
 Codex 的 macOS/Linux 符号链接：
 
 ```bash
-for skill_name in everyline-cli everyline-review everyline-review-config; do
+for skill_name in everyline-review everyline-review-config; do
   unlink "$HOME/.agents/skills/$skill_name"
 done
 ```
@@ -578,14 +609,14 @@ done
 WorkBuddy 的符号链接卸载：
 
 ```bash
-for skill_name in everyline-cli everyline-review everyline-review-config; do
+for skill_name in everyline-review everyline-review-config; do
   unlink "$HOME/.workbuddy/skills/$skill_name"
 done
 ```
 
-豆包在「我的技能」中分别移除三项 Skill；不手工删除豆包客户端内部数据目录，也不因此卸载其他宿主仍在使用的 CLI。
+豆包在「我的技能」中分别移除两项 Skill；不手工删除豆包客户端内部数据目录，也不因此卸载其他宿主仍在使用的 CLI。
 
-Windows 目录联接在确认路径后，分别对两个宿主下的 `everyline-cli`、`everyline-review`、`everyline-review-config` 执行 `Remove-Item`。WorkBuddy 通过界面安装时，也只在其「专家·技能·连接器」中移除对应技能。
+Windows 目录联接在确认路径后，分别对两个宿主下的 `everyline-review`、`everyline-review-config` 执行 `Remove-Item`。WorkBuddy 通过界面安装时，也只在其「专家·技能·连接器」中移除对应技能。
 
 ### 全局卸载 CLI 和 npm 包
 
@@ -594,19 +625,31 @@ Windows 目录联接在确认路径后，分别对两个宿主下的 `everyline-
 标准全局目录：
 
 ```bash
-npm uninstall -g everyline-cli
+npm uninstall -g @qfeius/everyline-cli
 ```
 
 macOS/Linux 使用自定义 prefix 时复用原安装位置：
 
 ```bash
 export EVERYLINE_NPM_PREFIX="$HOME/.local"
-npm uninstall -g --prefix "$EVERYLINE_NPM_PREFIX" everyline-cli
+npm uninstall -g --prefix "$EVERYLINE_NPM_PREFIX" @qfeius/everyline-cli
 ```
 
 Windows PowerShell 使用自定义 prefix 时：
 
 ```powershell
 $EverylineNpmPrefix = Join-Path $HOME ".local"
-npm uninstall -g --prefix $EverylineNpmPrefix everyline-cli
+npm uninstall -g --prefix $EverylineNpmPrefix @qfeius/everyline-cli
 ```
+
+### 恢复缺失的命令入口
+
+macOS/Linux 全局包仍存在但 `everyline-cli` 命令入口缺失时，使用原安装 prefix 执行：
+
+```bash
+npm rebuild -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli
+```
+
+安装脚本会按包实际所在 prefix 检查并恢复缺失链接；显式设置 `--bin-links=false` 时跳过恢复。已有文件或链接保持原样；Windows 的命令 shim 由 npm rebuild 管理。入口后来再次被删除时，需要重新执行恢复命令，不会在后台自动重建。
+
+两个 Skill 的主文件以提供的附件为内容基准：review 主文件包含完整公共接入及审查流程，配置操作全文放在 config 主文件；review 主文件中的配置转交章节负责衔接 config。配置入口按宿主技能名称加载 review 的公共接入章节，不依赖跨 ZIP 的相对路径。

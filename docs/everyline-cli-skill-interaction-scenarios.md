@@ -1,6 +1,6 @@
 # EveryLine CLI Skill 全量交互场景
 
-本文以当前三项 Skill 为行为基线：`skills/everyline-cli/SKILL.md` 负责公共接入与授权，`skills/everyline-review/` 负责单份合同审查，`skills/everyline-review-config/` 负责清单与规则管理。本文梳理已经定义的全部用户交互、分支、停止条件和当前范围外能力，可用于产品评审、验收测试和其他设备上的对话验证。
+本文以当前两项 Skill 为行为基线：`skills/everyline-review/` 负责公共接入、授权与单份合同审查，`skills/everyline-review-config/` 负责清单与规则管理。本文梳理已经定义的全部用户交互、分支、停止条件和当前范围外能力，可用于产品评审、验收测试和其他设备上的对话验证。
 
 ## 1. 场景状态说明
 
@@ -69,22 +69,22 @@ flowchart TD
 
 | ID | 状态 | 用户示例 | Skill 处理 | 结束条件 |
 | --- | --- | --- | --- | --- |
-| ENTRY-01 | 已支持 | `$everyline-cli 帮我审查合同` | 显式加载 Skill，识别为合同审查 | 进入首次使用检查 |
+| ENTRY-01 | 已支持 | `$everyline-review 帮我审查合同` | 显式加载 Skill，识别为合同审查 | 进入首次使用检查 |
 | ENTRY-02 | 已支持 | `用 EveryLine CLI 看一下这份合同` | description 唯一匹配时隐式加载 | 进入首次使用检查 |
 | ENTRY-03 | 已支持 | `帮我操作普通智书 contract-cli` | 根据 Skill 边界不接管 | 交由其他能力处理 |
 | READY-01 | 已支持 | 新会话首次调用 | 执行 `command -v`、`version --output json` 和根帮助；解析首次安装授权字段 | 命令和版本可读取 |
 | READY-02 | 已支持 | CLI 已安装 | 使用现有版本，不主动升级 | 继续读取目标命令帮助 |
-| READY-03 | 已支持 | 已要求安装 CLI/Skill，CLI 未安装 | 优先安装用户指定版本或 `.tgz`，否则执行 `npm install -g --foreground-scripts --allow-scripts=everyline-cli everyline-cli@latest` | 安装校验后在回复正文展示统一文案 |
+| READY-03 | 已支持 | 已要求安装 CLI/Skill，CLI 未安装 | 优先安装用户指定版本或 `.tgz`，否则执行 `npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest` | 安装校验后在回复正文展示统一文案 |
 | READY-04 | 受限 | 宿主只完成静态 Skill 导入 | 首次运行时验证 CLI；用户已要求安装时补做 CLI 安装，安装失败报告真实原因 | CLI 和 Skill 就绪后在回复正文展示统一文案 |
 | READY-05 | 受限 | 目标命令或参数在实时帮助中缺失 | 列出缺口，不模拟或猜测接口 | 停止该业务操作 |
 | READY-06 | 受限 | 旧版 `reviewStrength` 只接受 `0/1/2` | 不维护数字映射，不上传合同 | 停止合同审查；只读能力仍可继续 |
 | READY-07 | 受限 | CLI 未说明清单与内置规则包可组合 | 不假设组合语义，不上传合同 | 停止合同审查 |
 | READY-08 | 受限 | `review task result --help` 未提供等待最终结果能力 | 不自行模拟任务状态机 | 停止合同审查 |
 | READY-09 | 已支持 | `firstInstall=true` 且 `authorizationRequired=true` | 展示首次安装引导，先让用户选择身份再匹配 Profile 并进入强制新授权流程；不接受旧 dev token，不调用业务 API | 新授权成功并返回 `authorizationRequired=false` |
-| READY-10 | 已支持 | CLI 与三项 Skill 更新成功 | 展示统一更新完成文案，复用同次授权已选身份；尚未选择时先单选，再对匹配的 Profile/身份执行一次 `auth status` | 进入唯一一个授权状态分支 |
+| READY-10 | 已支持 | CLI 与两项 Skill 更新成功 | 展示统一更新完成文案，复用同次授权已选身份；尚未选择时先单选，再对匹配的 Profile/身份执行一次 `auth status` | 进入唯一一个授权状态分支 |
 | READY-11 | 已支持 | 更新后 `authenticated=false` | 展示“使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。”；已有继续授权请求时直接继续，否则等待用户确认 | 使用已选身份按宿主进入授权流程 |
 | READY-12 | 已支持 | 更新后 `authenticated=true` | 提示当前授权生效且可直接调用 CLI | 当前请求结束或进入下一项业务 |
-| READY-13 | 已支持 | Codex/WorkBuddy 首次 npm 安装成功，但日志未显示安装器文案 | 检查 `version --output json` 和三项 Skill，按本次安装事实在最终回复正文补齐统一文案 | 用户看到能力介绍及打开授权页面或生成授权链接的提示 |
+| READY-13 | 已支持 | Codex/WorkBuddy 首次 npm 安装成功，但日志未显示安装器文案 | 检查 `version --output json` 和两项 Skill，按本次安装事实在最终回复正文补齐统一文案 | 用户看到能力介绍及打开授权页面或生成授权链接的提示 |
 | READY-14 | 已支持 | 豆包/WorkBuddy 界面首次导入，`version` 未提供首次安装字段或字段为 false | 依据宿主明确的首次导入上下文或用户首次使用说明，确认 CLI 可用后展示统一文案 | 提示展示一次，等待用户选择身份 |
 | READY-15 | 已支持 | 同次对话从公共 Skill 进入审查或配置 Skill | 复用公共 Skill 的提示展示记录和已选身份 | 不重复介绍，不丢失原业务目标 |
 
@@ -220,7 +220,7 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | TASK-01 | 已支持 | 创建成功并取得 task ID | 记录唯一 task ID，调用 `review task result` | 等待终态 |
 | TASK-02 | 已支持 | 任务仍在运行 | 告知“任务已创建并正在等待”，不称为完成 | 继续查询同一任务 |
-| TASK-03 | 已支持 | 成功且返回签名 `reviewDetailUrl` | 只返回结果概要、指向完整免登录 URL 的“审查结果详情”可点击链接和默认两小时有效期提示；不展示 task ID、终态字段或其他服务端参数 | 审查完成 |
+| TASK-03 | 已支持 | 成功且返回签名 `reviewDetailUrl` | 统一返回基础信息表、审查概览，以及“审查结果：[查看详情]”完整签名链接和两小时有效期提示；不展示 task ID、终态字段或其他服务端参数 | 审查完成 |
 | TASK-04 | 已支持 | 成功但链接缺失 | 仅在结果链接项说明缺失，保留结果概要和有效期提示 | 不自行拼接地址或展开原始终态 |
 | TASK-05 | 已支持 | 任务失败、取消或结果查询超时 | 返回真实阶段、原因及已有 ID | 停止查询 |
 | TASK-06 | 受限 | 发起请求超时且没有 task ID | 说明结果不确定，不自动重试创建 | 停止，避免重复任务或扣点 |
@@ -306,16 +306,16 @@ flowchart TD
 
 以下最小集合可覆盖主要分支：
 
-1. `$everyline-cli 使用 prod-user Profile 和 user 身份检查授权状态，先不要上传文件。`
-2. 在消息中附加一份合同并发送：`$everyline-cli 使用 prod-user Profile 和 user 身份审查这个附件；强度中立。`
-3. `$everyline-cli 使用 prod-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
-4. `$everyline-cli 使用 prod-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
-5. `$everyline-cli 列出我可用的自定义审查清单和其中的规则。`
-6. `$everyline-cli 创建一个采购合同审查清单。`
-7. `$everyline-cli 给“采购合同清单”增加“付款条件风险”规则。`
-8. `$everyline-cli 删除“采购合同清单”。`
-9. `$everyline-cli 创建一条付款条件风险规则。`
-10. `$everyline-cli 删除一条仍被清单引用的规则。`
-11. `$everyline-cli 删除包含多条规则的规则分组。`
+1. `$everyline-review 使用 test-user Profile 和 user 身份检查授权状态，先不要上传文件。`
+2. 在消息中附加一份合同并发送：`$everyline-review 使用 test-user Profile 和 user 身份审查这个附件；强度中立。`
+3. `$everyline-review 使用 test-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
+4. `$everyline-review 使用 test-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
+5. `$everyline-review 列出我可用的自定义审查清单和其中的规则。`
+6. `$everyline-review 创建一个采购合同审查清单。`
+7. `$everyline-review 给“采购合同清单”增加“付款条件风险”规则。`
+8. `$everyline-review 删除“采购合同清单”。`
+9. `$everyline-review 创建一条付款条件风险规则。`
+10. `$everyline-review 删除一条仍被清单引用的规则。`
+11. `$everyline-review 删除包含多条规则的规则分组。`
 
 验收时应同时覆盖确认、取消、名称重复、无匹配、授权失败、版本能力缺失、计费异常、发起超时无 task ID、成功无详情链接等分支。

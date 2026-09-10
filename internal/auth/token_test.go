@@ -334,7 +334,7 @@ func TestProviderExpiredUserTokenOffersManualLogin(t *testing.T) {
 							t.Fatal(err)
 						}
 						provider.WithDeviceCredentials(store)
-						loginCommand = "auth init --profile test-user --as user --output json"
+						loginCommand = "auth init --restart --profile test-user --as user --output json"
 					} else if err := fileStore.SaveForIdentity(profile.Name, config.IdentityUser, token); err != nil {
 						t.Fatal(err)
 					}

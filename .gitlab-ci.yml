@@ -55,7 +55,7 @@ package:
     - sh tests/release/verify-assets.sh
     - EXPECTED_PACKAGE_VERSION="$RELEASE_VERSION" sh tests/release/package-dry-run.sh
     - EXPECTED_VERSION="$RELEASE_VERSION" sh tests/release/local-install.sh
-    - npm pack
+    - node scripts/pack-release.js .
   artifacts:
     paths:
       - everyline-cli-*.tgz

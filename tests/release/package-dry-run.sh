@@ -11,7 +11,7 @@ if [ -n "${EXPECTED_PACKAGE_VERSION:-}" ]; then
   mkdir -p "$package_root"
   cp package.json README.md "$package_root/"
   mkdir -p "$package_root/docs"
-  cp docs/everyline-cli-skill-guide.md docs/everyline-cli-skill-interaction-scenarios.md "$package_root/docs/"
+  cp docs/npm-release.md docs/everyline-cli-skill-guide.md docs/everyline-cli-skill-interaction-scenarios.md "$package_root/docs/"
   # 发布校验使用临时包根目录时，也携带对外分发的 Agent Skill。
   cp -R bin scripts skills "$package_root/"
   node - "$package_root/package.json" "$EXPECTED_PACKAGE_VERSION" <<'NODE'
@@ -41,6 +41,7 @@ function requiredPackageFiles() {
   const binaries = targets.map((target) => `bin/${target}/everyline-cli${target.startsWith("windows-") ? ".exe" : ""}`);
   return [
     "bin/checksums.txt",
+    "docs/npm-release.md",
     "docs/everyline-cli-skill-guide.md",
     "docs/everyline-cli-skill-interaction-scenarios.md",
     "scripts/install.js",
@@ -49,11 +50,8 @@ function requiredPackageFiles() {
     "scripts/platform.js",
     "scripts/run.js",
     "scripts/verify-package-version.js",
-    "skills/everyline-cli/SKILL.md",
     "skills/everyline-review/SKILL.md",
-    "skills/everyline-review/references/review-flow.md",
     "skills/everyline-review-config/SKILL.md",
-    "skills/everyline-review-config/references/management.md",
     ...binaries,
   ];
 }
@@ -69,6 +67,10 @@ if (missing.length > 0) {
   throw new Error(`npm pack 缺少文件: ${missing.join(", ")}`);
 }
 for (const obsolete of [
+  "skills/everyline-review/references/review-config.md",
+  "skills/everyline-review/references/review-flow.md",
+  "skills/everyline-review-config/references/management.md",
+  "skills/everyline-cli/SKILL.md",
   "skills/everyline-shared/SKILL.md",
   "skills/everyline-cli/references/management.md",
   "skills/everyline-cli/references/review-flow.md",

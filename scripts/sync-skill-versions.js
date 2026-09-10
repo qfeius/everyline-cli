@@ -4,7 +4,7 @@ const { join } = require("node:path");
 const { normalizePackageVersion } = require("./package-version");
 
 /**
- * syncSkillVersions 将安装包版本写入三项 Skill 的 metadata。
+ * syncSkillVersions 将安装包版本写入两项 Skill 的 metadata。
  * 入参：root string 为包根目录。
  * 返回值：无；版本或 frontmatter 无效时抛出错误，阻止发布。
  */
@@ -14,7 +14,7 @@ function syncSkillVersions(root) {
     throw new Error(`无效发布版本: ${version}`);
   }
   // 先验证全部文件再写入，避免其中一项格式异常造成部分同步。
-  const changes = ["everyline-cli", "everyline-review", "everyline-review-config"].map(name => {
+  const changes = ["everyline-review", "everyline-review-config"].map(name => {
     const path = join(root, "skills", name, "SKILL.md");
     const source = readFileSync(path, "utf8");
     const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);

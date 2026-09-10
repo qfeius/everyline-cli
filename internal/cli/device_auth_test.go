@@ -288,6 +288,8 @@ func TestAuthDeviceInitRenewsExpiredUserToken(t *testing.T) {
 		expiresAt time.Time
 		renew     bool
 	}{
+		{name: "refresh_failure", expiresAt: now.Add(time.Minute), renew: true},
+		{name: "refresh_window", expiresAt: now.Add(time.Minute), renew: true},
 		{name: "expired", expiresAt: now.Add(-time.Minute), renew: true},
 		{name: "expires_now", expiresAt: now, renew: true},
 		{name: "still_valid", expiresAt: now.Add(time.Minute)},
@@ -305,6 +307,11 @@ func TestAuthDeviceInitRenewsExpiredUserToken(t *testing.T) {
 					deviceCalls.Add(1)
 					_, _ = writer.Write([]byte(`{"device_code":"private-new-device-code","user_code":"NEW-CODE","verification_uri":"https://auth.example.com/device","verification_uri_complete":"` + verificationURL + `","expires_in":600}`))
 				case "/token":
+					_ = request.ParseForm()
+					if request.Form.Get("grant_type") == "refresh_token" {
+						http.Error(writer, "temporary failure", http.StatusServiceUnavailable)
+						return
+					}
 					tokenCalls.Add(1)
 					if err := request.ParseForm(); err != nil || request.Form.Get("grant_type") != auth.DeviceGrantType || request.Form.Get("device_code") != "private-new-device-code" {
 						http.Error(writer, "unexpected token exchange", http.StatusBadRequest)
@@ -332,11 +339,27 @@ func TestAuthDeviceInitRenewsExpiredUserToken(t *testing.T) {
 			deviceStore := &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{
 				profile.Name: {Token: &auth.Token{AccessToken: "private-old-user-token", ExpiresAt: scenario.expiresAt}},
 			}}
+			if scenario.name == "refresh_failure" {
+				credential := deviceStore.credentials[profile.Name]
+				credential.Token.RefreshToken = "fixture-refresh"
+				deviceStore.credentials[profile.Name] = credential
+			}
 			runtime.DeviceCredentials = deviceStore
+			provider := auth.NewProvider(runtime.Tokens, runtime.HTTP, runtime.Now).WithDeviceCredentials(deviceStore)
+			if scenario.name == "refresh_window" || scenario.name == "refresh_failure" {
+				_, err := provider.TokenForIdentity(context.Background(), profile, config.IdentityUser)
+				if err == nil || !strings.Contains(err.Error(), "auth init --restart") {
+					t.Fatalf("缺少可恢复的授权命令: %v", err)
+				}
+			}
 			// 连续 init 模拟 Agent 重试；待用户完成前只允许一笔授权且不请求 token endpoint。
 			for attempt := 0; attempt < 2; attempt++ {
 				stdout.Reset()
-				if err := Execute(context.Background(), runtime, []string{"auth", "init", "--profile", profile.Name, "--as", "user"}); err != nil {
+				args := []string{"auth", "init", "--profile", profile.Name, "--as", "user"}
+				if (scenario.name == "refresh_window" || scenario.name == "refresh_failure") && attempt == 0 {
+					args = append(args, "--restart")
+				}
+				if err := Execute(context.Background(), runtime, args); err != nil {
 					t.Fatal(err)
 				}
 				var result deviceAuthOutput
@@ -363,6 +386,10 @@ func TestAuthDeviceInitRenewsExpiredUserToken(t *testing.T) {
 			}
 			if !strings.Contains(stdout.String(), `"status": "succeeded"`) || strings.Contains(stdout.String(), "private-") || tokenCalls.Load() != 1 {
 				t.Fatalf("手动授权完成结果=%s，兑换请求数=%d", stdout.String(), tokenCalls.Load())
+			}
+			token, err := provider.TokenForIdentity(context.Background(), profile, config.IdentityUser)
+			if err != nil || token.AccessToken != "private-new-user-token" {
+				t.Fatalf("业务凭证恢复失败: %v", err)
 			}
 			stdout.Reset()
 			if err := Execute(context.Background(), runtime, []string{"auth", "status", "--profile", profile.Name, "--as", "user"}); err != nil || !strings.Contains(stdout.String(), `"authenticated": true`) {
