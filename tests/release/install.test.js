@@ -7,6 +7,7 @@ const { tmpdir } = require("node:os");
 const { join, sep } = require("node:path");
 const test = require("node:test");
 const {
+  restoreGlobalCommand,
   formatInstallOutput,
   installPackage,
   registerCodexSkill,
@@ -33,15 +34,15 @@ test.after(() => rmSync(nativeFixtureRoot, { recursive: true, force: true }));
  */
 function createFixture() {
   const root = mkdtempSync(join(tmpdir(), "everyline-install-"));
-  const source = join(root, "package", "skills", "everyline-cli");
-  const target = join(root, "codex", "skills", "everyline-cli");
+  const source = join(root, "package", "skills", "everyline-review");
+  const target = join(root, "codex", "skills", "everyline-review");
   mkdirSync(source, { recursive: true });
-  writeFileSync(join(source, "SKILL.md"), "---\nname: everyline-cli\n---\n");
+  writeFileSync(join(source, "SKILL.md"), "---\nname: everyline-review\n---\n");
   return { root, source, target };
 }
 
 /**
- * createPackageFixture 创建包含可执行 CLI 和三项 Skill 的最小 npm 包夹具。
+ * createPackageFixture 创建包含可执行 CLI 和两项 Skill 的最小 npm 包夹具。
  * 入参：无。
  * 返回值：object，包含临时根目录 root、模拟包根 packageRoot 和用户目录 userHome。
  */
@@ -109,12 +110,12 @@ test("豆包本地 Skill 随安装同步并可重复更新", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
   const skillRoot = join(fixture.root, "workspace", ".user_skills");
-  const reference = join(fixture.packageRoot, "skills", "everyline-review", "references", "review-flow.md");
+  const reference = join(fixture.packageRoot, "skills", "everyline-review", "references", "review-config.md");
   mkdirSync(join(reference, ".."), { recursive: true });
   writeFileSync(reference, "最新审查流程");
-  const oldSkill = join(skillRoot, "everyline-cli");
+  const oldSkill = join(skillRoot, "everyline-review");
   mkdirSync(oldSkill, { recursive: true });
-  writeFileSync(join(oldSkill, "SKILL.md"), "---\nname: everyline-cli\n---\n旧文案");
+  writeFileSync(join(oldSkill, "SKILL.md"), "---\nname: everyline-review\n---\n旧文案");
   const unrelated = join(skillRoot, "my-skill");
   mkdirSync(unrelated);
   writeFileSync(join(unrelated, "SKILL.md"), "用户技能");
@@ -127,8 +128,8 @@ test("豆包本地 Skill 随安装同步并可重复更新", (t) => {
   assert.equal(result.doubaoSkillReloadRequired, true);
   assert.equal(result.skills.doubao[0].status, "updated");
   assert.equal(lstatSync(oldSkill).isSymbolicLink(), false);
-  assert.equal(readFileSync(join(oldSkill, "SKILL.md"), "utf8"), readFileSync(join(fixture.packageRoot, "skills", "everyline-cli", "SKILL.md"), "utf8"));
-  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-flow.md"), "utf8"), "最新审查流程");
+  assert.equal(readFileSync(join(oldSkill, "SKILL.md"), "utf8"), readFileSync(join(fixture.packageRoot, "skills", "everyline-review", "SKILL.md"), "utf8"));
+  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-config.md"), "utf8"), "最新审查流程");
   assert.equal(readFileSync(join(unrelated, "SKILL.md"), "utf8"), "用户技能");
   assert.equal(result.skills.doubao[0].backupPath.startsWith(skillRoot + sep), false);
   assert.match(readFileSync(join(result.skills.doubao[0].backupPath, "SKILL.md"), "utf8"), /旧文案/);
@@ -141,7 +142,7 @@ test("豆包本地 Skill 随安装同步并可重复更新", (t) => {
   const revised = installPackage(options);
   assert.equal(revised.updated, false);
   assert.equal(revised.doubaoSkillReloadRequired, true);
-  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-flow.md"), "utf8"), "同版本修订后的流程");
+  assert.equal(readFileSync(join(skillRoot, "everyline-review", "references", "review-config.md"), "utf8"), "同版本修订后的流程");
   const events = formatInstallOutput(revised).split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
   assert.equal(events.some((event) => event.event === "skills_updated" && event.nextAction === "reload_skills"), true);
 });
@@ -205,9 +206,9 @@ test("豆包同步中途失败会回滚所有宿主的本轮变更", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
   const nativeRoot = join(fixture.root, "workspace", ".user_skills");
-  const original = "---\nname: everyline-cli\n---\n原始内容";
-  mkdirSync(join(nativeRoot, "everyline-cli"), { recursive: true });
-  writeFileSync(join(nativeRoot, "everyline-cli", "SKILL.md"), original);
+  const original = "---\nname: everyline-review\n---\n原始内容";
+  mkdirSync(join(nativeRoot, "everyline-review"), { recursive: true });
+  writeFileSync(join(nativeRoot, "everyline-review", "SKILL.md"), original);
   const script = `
     const fs = require('node:fs');
     const path = require('node:path');
@@ -225,8 +226,8 @@ test("豆包同步中途失败会回滚所有宿主的本轮变更", (t) => {
     packageRoot: fixture.packageRoot, platform: "linux", architecture: "x64", userHome: fixture.userHome,
     environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot },
   }), join(__dirname, "../../scripts/install.js")]);
-  assert.equal(readFileSync(join(nativeRoot, "everyline-cli", "SKILL.md"), "utf8"), original);
-  assert.deepEqual(readdirSync(nativeRoot), ["everyline-cli"]);
+  assert.equal(readFileSync(join(nativeRoot, "everyline-review", "SKILL.md"), "utf8"), original);
+  assert.deepEqual(readdirSync(nativeRoot), ["everyline-review"]);
   assert.deepEqual(readdirSync(join(nativeRoot, "..")), [".user_skills"]);
   for (const host of [".agents", ".workbuddy"]) assert.deepEqual(readdirSync(join(fixture.userHome, host, "skills")), []);
 });
@@ -323,8 +324,8 @@ test("首次安装最终提交失败保留门禁并撤回三宿主写入", (t) =
 });
 
 /**
- * 验证旧 ZIP 的 shared 普通目录迁出后只保留三项当前技能，备份完整且重试不重复提示重载。
- * 入参：t（TestContext）为仅旧入口及旧三项布局子场景上下文。
+ * 验证旧 ZIP 的 shared 普通目录迁出后只保留两项当前技能，备份完整且重试不重复提示重载。
+ * 入参：t（TestContext）为仅旧入口及旧两项布局子场景上下文。
  * 返回值：Promise<void>，残留旧入口、备份丢失或旧安装被误判为首次安装时断言失败。
  */
 test("豆包旧 shared 目录迁出扫描范围并保留备份", async (t) => {
@@ -399,11 +400,11 @@ test("Codex Skill 登记保留用户已有的同名目录", (t) => {
 });
 
 /**
- * 验证全局安装登记三项 Skill，并在文本和事件中原样提供首次安装与授权帮助文案。
+ * 验证全局安装登记两项 Skill，并在文本和事件中原样提供首次安装与授权帮助文案。
  * 入参：t（TestContext），用于登记临时安装目录的清理操作。
  * 返回值：void，登记结果或授权提示不符合预期时断言失败。
  */
-test("全局安装同步登记 Codex 与 WorkBuddy 的三项 Skill", (t) => {
+test("全局安装同步登记 Codex 与 WorkBuddy 的两项 Skill", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
 
@@ -411,10 +412,15 @@ test("全局安装同步登记 Codex 与 WorkBuddy 的三项 Skill", (t) => {
     packageRoot: fixture.packageRoot,
     platform: "linux",
     architecture: "x64",
-    environment: { npm_config_global: "true" },
+    environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: join(fixture.root, "doubao-skills") },
     userHome: fixture.userHome,
   });
 
+  assert.deepEqual(skillNames, ["everyline-review", "everyline-review-config"]);
+  assert.deepEqual(result.skills.doubao.map((skill) => skill.name), skillNames);
+  for (const root of [join(fixture.userHome, ".agents", "skills"), join(fixture.userHome, ".workbuddy", "skills"), join(fixture.root, "doubao-skills")]) {
+    assert.deepEqual(readdirSync(root).sort(), [...skillNames].sort());
+  }
   assert.deepEqual(result.skills.codex.map((skill) => skill.name), skillNames);
   assert.deepEqual(result.skills.workBuddy.map((skill) => skill.name), skillNames);
   for (const hostSkills of [result.skills.codex, result.skills.workBuddy]) {
@@ -438,9 +444,10 @@ test("全局安装同步登记 Codex 与 WorkBuddy 的三项 Skill", (t) => {
   const outputLines = output.trim().split("\n");
   assert.equal(outputLines[0], expectedMessage);
   assert.equal(JSON.parse(outputLines.at(-1)).message, expectedMessage);
+  assert.equal(JSON.parse(outputLines.at(-1)).recommendedSkill, "everyline-review");
 });
 
-test("升级安装以 everyline-cli 替换本包遗留的 everyline-shared 链接", (t) => {
+test("升级安装以 everyline-review 替换本包遗留的 everyline-shared 链接", (t) => {
   const fixture = createPackageFixture();
   t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
   const codexSkillRoot = join(fixture.root, "codex-skills");
@@ -468,7 +475,7 @@ test("升级安装以 everyline-cli 替换本包遗留的 everyline-shared 链�
   assert.deepEqual(result.skills.codex.map((skill) => skill.name), skillNames);
   for (const skillRoot of [codexSkillRoot, workBuddySkillRoot]) {
     assert.throws(() => lstatSync(join(skillRoot, "everyline-shared")), /ENOENT/);
-    assert.equal(lstatSync(join(skillRoot, "everyline-cli")).isSymbolicLink(), true);
+    assert.equal(lstatSync(join(skillRoot, "everyline-review")).isSymbolicLink(), true);
   }
   assert.equal(result.firstInstall, false);
   assert.equal(result.authorizationRequired, false);
@@ -482,7 +489,7 @@ test("无状态的旧安装迁移为更新，保留凭证且同版本重装不�
     { name: "仅 Codex 有旧版登记", hosts: [".agents"], names: legacySkills },
     { name: "仅 WorkBuddy 有旧版登记", hosts: [".workbuddy"], names: legacySkills },
     { name: "旧入口已移除但审查 Skill 仍在", hosts: [".agents"], names: ["everyline-review", "everyline-review-config"] },
-    { name: "三项当前 Skill 均已存在", hosts: [".agents", ".workbuddy"], names: skillNames },
+    { name: "两项当前 Skill 均已存在", hosts: [".agents", ".workbuddy"], names: skillNames },
   ];
   for (const scenario of cases) {
     await t.test(scenario.name, (t) => {
@@ -803,7 +810,7 @@ test("全局安装后置目标冲突时不留下部分 Skill 链接", (t) => {
 });
 
 /**
- * 验证跨 Node/npm 来源安装直接迁移三项 Skill，保留授权状态且不创建可被扫描的备份。
+ * 验证跨 Node/npm 来源安装直接迁移两项 Skill，保留授权状态且不创建可被扫描的备份。
  * 入参：t（TestContext）为隔离目录清理及子场景上下文。
  * 返回值：void，链接、升级标记或授权状态不符合预期时断言失败。
  */
@@ -854,7 +861,7 @@ test("跨 Node 环境安装迁移两个宿主的链接且保持安装状态", as
 });
 
 /**
- * 验证旧三项布局跨 Node 前缀升级时清理 shared，且保留旧 token 和升级语义。
+ * 验证旧两项布局跨 Node 前缀升级时清理 shared，且保留旧 token 和升级语义。
  * 入参：t（TestContext）为各旧版布局的子测试及临时目录清理上下文。
  * 返回值：Promise<void>，遗留废弃链接、强制重新授权或覆盖 token 时断言失败。
  */
@@ -949,7 +956,7 @@ test("旧链接迁移校验包归属并兼容已移除的 Skill 文件", async (
         rmSync(previous.root, { recursive: true, force: true });
         rmSync(current.root, { recursive: true, force: true });
       });
-      const oldSource = join(previous.packageRoot, "skills", "everyline-cli");
+      const oldSource = join(previous.packageRoot, "skills", "everyline-review");
       const manifestPath = join(previous.packageRoot, "package.json");
       if (kind === "owned-dangling") rmSync(oldSource, { recursive: true });
       if (kind === "foreign") writeFileSync(manifestPath, '{"name":"another-package","bin":{"everyline-cli":"scripts/run.js"}}');
@@ -1046,4 +1053,33 @@ test("scoped package migrates legacy and scoped Skill registrations", async (t) 
       }
     });
   }
+});
+
+/**
+ * 验证命令恢复遵守 bin-links 配置，且已有文件、局部安装和 Windows 不受影响。
+ * 入参：t（TestContext）负责隔离目录的清理；返回值：void，行为偏离预期时断言失败。
+ */
+test("全局命令缺失时恢复入口且不覆盖已有文件", (t) => {
+  const prefix = mkdtempSync(join(tmpdir(), "everyline-command-"));
+  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  const root = join(prefix, "lib", "node_modules", "@qfeius", "everyline-cli");
+  const source = join(root, "scripts", "run.js");
+  const target = join(prefix, "bin", "everyline-cli");
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(source, "#!/usr/bin/env node\nconsole.log('entry-ok');\n");
+  restoreGlobalCommand(root, "linux", { npm_config_global: "true", npm_config_bin_links: "false" });
+  assert.equal(existsSync(target), false);
+  assert.equal(existsSync(join(prefix, "bin")), false);
+  restoreGlobalCommand(root, "linux", {});
+  restoreGlobalCommand(root, "win32", { npm_config_global: "true" });
+  assert.equal(existsSync(target), false);
+  restoreGlobalCommand(root, "linux", { npm_config_global: "true" });
+  assert.equal(realpathSync(target), realpathSync(source));
+  assert.equal(execFileSync(process.execPath, [target], { encoding: "utf8" }).trim(), "entry-ok");
+  restoreGlobalCommand(root, "darwin", { npm_config_global: "true", npm_config_bin_links: "true" });
+  assert.equal(realpathSync(target), realpathSync(source));
+  rmSync(target);
+  writeFileSync(target, "user-owned");
+  restoreGlobalCommand(root, "linux", { npm_config_global: "true" });
+  assert.equal(readFileSync(target, "utf8"), "user-owned");
 });

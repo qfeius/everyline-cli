@@ -94,16 +94,18 @@ func completeFirstInstallAuthorization(runtime *Runtime, expectedEventID ...stri
 	return nil
 }
 
-// emitFirstInstallEvent 把首次安装状态作为单行 JSON 写入 stderr，避免污染业务 stdout。
-// 入参：runtime *Runtime 提供 stderr；state config.InstallState 提供稳定 eventId。
-// 返回值：error，编码或写入失败时非 nil。
+/*
+emitFirstInstallEvent 把首次安装状态作为单行 JSON 写入 stderr，避免污染业务 stdout。
+入参：runtime *Runtime 提供 stderr；state config.InstallState 提供稳定 eventId。
+返回值：error，编码或写入失败时非 nil。
+*/
 func emitFirstInstallEvent(runtime *Runtime, state config.InstallState) error {
 	payload, err := json.Marshal(firstInstallEvent{
 		Schema:                "everyline.skill-event.v1",
 		Event:                 "first_install",
 		EventID:               state.EventID,
 		CLIVersion:            build.Current().Version,
-		RecommendedSkill:      "everyline-cli",
+		RecommendedSkill:      "everyline-review",
 		AuthorizationRequired: true,
 		NextAction:            "authorize",
 		Message:               firstInstallMessage,

@@ -233,7 +233,7 @@ func TestClientDeviceSessionExpiryUsesDeviceGrantHint(t *testing.T) {
 	if !errors.Is(err, auth.ErrUserSessionExpired) || !strings.Contains(err.Error(), "req-device-expired") {
 		t.Fatalf("err=%v，期望 Device 会话失效和 request ID", err)
 	}
-	if !strings.Contains(err.Error(), "auth init --profile test-user --as user --output json") || strings.Contains(err.Error(), "auth login") {
+	if !strings.Contains(err.Error(), "auth init --restart --profile test-user --as user --output json") || strings.Contains(err.Error(), "auth login") {
 		t.Fatalf("Device 会话恢复提示未固定使用 auth init: %v", err)
 	}
 }

@@ -1,6 +1,6 @@
 {
   "name": "@qfeius/everyline-cli",
-  "version": "0.0.12",
+  "version": "0.1.8",
   "description": "EveryLine CLI 工具的 npm/npx 薄包装",
   "license": "UNLICENSED",
   "bin": {
@@ -33,10 +33,6 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/qfeius/everyline-cli.git"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
