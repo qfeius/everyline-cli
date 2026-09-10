@@ -7,10 +7,10 @@ npm 包名为 `@qfeius/everyline-cli`，终端命令和两项 Skill 名称保持
 ## 一次性配置
 
 1. 确认 npm 账号有 `@qfeius` 下此包的发布权限。首次发布前先检查组织权限和包名归属。
-2. 在 GitHub 仓库 `qfeius/everyline-cli` 的 **Settings → Secrets and variables → Actions** 中添加 `NPM_TOKEN`。使用具有包写权限、允许非交互发布的 granular access token；按 npm 当前规则配置 Bypass 2FA，不将 token 写入仓库。
-3. 将 `.github/workflows/release.yml` 推送到 GitHub。工作流使用 GitHub 自动提供的 token 创建 Release，无需另配 GitHub token。
+2. npm 使用已配置的 GitHub OIDC trusted publisher，绑定 `qfeius/everyline-cli` 的 `npm-publish.yml`；发布工作流保留 `id-token: write` 权限。
+3. 将两条发布工作流推送到 GitHub。`release.yml` 使用 GitHub 自动提供的 token 创建 Release 并上传制品；`npm-publish.yml` 单独发布 npm，避免两个任务争抢同一版本。
 
-Token 权限说明：[npm CI/CD 文档](https://docs.npmjs.com/using-private-packages-in-a-ci-cd-workflow/)。
+发布授权说明：[npm trusted publishing 文档](https://docs.npmjs.com/trusted-publishers/)。
 
 ## 发布步骤
 
@@ -26,7 +26,7 @@ git push github v0.1.10-blue.0
 
 上例中的版本须替换为本次版本。`github` 为本仓库指向 GitHub 的远端名称。
 
-标签触发的工作流先拒绝非 blue 版本或渠道，然后校验 npm 登录、运行测试和安装校验、发布 GitHub 预发布制品、上传 npm 安装包和两项 Skill ZIP、发布 npm 包，最后回查 blue 渠道版本。发布始终使用 `--tag blue`，不覆盖 `latest` 或 `beta`。
+同一标签触发两条工作流；两者都校验已提交版本、blue 渠道、Windows 打包和完整发布检查。`release.yml` 发布 GitHub 预发布制品、npm 安装包和两项 Skill ZIP；`npm-publish.yml` 通过 OIDC 发布 npm 包并回查 blue 渠道。npm 发布始终使用 `--tag blue`，不覆盖 `latest` 或 `beta`。
 
 GitLab 流水线继续负责测试、构建和保存 `.tgz`，不重复发布 npm。
 
@@ -66,7 +66,7 @@ everyline-cli version --output json
 
 ## 发布失败
 
-- 缺少 `NPM_TOKEN`：工作流在发布前明确报错，配置 GitHub Secret 后重跑。
+- OIDC 授权失败：核对 npm trusted publisher 绑定的仓库、工作流文件和 GitHub `id-token: write` 权限。
 - npm 403：核对 scope、包写权限、token 有效期及非交互发布权限。
 - 版本已存在：不要覆盖；核对已发布结果，需要变更时提升版本并创建新标签。
 - GitHub Release 已生成但 npm 发布失败：npm 包尚未发布成功；解决错误后可安装 Release 中的 `.tgz`，再处理 npm 发布。不要仅凭 Release 存在宣称 npm 已可安装。

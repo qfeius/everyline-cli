@@ -11,12 +11,13 @@ const versions = require("../../scripts/package-version");
 const pkg = require("../../package.json");
 
 /**
- * 验证实际 GitHub 发布前置脚本只接受与包一致的 blue 标签及渠道。
+ * 验证 GitHub 制品和 npm 发布的实际前置脚本只接受与包一致的 blue 标签及渠道。
  * 入参：无；读取真实工作流并隔离文件写入与进程环境。
  * 返回值：void，错误渠道或版本通过发布检查、输出渠道错误时断言失败。
  */
-test("发布前置检查只接受 blue 版本与渠道", () => {
-  const workflow = readFileSync(join(__dirname, "../../.github/workflows/release.yml"), "utf8");
+for (const workflowName of ["release.yml", "npm-publish.yml"]) {
+test(`${workflowName} 发布前置检查只接受 blue 版本与渠道`, () => {
+  const workflow = readFileSync(join(__dirname, "../../.github/workflows", workflowName), "utf8");
   const source = workflow.match(/node <<'NODE'\r?\n([\s\S]*?)\r?\n\s+NODE/)[1];
   const cases = [
     { tag: `v${pkg.version}`, version: pkg.version, channel: "blue", valid: true },
@@ -47,6 +48,7 @@ test("发布前置检查只接受 blue 版本与渠道", () => {
     }
   }
 });
+}
 
 /**
  * 验证 npm 源码发布生命周期拒绝其他环境，普通 CI 构建包仍可本地打包。

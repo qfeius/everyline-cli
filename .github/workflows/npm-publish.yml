@@ -14,7 +14,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify Windows npm packaging
+        run: node --test tests/release/pack-release.test.js
+
   publish:
+    needs: windows-package
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -34,29 +46,20 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
-      - name: Set package version and dist-tag from tag
+      - name: Validate release version and channel
         id: metadata
-        env:
-          TAG_NAME: ${{ github.ref_name }}
         run: |
-          set -eu
-          version="${TAG_NAME#v}"
-          if [[ "$version" == *-* ]]; then
-            dist_tag="${version#*-}"
-            dist_tag="${dist_tag%%.*}"
-          else
-            dist_tag="latest"
-          fi
-          node - "$version" <<'NODE'
-          const { readFileSync, writeFileSync } = require("node:fs");
-
-          const path = "package.json";
-          const packageData = JSON.parse(readFileSync(path, "utf8"));
-          packageData.version = process.argv[2];
-          writeFileSync(path, `${JSON.stringify(packageData, null, 2)}\n`);
+          node <<'NODE'
+          const { appendFileSync } = require('node:fs');
+          const pkg = require('./package.json');
+          const { validateBlueRelease } = require('./scripts/package-version');
+          const version = process.env.GITHUB_REF_NAME.slice(1);
+          validateBlueRelease(version, pkg.publishConfig?.tag);
+          if (pkg.version !== version) throw new Error('发布标签必须为 v<package.json.version>');
+          if (pkg.name !== '@qfeius/everyline-cli') throw new Error('npm 包名不匹配');
+          // 发布已提交的版本，保持 npm、CLI 和两项 Skill 的内容一致。
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nchannel=${pkg.publishConfig.tag}\n`);
           NODE
-          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-          printf 'dist_tag=%s\n' "$dist_tag" >> "$GITHUB_OUTPUT"
 
       - name: Run release checks and build platform assets
         env:
@@ -65,5 +68,13 @@ jobs:
 
       - name: Publish to npm with OIDC
         env:
-          NPM_DIST_TAG: ${{ steps.metadata.outputs.dist_tag }}
+          NPM_DIST_TAG: ${{ steps.metadata.outputs.channel }}
         run: npm publish --provenance --access public --tag "$NPM_DIST_TAG"
+
+      - name: Verify npm channel
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          NPM_DIST_TAG: ${{ steps.metadata.outputs.channel }}
+        run: |
+          published_version=$(npm view "@qfeius/everyline-cli@$NPM_DIST_TAG" version --registry https://registry.npmjs.org)
+          test "$published_version" = "$RELEASE_VERSION"
