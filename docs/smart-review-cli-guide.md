@@ -2,7 +2,7 @@
 
 你的 AI Agent 能读合同、找风险、整理审查意见，但如果它用不了 EveryLine，就只能停在“帮你分析一下”。`everyline-cli` 把合同上传、主体提取、发起审查、结果查询、清单管理和规则管理变成稳定的命令，让 Agent、测试脚本和 CI 都能直接完成一条真实的 EveryLine 审查流程。
 
-> 当前基线：`test` 分支，核对日期 `2026-08-26`。
+> 当前基线：`blue` 分支，核对日期 `2026-09-10`。
 >
 > 本文格式参照[智书合同 CLI 文档](https://ysi13ckdb9.feishu.cn/wiki/BosWwJsWfi5zK3kqtagctiwrnpf)，命令、字段、接口路径和行为以当前 `everyline-cli` 源码与 JSON Schema 为准。
 
@@ -13,7 +13,7 @@
 | 组成部分 | 作用 | 适用场景 |
 |---|---|---|
 | `everyline-cli` | 把 EveryLine 合同审查能力封装为结构化命令 | 人工终端、Agent 调用、自动化测试、CI |
-| Profile | 保存环境地址、app ID、默认身份和输出格式 | 在 `dev`、`test`、`blue`、`prod` 或自定义环境之间切换 |
+| Profile | 保存环境地址、app ID、默认身份和输出格式 | 使用 blue 预设或自定义连接配置 |
 | app / user 身份 | 分别完成应用身份和个人身份认证 | 系统集成、个人操作、联调验收 |
 | JSON / YAML / table / raw 输出 | 将业务结果稳定写入 stdout | Agent 解析、脚本编排、人工查看 |
 | `review run` | 编排上传、主体提取、发起审查、轮询和取结果 | 一条命令完成合同审查 |
@@ -38,7 +38,7 @@
 你可以先让 Agent 执行安装：
 
 ```text
-请帮我从 everyline-cli 的 test 分支完成源码安装，先运行测试和构建，
+请帮我从 everyline-cli 的 blue 分支完成源码安装，先运行测试和构建，
 再把二进制安装到 ~/.local/bin，最后执行 version 验证。
 ```
 
@@ -48,7 +48,7 @@
 git clone https://git.qtech.cn/ai/everyline-cli.git everyline-cli
 cd everyline-cli
 
-git switch test
+git switch blue
 make test
 make build
 
@@ -77,19 +77,19 @@ tgz 通常从 GitLab CI 的 `package` 制品或发布页面下载，包内包含
 
 ### 2. 初始化本地 Profile
 
-先让 Agent 创建一个 test 应用身份 Profile：
+先让 Agent 创建一个 blue 应用身份 Profile：
 
 ```text
-请帮我为 everyline-cli 创建名为 test-app 的 test 环境 Profile，
-默认使用 app 身份和 JSON 输出。appId 是 <TEST_APP_ID>。
+请帮我为 everyline-cli 创建名为 blue-app 的 blue 环境 Profile，
+默认使用 app 身份和 JSON 输出。appId 是 <BLUE_APP_ID>。
 ```
 
 手动执行：
 
 ```bash
-everyline-cli config add test-app \
-  --env test \
-  --app-id '<TEST_APP_ID>' \
+everyline-cli config add blue-app \
+  --env blue \
+  --app-id '<BLUE_APP_ID>' \
   --default-identity app \
   --default-output json
 ```
@@ -98,41 +98,30 @@ everyline-cli config add test-app \
 
 | 参数 | 含义 | 示例值 |
 |---|---|---|
-| Profile 名 | 本地配置名称，可按环境和身份命名 | `test-app` |
-| `--env` | 使用内置环境预设 | `dev`、`test`、`blue`、`prod` |
-| `--app-id` | 应用身份的 app ID | `<TEST_APP_ID>` |
+| Profile 名 | 本地配置名称，可按环境和身份命名 | `blue-app` |
+| `--env` | 使用唯一内置环境预设 | `blue` |
+| `--app-id` | 应用身份的 app ID | `<BLUE_APP_ID>` |
 | `--default-identity` | 默认调用身份 | `app` 或 `user` |
 | `--default-output` | 默认输出格式 | `json` |
 
-当前代码内置四套环境：
+当前代码仅内置 blue 环境；未指定 `--env` 且未提供自定义地址时默认使用 blue，显式指定 `dev`、`test`、`prod` 会返回参数错误。
 
 | 环境 | Base URL | Token URL | Auth URL |
 |---|---|---|---|
-| `dev` | `https://dev-open.qtech.cn` | `https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://dev-contract-agent.qtech.cn` |
-| `test` | `https://test-open.qtech.cn` | `https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://test-contract-agent.qtech.cn` |
 | `blue` | `https://open-b.qfei.cn` | `https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://contract-agent-b.qfei.cn` |
-| `prod` | `https://open.qfei.cn` | `https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal` | `https://contract-agent.qfei.cn` |
 
-dev/test/prod 还内置了 user OAuth 配置：
+blue 同时内置 user OAuth 配置：
 
-| 配置 | dev | test | prod |
-|---|---|---|---|
-| OAuth metadata | `https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review` | `https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
-| business type | `contract-review` | `contract-review` | `contract-review` |
-| 浏览器 public client ID | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 | 每次显式 Codex user 登录动态注册并替换 |
-| Device client ID | `zscli_c77221e810ce3977` | `zscli_c77221e810ce3977` | 当前未配置，使用时显式提供 |
-| redirect URL | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` | `http://127.0.0.1:8000/login` |
-| scope | `contract-review:full` | `contract-review:full` | `contract-review:full` |
+| 配置 | blue |
+|---|---|
+| OAuth metadata | `https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review` |
+| business type | `contract-review` |
+| 浏览器 public client ID | 每次显式 Codex user 登录动态注册并替换 |
+| Device client ID | `zscli_bc60fee4de9913ae` |
+| redirect URL | `http://127.0.0.1:8000/login` |
+| scope | `contract-review:full` |
 
-blue 已内置 business type `contract-review`、redirect URL `http://127.0.0.1:8000/login` 和 scope `contract-review:full`，OAuth metadata URL 为 `https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review`。需要使用 user 身份时，由对应环境提供这些参数后显式注入；Codex 浏览器 client ID 由每次显式登录动态注册。
-
-其他内置环境的 app Profile：
-
-```bash
-everyline-cli config add dev-app  --env dev  --app-id '<DEV_APP_ID>'  --default-identity app --default-output json
-everyline-cli config add blue-app --env blue --app-id '<BLUE_APP_ID>' --default-identity app --default-output json
-everyline-cli config add prod-app --env prod --app-id '<PROD_APP_ID>' --default-identity app --default-output json
-```
+使用 `--env blue` 时会自动填入上述连接与 OAuth 配置；Codex 浏览器 client ID 由每次显式登录动态注册。
 
 不使用内置预设时，可以通过自定义 Profile 注入全部连接参数：
 
@@ -164,7 +153,7 @@ export EVERYLINE_APP_SECRET='<APP_SECRET>'
 
 printf '%s' "$EVERYLINE_APP_SECRET" | \
   everyline-cli auth login \
-    --profile test-app \
+    --profile blue-app \
     --as app \
     --app-secret-stdin \
     --output json
@@ -173,13 +162,13 @@ printf '%s' "$EVERYLINE_APP_SECRET" | \
 user 身份授权：
 
 ```bash
-everyline-cli config add test-user \
-  --env test \
+everyline-cli config add blue-user \
+  --env blue \
   --default-identity user \
   --default-output json
 
 everyline-cli auth login \
-  --profile test-user \
+  --profile blue-user \
   --as user \
   --timeout 3m
 ```
@@ -194,7 +183,7 @@ CLI 会打开浏览器完成 OAuth/PKCE 授权，并通过本机 loopback 回调
 
 ```text
 帮我用 everyline-cli 审查 ./contract.pdf。
-使用 test-app Profile 和 app 身份，审查立场使用 xxx公司，审查角色使用该主体对应的甲方，
+使用 blue-app Profile 和 app 身份，审查立场使用 xxx公司，审查角色使用该主体对应的甲方，
 审查强度为中立，自动匹配合同类型规则包；先 dry-run，确认后正式执行并等待结果。
 ```
 
@@ -222,7 +211,7 @@ CLI 会打开浏览器完成 OAuth/PKCE 授权，并通过本机 loopback 回调
 
 ```bash
 everyline-cli review run \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --input review-run.json \
   --dry-run \
@@ -233,7 +222,7 @@ everyline-cli review run \
 
 ```bash
 everyline-cli review run \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --input review-run.json \
   --verbose \
@@ -358,7 +347,7 @@ URL 上传链路会返回 `fileId/businessId/fileHash`，一键审查会直接�
 
 ```bash
 everyline-cli review file upload \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --file ./contract.pdf \
   --name '采购合同.pdf' \
@@ -386,7 +375,7 @@ Content-Type: multipart/form-data
 
 ```bash
 everyline-cli review file upload-url \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --file-url 'https://<FILE_HOST>/contract.pdf' \
   --name '采购合同.pdf' \
@@ -427,7 +416,7 @@ Content-Type: application/json
 
 ```bash
 everyline-cli review task start \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --input review-start.json \
   --output json
@@ -471,7 +460,7 @@ CLI 发送到后端时会将 `fileId` 转为字符串：
 
 ```bash
 everyline-cli review subject extract \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --business-id '<BUSINESS_ID>' \
   --file-id 123 \
@@ -513,7 +502,7 @@ everyline-cli review subject extract \
 
 ```bash
 everyline-cli review task status \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --task-id 456 \
   --output json
@@ -541,7 +530,7 @@ everyline-cli review task status \
 
 ```bash
 everyline-cli review task result \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --task-id 456 \
   --interval 2s \
@@ -600,7 +589,7 @@ Agent 可以创建、查询、更新和删除审查清单，并把规则 ID 组�
 
 ```bash
 everyline-cli checklist create \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --data '{"name":"采购合同审查清单","enabled":true,"reviewRuleIds":["<RULE_ID>"]}' \
   --output json
@@ -666,13 +655,13 @@ everyline-cli checklist create \
 
 ```bash
 everyline-cli rule group create \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --data '{"name":"采购合同规则组","sourceType":0}' \
   --output json
 
 everyline-cli rule create \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --group-id '<GROUP_ID>' \
   --data '{"name":"付款期限审查","riskLevel":2,"riskTips":"关注付款期限和逾期责任","content":"付款期限不得早于验收完成日期","sourceType":0}' \
@@ -692,17 +681,17 @@ Agent 和 CI 应固定版本、显式身份、先验证再执行，并把业务�
 
 ```bash
 everyline-cli version --output json
-everyline-cli auth status --profile test-app --as app --output json
+everyline-cli auth status --profile blue-app --as app --output json
 
 everyline-cli review run \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --input review-run.json \
   --dry-run \
   --output json
 
 everyline-cli review run \
-  --profile test-app \
+  --profile blue-app \
   --as app \
   --input review-run.json \
   --verbose \
@@ -792,8 +781,8 @@ everyline-cli review run \
 |---|---|---|
 | CLI 已进入 PATH | `command -v everyline-cli` | 输出可执行文件路径 |
 | 版本可读取 | `everyline-cli version --output json` | stdout 返回版本 JSON |
-| Profile 已创建 | `everyline-cli config show test-app --output yaml` | 显示 test 环境及 app ID |
-| 身份已授权 | `everyline-cli auth status --profile test-app --as app --output json` | 返回有效认证状态 |
+| Profile 已创建 | `everyline-cli config show blue-app --output yaml` | 显示 blue 环境及 app ID |
+| 身份已授权 | `everyline-cli auth status --profile blue-app --as app --output json` | 返回有效认证状态 |
 | 本地输入可解析 | `everyline-cli review run --input review-run.json --dry-run --output json` | 退出码 `0` 并输出规范化请求 |
 | 后端链路可用 | 执行一次真实 `review file upload` 或 `review run` | 返回业务 `data`，无 HTTP/业务错误 |
 
@@ -801,16 +790,16 @@ everyline-cli review run \
 
 ```bash
 everyline-cli config list --output json
-everyline-cli config show test-app --output yaml
-everyline-cli config use test-app
+everyline-cli config show blue-app --output yaml
+everyline-cli config use blue-app
 ```
 
 查看和清理认证状态：
 
 ```bash
-everyline-cli auth status --profile test-app --as app --output json
-everyline-cli auth use test-app --as app
-everyline-cli auth logout --profile test-app --as app
+everyline-cli auth status --profile blue-app --as app --output json
+everyline-cli auth use blue-app --as app
+everyline-cli auth logout --profile blue-app --as app
 ```
 
 `auth logout` 删除 token 缓存，不删除通过 `--save-app-secret` 显式保存的 app secret。
@@ -906,7 +895,7 @@ CLI 校验 HTTP 状态和业务 code 后，只把 `data` 写到 stdout。GET 请
 
 ```text
 请使用 everyline-cli 审查 ./contract.pdf。
-Profile 使用 test-app，身份使用 app；先执行 auth status。
+Profile 使用 blue-app，身份使用 app；先执行 auth status。
 审查立场和角色都设置为 xxx公司，reviewStrength=中立，
 matchContractTypeRulePackage=true，extractSubjects=true，wait=true。
 先 dry-run 并展示规范化请求，确认后再真实调用。
@@ -956,14 +945,14 @@ export PATH="$HOME/.local/bin:$PATH"
 command -v everyline-cli
 ```
 
-### 提示 Profile `test-app` not found 怎么办？
+### 提示 Profile `blue-app` not found 怎么办？
 
 先查看现有 Profile，再创建或切换：
 
 ```bash
 everyline-cli config list --output json
-everyline-cli config add test-app --env test --app-id '<TEST_APP_ID>' --default-identity app --default-output json
-everyline-cli config use test-app
+everyline-cli config add blue-app --env blue --app-id '<BLUE_APP_ID>' --default-identity app --default-output json
+everyline-cli config use blue-app
 ```
 
 ### 提示未授权怎么办？
@@ -1012,8 +1001,8 @@ dry-run 不访问 Profile、token 和后端，只代表 CLI 本地契约通过�
 
 ```bash
 cd <EVERYLINE_CLI_SOURCE_DIR>
-git switch test
-git pull --ff-only origin test
+git switch blue
+git pull --ff-only origin blue
 
 make test
 make build
@@ -1043,4 +1032,5 @@ everyline-cli version --output json
 
 | 版本/基线 | 日期 | 变更说明 |
 |---|---|---|
+| `blue` | `2026-09-10` | 仅保留 blue 环境预设，移除 dev/test/prod，并同步 Profile 与授权示例 |
 | `test` | `2026-08-26` | 按当前 CLI 契约同步中文审查强度、规则来源校验、固定用量上报参数、公司名示例和 URL 上传行为 |

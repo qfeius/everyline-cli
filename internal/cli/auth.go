@@ -219,7 +219,7 @@ func newAuthDeviceInitCommand(runtime *Runtime, root *rootOptions) *cobra.Comman
 	}
 	command.Flags().BoolVar(&restart, "restart", false, "明确废弃已有事务并重新开始 Device 授权")
 	withNotes(command,
-		"Device Grant 只使用 Profile 或 dev/test 预设中的独立 Device client，不动态注册且不复用 Codex 浏览器 client。",
+		"Device Grant 只使用 Profile 或 blue 预设中的独立 Device client，不动态注册且不复用 Codex 浏览器 client。",
 		"豆包本地电脑同样使用 Device Grant；首次 auth status 前固定 SESSION_ID 和初始工作目录，后续每条命令显式复用。",
 		"待授权时 verification_link_text 固定为点击授权；豆包与 WorkBuddy 都以该字段作为按钮或 Markdown 链接文字。",
 		"把 verification_uri_complete 作为一个完整链接原样展示给用户，不拆分、不改写 query；链接目标保留完整 URL，展示文字使用点击授权。",

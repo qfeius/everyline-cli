@@ -63,24 +63,38 @@ func TestProfileRejectsUnusableURLs(t *testing.T) {
 	}
 }
 
-// TestProfileUsesConfiguredDeviceClient 验证 Device Grant 优先使用显式值，并为旧 dev/test Profile 恢复平台专用 client。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；环境预设失效、发生跨授权方式复用或显式值失效时通过 t.Fatal 报告。
+/*
+TestProfileUsesConfiguredDeviceClient 验证显式 Device client 优先，只为 blue 自动补全，已移除环境不再补全。
+入参：t *testing.T 为测试上下文。
+返回值：无；预设失效、发生跨授权方式复用或显式值失效时通过 t.Fatal 报告。
+*/
 func TestProfileUsesConfiguredDeviceClient(t *testing.T) {
 	profile := Profile{
-		OAuthMetadataURL: "https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
+		OAuthMetadataURL: "https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review",
 		OAuthClientID:    "browser-client",
 	}
-	if got := profile.EffectiveOAuthDeviceClientID(); got != "zscli_c77221e810ce3977" {
+	if got := profile.EffectiveOAuthDeviceClientID(); got != "zscli_bc60fee4de9913ae" {
 		t.Fatalf("deviceClientID=%q", got)
 	}
 	profile.OAuthDeviceClientID = "explicit-device-client"
 	if got := profile.EffectiveOAuthDeviceClientID(); got != "explicit-device-client" {
 		t.Fatalf("显式 deviceClientID=%q", got)
 	}
-	profile.OAuthDeviceClientID = ""
-	profile.OAuthMetadataURL = "https://account.example.com/.well-known/oauth-authorization-server/contract-review"
-	if got := profile.EffectiveOAuthDeviceClientID(); got != "" {
-		t.Fatalf("未知环境不得复用浏览器 client: %q", got)
+	for _, metadataURL := range []string{
+		"https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
+		"https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
+		"https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review",
+		"https://account.example.com/.well-known/oauth-authorization-server/contract-review",
+		"",
+	} {
+		profile.OAuthMetadataURL = metadataURL
+		profile.OAuthDeviceClientID = "explicit-device-client"
+		if got := profile.EffectiveOAuthDeviceClientID(); got != "explicit-device-client" {
+			t.Fatalf("metadata=%q 显式 deviceClientID=%q", metadataURL, got)
+		}
+		profile.OAuthDeviceClientID = ""
+		if got := profile.EffectiveOAuthDeviceClientID(); got != "" {
+			t.Fatalf("metadata=%q 不应补全或复用浏览器 client: %q", metadataURL, got)
+		}
 	}
 }

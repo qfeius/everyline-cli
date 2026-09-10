@@ -1,9 +1,12 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 /*
-TestResolveEnvironment 验证四套环境连接参数，并锁定 dev/test 的平台专用 Device client。
+TestResolveEnvironment 验证 blue 环境连接参数和平台专用 Device client。
 入参：t *testing.T 为测试上下文。
 返回值：无；失败通过 t.Fatal 报告。
 */
@@ -15,32 +18,12 @@ func TestResolveEnvironment(t *testing.T) {
 		oauthMetadataURL string
 		deviceClientID   string
 	}{
-		"dev": {
-			baseURL:          "https://dev-open.qtech.cn",
-			authURL:          "https://dev-contract-agent.qtech.cn",
-			tokenURL:         "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
-			oauthMetadataURL: "https://dev-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
-			deviceClientID:   "zscli_c77221e810ce3977",
-		},
-		"test": {
-			baseURL:          "https://test-open.qtech.cn",
-			authURL:          "https://test-contract-agent.qtech.cn",
-			tokenURL:         "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal",
-			oauthMetadataURL: "https://test-myaccount.qtech.cn/.well-known/oauth-authorization-server/contract-review",
-			deviceClientID:   "zscli_c77221e810ce3977",
-		},
 		"blue": {
 			oauthMetadataURL: "https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review",
 			deviceClientID:   "zscli_bc60fee4de9913ae",
 			baseURL:          "https://open-b.qfei.cn",
 			authURL:          "https://contract-agent-b.qfei.cn",
 			tokenURL:         "https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal",
-		},
-		"prod": {
-			baseURL:          "https://open.qfei.cn",
-			authURL:          "https://contract-agent.qfei.cn",
-			tokenURL:         "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal",
-			oauthMetadataURL: "https://myaccount.qfei.cn/.well-known/oauth-authorization-server/contract-review",
 		},
 	}
 	for name, expected := range tests {
@@ -63,11 +46,21 @@ func TestResolveEnvironment(t *testing.T) {
 	}
 }
 
-// TestResolveEnvironmentRejectsUnknown 验证未知环境不会静默生成错误地址。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；失败通过 t.Fatal 报告。
+/*
+TestResolveEnvironmentRejectsUnknown 验证已移除和未知环境返回错误，不回退到 blue。
+入参：t *testing.T 为测试上下文。
+返回值：无；错误文本或解析结果不符合预期时通过 t.Fatal 报告。
+*/
 func TestResolveEnvironmentRejectsUnknown(t *testing.T) {
-	if _, err := ResolveEnvironment("staging"); err == nil {
-		t.Fatal("未知环境应返回错误")
+	for _, name := range []string{"dev", "test", "prod", " DEV ", "TEST", "Prod", "staging", ""} {
+		t.Run(name, func(t *testing.T) {
+			preset, err := ResolveEnvironment(name)
+			if err == nil || !strings.Contains(err.Error(), "可选环境为 blue") {
+				t.Fatalf("environment=%q err=%v", name, err)
+			}
+			if preset.BaseURL != "" || preset.OAuthDeviceClientID != "" {
+				t.Fatalf("拒绝环境时不应返回预设: %#v", preset)
+			}
+		})
 	}
 }

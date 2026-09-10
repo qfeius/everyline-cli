@@ -105,7 +105,7 @@ func TestConfigAddDefaultsToJSONAndPreservesExplicitOutput(t *testing.T) {
 }
 
 /*
-TestConfigAddEnvironmentPreset 验证 config add 可创建四套预设，Codex 保留动态注册参数，dev/test 同时内置专用 Device client。
+TestConfigAddEnvironmentPreset 验证 config add 可创建 blue 预设，保留 Codex 动态注册参数和专用 Device client。
 入参：t *testing.T 为测试上下文。
 返回值：无；失败通过 t.Fatal 报告。
 */
@@ -116,10 +116,7 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		baseURL  string
 		tokenURL string
 	}{
-		{name: "dev", baseURL: "https://dev-open.qtech.cn", tokenURL: "https://dev-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
-		{name: "test", baseURL: "https://test-open.qtech.cn", tokenURL: "https://test-open.qtech.cn/open-apis/auth/v3/tenant_access_token/internal"},
 		{name: "blue", baseURL: "https://open-b.qfei.cn", tokenURL: "https://open-b.qfei.cn/open-apis/auth/v3/tenant_access_token/internal"},
-		{name: "prod", baseURL: "https://open.qfei.cn", tokenURL: "https://open.qfei.cn/open-apis/auth/v3/tenant_access_token/internal"},
 	} {
 		if err := Execute(context.Background(), runtime, []string{
 			"config", "add", test.name,
@@ -144,19 +141,38 @@ func TestConfigAddEnvironmentPreset(t *testing.T) {
 		if profile.OAuthClientID != "" {
 			t.Fatalf("environment=%s 不应内置浏览器 client_id: %#v", test.name, profile)
 		}
-		expectedDeviceClientID := ""
-		if test.name == "dev" || test.name == "test" {
-			expectedDeviceClientID = "zscli_c77221e810ce3977"
-		}
-		if test.name == "blue" {
-			expectedDeviceClientID = "zscli_bc60fee4de9913ae"
-		}
+		expectedDeviceClientID := "zscli_bc60fee4de9913ae"
 		if profile.OAuthDeviceClientID != expectedDeviceClientID {
 			t.Fatalf("environment=%s deviceClientID=%q", test.name, profile.OAuthDeviceClientID)
 		}
-		if expectedDeviceClientID != "" && !profile.HasDeviceOAuthConfiguration() {
+		if !profile.HasDeviceOAuthConfiguration() {
 			t.Fatalf("environment=%s 缺少 Device Grant 预设: %#v", test.name, profile)
 		}
+	}
+}
+
+/*
+TestConfigAddRejectsRemovedEnvironmentPresets 验证已移除环境报错且不创建 Profile，不静默回退到 blue。
+入参：t *testing.T 为测试上下文。
+返回值：无；环境误通过或存在配置写入时通过 t.Fatal 报告。
+*/
+func TestConfigAddRejectsRemovedEnvironmentPresets(t *testing.T) {
+	for _, environment := range []string{"dev", "test", "prod"} {
+		t.Run(environment, func(t *testing.T) {
+			runtime, stdout, _ := testRuntime(t)
+			err := Execute(context.Background(), runtime, []string{
+				"config", "add", "removed-environment",
+				"--env", environment,
+				"--default-identity", "user",
+			})
+			if err == nil || !strings.Contains(err.Error(), "可选环境为 blue") {
+				t.Fatalf("err=%v", err)
+			}
+			profiles, err := runtime.Profiles.List()
+			if err != nil || len(profiles) != 0 || stdout.Len() != 0 {
+				t.Fatalf("profiles=%#v stdout=%q err=%v", profiles, stdout.String(), err)
+			}
+		})
 	}
 }
 
@@ -410,17 +426,21 @@ func TestConfigAddStoresOAuthConfiguration(t *testing.T) {
 	}
 }
 
-// TestConfigAddUserProfileDoesNotRequireAppID 验证 user Profile 可以只配置 OAuth 和环境信息。
+/*
+TestConfigAddUserProfileDoesNotRequireAppID 验证 blue user Profile 可以只配置 OAuth 和环境信息。
+入参：t *testing.T 为测试上下文。
+返回值：无；Profile 创建或默认身份异常时通过 t.Fatal 报告。
+*/
 func TestConfigAddUserProfileDoesNotRequireAppID(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
 	if err := Execute(context.Background(), runtime, []string{
-		"config", "add", "user-dev",
-		"--env", "dev",
+		"config", "add", "user-blue",
+		"--env", "blue",
 		"--default-identity", "user",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := runtime.Profiles.Get("user-dev")
+	profile, err := runtime.Profiles.Get("user-blue")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,12 +449,16 @@ func TestConfigAddUserProfileDoesNotRequireAppID(t *testing.T) {
 	}
 }
 
-// TestConfigAddAppProfileStillRequiresAppID 验证 app Profile 仍然必须提供 app-id。
+/*
+TestConfigAddAppProfileStillRequiresAppID 验证 blue app Profile 仍然必须提供 app-id。
+入参：t *testing.T 为测试上下文。
+返回值：无；缺少 app-id 时未报错则通过 t.Fatal 报告。
+*/
 func TestConfigAddAppProfileStillRequiresAppID(t *testing.T) {
 	runtime, _, _ := testRuntime(t)
 	err := Execute(context.Background(), runtime, []string{
-		"config", "add", "app-dev",
-		"--env", "dev",
+		"config", "add", "app-blue",
+		"--env", "blue",
 		"--default-identity", "app",
 	})
 	if err == nil || !strings.Contains(err.Error(), "app-id 不能为空") {
