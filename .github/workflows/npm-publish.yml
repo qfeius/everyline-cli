@@ -1,4 +1,4 @@
-name: Publish npm package
+name: Release and publish npm package
 
 on:
   push:
@@ -6,12 +6,16 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
+# GitHub Release 和 npm 发布共用同一个标签锁，避免重复发布同一版本。
 concurrency:
   group: npm-publish-${{ github.ref }}
   cancel-in-progress: false
+
+env:
+  NPM_REGISTRY_URL: https://registry.npmjs.org/
 
 jobs:
   publish:
@@ -31,7 +35,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
+          registry-url: ${{ env.NPM_REGISTRY_URL }}
           package-manager-cache: false
 
       - name: Set package version and dist-tag from tag
@@ -49,12 +53,21 @@ jobs:
           fi
           node - "$version" <<'NODE'
           const { readFileSync, writeFileSync } = require("node:fs");
+          const { normalizePackageVersion } = require("./scripts/package-version");
 
+          const version = process.argv[2];
           const path = "package.json";
           const packageData = JSON.parse(readFileSync(path, "utf8"));
-          packageData.version = process.argv[2];
+          if (normalizePackageVersion(version) !== version || version.includes("+")) {
+            throw new Error("发布标签必须是 v 开头且不含构建元数据的有效 npm 版本");
+          }
+          if (packageData.name !== "@qfeius/everyline-cli") {
+            throw new Error("npm 包名不匹配");
+          }
+          packageData.version = version;
           writeFileSync(path, `${JSON.stringify(packageData, null, 2)}\n`);
           NODE
+          node scripts/sync-skill-versions.js
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
           printf 'dist_tag=%s\n' "$dist_tag" >> "$GITHUB_OUTPUT"
 
@@ -63,7 +76,36 @@ jobs:
           VERSION: ${{ steps.metadata.outputs.version }}
         run: make release-check VERSION="$VERSION"
 
+      - name: Publish native GitHub release
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Package CLI and Skills
+        run: |
+          # GoReleaser 清理 dist 后，重新生成独立 Skill 导入包。
+          make skill-assets
+          node scripts/pack-release.js .
+
+      - name: Attach npm and Skill packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: gh release upload "$GITHUB_REF_NAME" "everyline-cli-${RELEASE_VERSION}.tgz" dist/*-skill.zip --clobber
+
       - name: Publish to npm with OIDC
         env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
           NPM_DIST_TAG: ${{ steps.metadata.outputs.dist_tag }}
-        run: npm publish --provenance --access public --tag "$NPM_DIST_TAG"
+        run: npm publish "everyline-cli-${RELEASE_VERSION}.tgz" --registry "$NPM_REGISTRY_URL" --provenance --access public --tag "$NPM_DIST_TAG"
+
+      - name: Verify npm channel
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          NPM_DIST_TAG: ${{ steps.metadata.outputs.dist_tag }}
+        run: |
+          published_version=$(npm view "@qfeius/everyline-cli@$NPM_DIST_TAG" version --registry "$NPM_REGISTRY_URL")
+          test "$published_version" = "$RELEASE_VERSION"

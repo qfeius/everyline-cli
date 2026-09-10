@@ -5,16 +5,15 @@ npm 包名为 `@qfeius/everyline-cli`，终端命令和两项 Skill 名称保持
 ## 一次性配置
 
 1. 确认 npm 账号有 `@qfeius` 下此包的发布权限。首次发布前先检查组织权限和包名归属。
-2. 在 GitHub 仓库 `qfeius/everyline-cli` 的 **Settings → Secrets and variables → Actions** 中添加 `NPM_TOKEN`。使用具有包写权限、允许非交互发布的 granular access token；按 npm 当前规则配置 Bypass 2FA，不将 token 写入仓库。
-3. 将 `.github/workflows/release.yml` 推送到 GitHub。工作流使用 GitHub 自动提供的 token 创建 Release，无需另配 GitHub token。
+2. 在 npm 包 `@qfeius/everyline-cli` 的 Trusted Publisher 中绑定 GitHub 仓库 `qfeius/everyline-cli` 和工作流文件 `npm-publish.yml`。发布使用 GitHub OIDC，不配置长期 `NPM_TOKEN`。
+3. 将 `.github/workflows/npm-publish.yml` 推送到 GitHub。工作流使用 GitHub 自动提供的 token 创建 Release，无需另配 GitHub token。
 
-Token 权限说明：[npm CI/CD 文档](https://docs.npmjs.com/using-private-packages-in-a-ci-cd-workflow/)。
+Trusted Publishing 说明：[npm Trusted Publishing 文档](https://docs.npmjs.com/trusted-publishers/)。
 
 ## 发布步骤
 
-1. 在准备发布的分支更新 `package.json.version`。正式版如 `0.0.8`，预发布版如 `0.0.8-beta.1`。已发布版本不能覆盖。
-2. 执行 `make release-check`。构建脚本会同步两项 Skill 的版本；提交版本及相关改动。
-3. 创建并推送与包版本完全一致的标签，例如：
+1. 在准备发布的分支执行 `make release-check` 并提交待发布代码。
+2. 创建并推送版本标签。工作流以标签为准更新 npm 包和两项 Skill 的发布版本，例如：
 
 ```bash
 git tag v0.0.8
@@ -24,7 +23,7 @@ git push github v0.0.8
 
 上例中的版本须替换为本次版本。`github` 为本仓库指向 GitHub 的远端名称。
 
-标签触发的工作流依次校验版本与 npm 登录、运行测试和安装校验、发布 GitHub 原生二进制制品、上传 npm 安装包和两项 Skill ZIP、发布 npm 包，最后回查 npm 渠道版本。正式版发布到 `latest`；含预发布后缀的版本发布到 `beta`，不覆盖 `latest`。
+标签触发的唯一工作流依次同步版本、运行测试和安装校验、发布 GitHub 原生二进制制品、上传 npm 安装包和两项 Skill ZIP、通过 OIDC 发布 npm 包，最后回查 npm 渠道版本。正式版发布到 `latest`；预发布版按首个预发布标识发布，例如 `v0.1.0-beta.1` 发布到 `beta`、`v0.1.0-blue` 发布到 `blue`，均不覆盖 `latest`。
 
 GitLab 流水线继续负责测试、构建和保存 `.tgz`，不重复发布 npm。
 
@@ -64,8 +63,8 @@ everyline-cli version --output json
 
 ## 发布失败
 
-- 缺少 `NPM_TOKEN`：工作流在发布前明确报错，配置 GitHub Secret 后重跑。
-- npm 403：核对 scope、包写权限、token 有效期及非交互发布权限。
+- npm 404/403：核对包权限以及 Trusted Publisher 的组织、仓库、工作流文件名和发布环境配置。
+- provenance 校验失败：核对 `package.json` 的 `repository.url` 是否为 `https://github.com/qfeius/everyline-cli`，并确认工作流从该仓库运行。
 - 版本已存在：不要覆盖；核对已发布结果，需要变更时提升版本并创建新标签。
 - GitHub Release 已生成但 npm 发布失败：npm 包尚未发布成功；解决错误后可安装 Release 中的 `.tgz`，再处理 npm 发布。不要仅凭 Release 存在宣称 npm 已可安装。
 
