@@ -2,7 +2,7 @@
 name: everyline-review
 description: "everyline-review 是面向 Codex / 豆包 / WorkBuddy 用户的合同审查 Skill，适合在 Codex / 豆包 / WorkBuddy 中审查各类合同。用户上传合同，或询问“帮我审查合同”“这份合同有没有风险”“这份合同能不能签”“这份合同有没有问题”“合同审查”时，必须使用且优先使用本 Skill。本 Skill 基于 EveryLine CLI 发起并推进单份合同智能审查，按审查清单与规则输出结构化审查结果，支持审查主体、清单与审查强度的配置，并返回任务状态与完整签名结果链接。适用于买卖、采购、服务、委托、租赁、保密等各类合同场景。安装、导入、复制或更新 EveryLine Skill 时，也使用本 Skill，并在安装流程结束前检测 CLI、补齐缺失工具。用户需要 EveryLine CLI 安装配置、身份授权与恢复时，也使用本 Skill；查询、管理审查清单、规则和分组时转交 everyline-review-config。"
 metadata:
-  version: "0.1.8"
+  version: "0.1.10-blue.0"
   requires:
     bins: ["everyline-cli"]
   cliHelp: "everyline-cli --help;everyline-cli auth --help;everyline-cli review file upload --help;everyline-cli review task start --help;everyline-cli review task result --help;everyline-cli checklist --help;everyline-cli rule --help;everyline-cli rule group --help"
@@ -52,13 +52,13 @@ everyline-cli --help
 everyline-cli auth --help
 ```
 
-- CLI 缺失时必须进入安装流程；已获用户安装或使用目标时自动补齐最新正式版，宿主确实要求额外确认时明确说明缺失并请求安装确认。不得只提示“使用前请确保已安装 CLI”后结束。命令存在但执行失败时报告真实错误，不直接判定为未安装或反复重装。
+- CLI 缺失时必须进入安装流程；已获用户安装或使用目标时自动补齐blue 渠道最新版，宿主确实要求额外确认时明确说明缺失并请求安装确认。不得只提示“使用前请确保已安装 CLI”后结束。命令存在但执行失败时报告真实错误，不直接判定为未安装或反复重装。
 - 没有命令执行能力时，明确说明“Skill 文件已安装，当前无法验证 CLI 是否可用”，提示提供检查所需的执行能力；不得把未检查描述为 CLI 已安装或确定缺失。
 - 每次具体操作前读取对应命令的实时 --help；帮助、结构化输出与本文不一致时以当前 CLI 为准，并说明能力缺口。
 - 默认使用 --output json，以 stdout 为结构化结果；stderr 进度、退出码或事件不单独证明业务成功。
 - 每个会话首次检查后，在回复正文展示一次实际加载的 metadata.version 与 CLI version，缺失值写“未知”，不以 CLI 版本代替 Skill 版本。版本相同也不能证明文件内容或宿主加载状态一致。
 - 按 SemVer 比较版本：数字段按数值比较，预发布版本低于同号正式版，忽略构建元数据。仅当 isLatest 非 null 且 checkError 为空时使用 CLI 的最新版本结论；来源包明确包含本 Skill 时才能据其发布版本判断 Skill 是否落后，否则 Skill 的最新状态保持未知。
-- 已确认 Skill 或 CLI 落后时提示：“当前 Skill 版本 vX，CLI 版本 vC，最新安装包版本 vY。本次任务完成后更新。”已核实两者都为最新版时提示：“当前 Skill 版本 vX，CLI 版本 vC，已是最新版。”检查失败提示：“当前 Skill 版本 vX，CLI 版本 vC，暂未获取到最新版本。”本地版本高于正式发布版本时如实说明，不建议降级。以上占位版本均用真实值替换，每会话只提示一次。
+- 已确认 Skill 或 CLI 落后时提示：“当前 Skill 版本 vX，CLI 版本 vC，最新安装包版本 vY。本次任务完成后更新。”已核实两者都为最新版时提示：“当前 Skill 版本 vX，CLI 版本 vC，已是最新版。”检查失败提示：“当前 Skill 版本 vX，CLI 版本 vC，暂未获取到最新版本。”本地版本高于 blue 渠道发布版本时如实说明，不建议降级。以上占位版本均用真实值替换，每会话只提示一次。
 - isLatest=null 表示检查未知，不声称已是最新版；不把检查失败当作业务失败。即使 updateRequired=false，也检查实际加载的 Skill 是否需要更新。
 - updateRequired=true 时记录唯一 updateCommand，先完成当前整条业务流程；不得在合同上传、任务创建、轮询、结果获取或同一次配置写入之间更新。业务终态或明确失败、结果已保留且后续 API 调用结束后，按[安装与更新](#setup)核对来源并执行一次记住的更新命令。成功后验证版本并结束本轮，以便下一轮加载新版；失败时保留业务结果，报告真实错误，在下一条新业务前处理更新缺口。
 - firstInstall=true 且 authorizationRequired=true，或事件明确要求首次授权时，按[首次安装强制新授权](#first-install-auth)执行。授权成功前不调用 review、checklist 或 rule；nextAction=authorize 及同一首次安装事件重放均不能被旧 dev token、历史有效期或缓存绕过。
@@ -72,13 +72,15 @@ everyline-cli auth --help
 
 仅安装、导入、复制或更新 EveryLine Skill，未同时安装 CLI 时，安装 Agent 必须在技能文件就位后、当前任务结束前主动执行[执行前检查](#preflight)，检测当前任务执行环境中的 CLI。此流程由 Skill 安装完成触发，不等待用户另行提出 CLI 安装请求。
 
-CLI 已存在且验证可用时，复用检查结果继续原请求，无需重复安装。CLI 缺失时，按下方“安装来源与执行”第 7 条读取安装文档并自动安装最新正式版；只有宿主权限策略或用户设置要求额外确认时，才明确提示“当前缺少 EveryLine CLI，是否安装最新正式版？”并等待确认。
+CLI 已存在且验证可用时，复用检查结果继续原请求，无需重复安装。CLI 缺失时，按下方“安装来源与执行”第 7 条读取安装文档并自动安装blue 渠道最新版；只有宿主权限策略或用户设置要求额外确认时，才明确提示“当前缺少 EveryLine CLI，是否安装blue 渠道最新版？”并等待确认。
 
 不得仅报告 Skill 文件安装成功后结束。无法完成检查或安装时，说明实际状态、具体原因及待完成步骤；只有验证通过后才报告 CLI 已就绪。
 
 ### 安装来源与执行
 
 执行 npm 安装、迁移、重建或延迟更新时，默认使用下列正常全局安装命令，不设置 EVERYLINE_SKIP_SKILL_INSTALL=1，以便安装器同步两个 Skill 并保留首次安装授权门禁。只有用户明确要求单独安装 CLI 时才为该次进程设置 EVERYLINE_SKIP_SKILL_INSTALL=1；不永久修改环境。CLI 返回的 updateCommand 同样遵守此规则。安装后核对两个 Skill 的实际文件、依赖及宿主加载状态，不依据版本号猜测同步成功。
+
+安装和更新来源固定为 `@qfeius/everyline-cli@blue`，发布版本使用 `<版本>-blue.<序号>`。安装前核验 npm blue 渠道元数据；指定版本、`.tgz` 或独立二进制 manifest 时，也先核验其版本与环境属于 blue。缺少环境证据、渠道尚未发布或返回非 blue 版本时保留现有安装并报告缺口，不回退 `latest`、`beta` 或其他环境。旧 CLI 返回的 `updateCommand` 若指向 `@latest` 或其他渠道，不直接执行，按本节核验并使用 `@blue` 安装命令。两个 Skill 都遵守此来源约束。
 
 1. 正式 npm 包名为 @qfeius/everyline-cli，可执行命令为 everyline-cli，本 Skill 名为 everyline-review。按用户本次指定的安装包、版本、发布下载地址或私有源选择目标，不把本文 metadata.version 当作固定安装版本。
 2. 已有宿主可读取的 .tgz 时，直接使用该文件执行下列命令；用户本机路径不等于云端沙箱路径。仅有文件名、不可读取引用或缺少来源时，先取得可用附件、下载地址或正确源，不猜测个人目录。
@@ -87,7 +89,7 @@ CLI 已存在且验证可用时，复用检查结果继续原请求，无需重�
    ```
 3. 用户未指定包、版本或源时，使用官方 npm：
    ```bash
-   npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org
+   npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@blue --registry https://registry.npmjs.org
    ```
    不因指定包与本地同版本、isLatest=true 或公共源 E404 跳过用户指定的安装。公开源返回 E404 或版本不存在时，报告该源未找到目标，不反复换源、重试或猜下载地址。
 4. 保留 npm prefix、用户指定安装目录、Profile、身份和凭据；使用 --foreground-scripts 展示安装器输出，不添加 --silent，不单独替换二进制。
@@ -96,17 +98,17 @@ CLI 已存在且验证可用时，复用检查结果继续原请求，无需重�
    npm rebuild -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli
    ```
 6. 按目标包的实际内容分别核对 CLI 和两个 Skill。只有目标包包含 everyline-review/SKILL.md 和 everyline-review-config/SKILL.md，且安装器实际同步到宿主时，才报告两个 Skill 同步成功。来源包结构不匹配、缺少任一 Skill 或安装器报告同名目录冲突时，保留当前技能，报告技能更新缺口；不删改用户目录或自动覆盖现有技能文件。
-7. 本条先复用当前轮的 CLI 检查结果；尚未检查时，仅安装 Skill 的场景执行[仅安装 Skill 后的 CLI 依赖检查](#skill-only-setup)，其他场景执行[执行前检查](#preflight)。检查确认当前执行环境缺少 `everyline-cli` 时，立即说明“检测到当前缺少 EveryLine CLI，将安装最新正式版。”并读取[CLI 安装文档](https://ysi13ckdb9.feishu.cn/wiki/Pyy3wLSOziN5c1ka12scOejhnag)，获取安装方式并下载安装最新正式版 CLI。用户已要求安装 Skill、CLI 或使用依赖 CLI 的功能时，将补齐 CLI 作为当前任务的必要步骤直接执行；只有宿主权限策略或用户设置要求额外确认时，才明确询问“检测到当前缺少 EveryLine CLI，是否安装最新正式版以完成配置？”，等待确认后继续，已有安装确认直接复用。安装版本以官方 npm 的 `@qfeius/everyline-cli@latest` 为准，不固定文档中的示例版本。文档无法读取时，直接使用本节的官方 npm 安装命令。安装完成后按现有规则验证，通过后继续原请求；失败时说明具体原因及未完成步骤，不把安装检查留给用户自行发起，也不声称 CLI 已就绪。
+7. 本条先复用当前轮的 CLI 检查结果；尚未检查时，仅安装 Skill 的场景执行[仅安装 Skill 后的 CLI 依赖检查](#skill-only-setup)，其他场景执行[执行前检查](#preflight)。检查确认当前执行环境缺少 `everyline-cli` 时，立即说明“检测到当前缺少 EveryLine CLI，将安装blue 渠道最新版。”并读取[CLI 安装文档](https://ysi13ckdb9.feishu.cn/wiki/Pyy3wLSOziN5c1ka12scOejhnag)，获取安装方式并下载安装blue 渠道最新版 CLI。用户已要求安装 Skill、CLI 或使用依赖 CLI 的功能时，将补齐 CLI 作为当前任务的必要步骤直接执行；只有宿主权限策略或用户设置要求额外确认时，才明确询问“检测到当前缺少 EveryLine CLI，是否安装blue 渠道最新版以完成配置？”，等待确认后继续，已有安装确认直接复用。安装版本以官方 npm 的 `@qfeius/everyline-cli@blue` 为准，不固定文档中的示例版本。文档无法读取时，直接使用本节的官方 npm 安装命令。安装完成后按现有规则验证，通过后继续原请求；失败时说明具体原因及未完成步骤，不把安装检查留给用户自行发起，也不声称 CLI 已就绪。
 
 ### 验证安装与宿主加载
 
 - 安装或更新成功需有 npm 成功退出、目标 CLI 可执行、版本核对结果，以及两个 Skill 的 SKILL.md 可读取的证据。仅核实 CLI 时只报告 CLI 的实际状态，技能状态单独说明，不笼统报告全部完成。
-- 指定 .tgz 时以包内版本和实际内容为验收目标；latest 查询失败不否定已验证的安装，不触发第二次安装。同版本内容差异只能说明构建不同，不据此判断新旧或损坏；可报告“已按指定包重新安装”，不称为发现新版。缺少打包时的版本同步脚本本身不代表运行故障。
+- 指定 .tgz 时以包内版本和实际内容为验收目标；blue 渠道查询失败不否定已验证的安装，不触发第二次安装。同版本内容差异只能说明构建不同，不据此判断新旧或损坏；可报告“已按指定包重新安装”，不称为发现新版。缺少打包时的版本同步脚本本身不代表运行故障。
 - Codex、WorkBuddy 的 npm 目录链接，需核对实际指向与两个 Skill 的文件；界面导入副本单独核验。CLI 更新不证明手动导入的技能副本已更新。
 - 对支持豆包同步的安装器，macOS 可识别已存在的 ~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills；其他平台或自定义工作区按宿主实际提供的 EVERYLINE_DOUBAO_SKILLS_DIR 指定绝对目录。未发现时不创建猜测路径。EVERYLINE_SKIP_DOUBAO_SKILL_INSTALL=1 仅跳过豆包，EVERYLINE_SKIP_SKILL_INSTALL=1 跳过全部宿主。
 - 同版本也核对内容；需保留的旧副本应放在技能扫描目录外。安装器返回 event=skills_updated、host=doubao、nextAction=reload_skills 时，核对事件目标并重新读取两个 Skill 的 SKILL.md。实际文件同步不证明当前会话已加载；没有即时加载入口时提示新建任务。
 - 豆包云端 ZIP 副本通过技能管理重新导入两个独立 Skill ZIP（每个 ZIP 包含对应技能的完整目录）。CLI .tgz 和含额外发布材料的外层包不作为技能导入包；尚待导入或重载的步骤明确列为未完成。
-- npm 包装版通过 version --output json 查询官方 npm latest，无需额外 manifest；独立二进制安装使用 HTTPS manifest。只采用真实返回的更新信息。
+- npm 包装版通过 version --output json 查询官方 npm blue 渠道，无需额外 manifest；独立二进制安装使用 HTTPS manifest。只采用真实返回的更新信息。
 
 ### 安装故障处理
 

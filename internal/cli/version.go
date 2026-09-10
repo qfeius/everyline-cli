@@ -38,9 +38,11 @@ type deferredUpdateNotice struct {
 	UpdateAfter    string `json:"updateAfter"`
 }
 
-// newVersionCommand 创建带非阻断在线检查的版本输出命令。
-// 入参：runtime *Runtime 为输出和网络依赖；root *rootOptions 为输出 flags。
-// 返回值：*cobra.Command，可输出当前版本、最新版本判断和更新命令。
+/*
+newVersionCommand 创建带非阻断在线检查的版本输出命令。
+入参：runtime *Runtime 为输出和网络依赖；root *rootOptions 为输出 flags。
+返回值：*cobra.Command，可输出当前版本、当前环境最新版本判断和更新命令。
+*/
 func newVersionCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	var manifestURL string
 	command := &cobra.Command{
@@ -61,7 +63,7 @@ func newVersionCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().StringVar(&manifestURL, "manifest-url", "", "覆盖更新 manifest 的 HTTPS 地址")
 	withNotes(command,
 		"检查失败不会使 version 命令失败，isLatest 返回 null，避免误报已是最新版。",
-		"npm 安装版从 npm latest 检查更新，无需 manifest；独立二进制更新地址按 --manifest-url、EVERYLINE_CLI_UPDATE_MANIFEST_URL、构建内置值的顺序选择。",
+		"npm 安装版只从 npm "+selfupdate.NPMChannel+" 渠道检查更新，渠道缺失时不回退其他环境；独立二进制更新地址按 --manifest-url、EVERYLINE_CLI_UPDATE_MANIFEST_URL、构建内置值的顺序选择。",
 	)
 	return command
 }
@@ -124,7 +126,7 @@ versionUpdateCommand 根据安装方式返回用户可直接执行的更新命�
 func versionUpdateCommand(manifestURL string, explicit bool) string {
 	if os.Getenv("EVERYLINE_CLI_WRAPPER") == "1" {
 		// npm 包同时携带 CLI 与 Skill，显式允许 everyline-cli 的 postinstall 才能重新登记两个宿主。
-		return "npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org"
+		return "npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@" + selfupdate.NPMChannel + " --registry https://registry.npmjs.org"
 	}
 	if explicit && strings.TrimSpace(manifestURL) != "" {
 		return "everyline-cli update --manifest-url " + strings.TrimSpace(manifestURL)

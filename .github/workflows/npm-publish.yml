@@ -18,7 +18,19 @@ env:
   NPM_REGISTRY_URL: https://registry.npmjs.org/
 
 jobs:
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify Windows npm packaging
+        run: node --test tests/release/pack-release.test.js
+
   publish:
+    needs: windows-package
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -38,38 +50,30 @@ jobs:
           registry-url: ${{ env.NPM_REGISTRY_URL }}
           package-manager-cache: false
 
-      - name: Set package version and dist-tag from tag
+      - name: Validate blue release metadata
         id: metadata
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -eu
           version="${TAG_NAME#v}"
-          if [[ "$version" == *-* ]]; then
-            dist_tag="${version#*-}"
-            dist_tag="${dist_tag%%.*}"
-          else
-            dist_tag="latest"
-          fi
           node - "$version" <<'NODE'
-          const { readFileSync, writeFileSync } = require("node:fs");
-          const { normalizePackageVersion } = require("./scripts/package-version");
+          const { readFileSync } = require("node:fs");
+          const { validateBlueRelease } = require("./scripts/package-version");
 
           const version = process.argv[2];
-          const path = "package.json";
-          const packageData = JSON.parse(readFileSync(path, "utf8"));
-          if (normalizePackageVersion(version) !== version || version.includes("+")) {
-            throw new Error("发布标签必须是 v 开头且不含构建元数据的有效 npm 版本");
+          const packageData = JSON.parse(readFileSync("package.json", "utf8"));
+          validateBlueRelease(version, packageData.publishConfig?.tag);
+          if (packageData.version !== version) {
+            throw new Error("发布标签必须为 v<package.json.version>");
           }
           if (packageData.name !== "@qfeius/everyline-cli") {
             throw new Error("npm 包名不匹配");
           }
-          packageData.version = version;
-          writeFileSync(path, `${JSON.stringify(packageData, null, 2)}\n`);
           NODE
           node scripts/sync-skill-versions.js
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-          printf 'dist_tag=%s\n' "$dist_tag" >> "$GITHUB_OUTPUT"
+          printf 'dist_tag=blue\n' >> "$GITHUB_OUTPUT"
 
       - name: Run release checks and build platform assets
         env:

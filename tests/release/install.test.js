@@ -89,6 +89,99 @@ assert.equal(calls, failCall);
 `, join(__dirname, "../../scripts/install.js"), JSON.stringify(options), String(failCall)]);
 }
 
+/**
+ * 验证旧三项 Skill 升级到两项时迁出 everyline-cli，保留授权和豆包备份，并支持重复安装。
+ * 入参：t（TestContext）提供同源替换和跨 npm 前缀场景；返回值：Promise<void>，旧入口或状态异常时断言失败。
+ */
+test("旧三项 Skill 升级清理 everyline-cli 并保留授权", async (t) => {
+  for (const layout of ["same-prefix", "cross-prefix"]) {
+    await t.test(layout, (t) => {
+      const previous = createPackageFixture();
+      const current = layout === "same-prefix" ? previous : createPackageFixture();
+      t.after(() => {
+        rmSync(previous.root, { recursive: true, force: true });
+        if (current !== previous) rmSync(current.root, { recursive: true, force: true });
+      });
+      const manifestPath = join(previous.packageRoot, "package.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      writeFileSync(manifestPath, JSON.stringify({ ...manifest, version: "9.8.6" }));
+      const nativeRoot = join(previous.userHome, "workspace", ".user_skills");
+      const options = {
+        packageRoot: previous.packageRoot, userHome: previous.userHome, platform: "linux", architecture: "x64",
+        environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot },
+      };
+      const installed = installPackage(options);
+      const state = JSON.parse(readFileSync(installed.installStatePath, "utf8"));
+      writeFileSync(installed.installStatePath, JSON.stringify({ ...state, firstInstall: false, authorizationRequired: false, nextAction: "" }));
+      const tokenPath = join(previous.userHome, ".everyline-cli", "tokens.json");
+      const tokens = '{"tokens":{"prod::user":{"access_token":"fixture-old-token"}}}';
+      writeFileSync(tokenPath, tokens);
+
+      // 构造真实旧三项布局：Codex/WorkBuddy 是目录链接，豆包保留 ZIP 导入的普通目录。
+      const oldName = "everyline-cli";
+      const oldSource = join(previous.packageRoot, "skills", oldName);
+      const oldContent = `---\nname: ${oldName}\n---\nlegacy public skill`;
+      mkdirSync(oldSource);
+      writeFileSync(join(oldSource, "SKILL.md"), oldContent);
+      mkdirSync(join(nativeRoot, oldName));
+      writeFileSync(join(nativeRoot, oldName, "SKILL.md"), oldContent);
+      for (const host of [".agents", ".workbuddy"]) {
+        symlinkSync(oldSource, join(previous.userHome, host, "skills", oldName), "dir");
+      }
+      if (layout === "same-prefix") {
+        // npm 同目录替换后旧链接已经悬空，也应被识别并清理。
+        rmSync(oldSource, { recursive: true });
+        writeFileSync(manifestPath, JSON.stringify(manifest));
+      }
+      options.packageRoot = current.packageRoot;
+      const updated = installPackage(options);
+      assert.equal(updated.updated, true);
+      assert.equal(updated.authorizationRequired, false);
+      assert.equal(readFileSync(tokenPath, "utf8"), tokens);
+      for (const host of [".agents", ".workbuddy"]) {
+        const root = join(previous.userHome, host, "skills");
+        assert.deepEqual(readdirSync(root).sort(), [...skillNames].sort());
+        for (const name of skillNames) {
+          assert.equal(realpathSync(join(root, name)), realpathSync(join(current.packageRoot, "skills", name)));
+        }
+      }
+      assert.deepEqual(readdirSync(nativeRoot).sort(), [...skillNames].sort());
+      const backups = readdirSync(join(nativeRoot, "..")).filter(name => name.startsWith(".everyline-skill-update-"));
+      assert.equal(backups.length, 1);
+      assert.equal(readFileSync(join(nativeRoot, "..", backups[0], "previous", "SKILL.md"), "utf8"), oldContent);
+      assert.equal(installPackage(options).updated, false);
+    });
+  }
+});
+
+/**
+ * 验证新增废弃入口清理不接管用户自建目录、其他来源链接或豆包未知身份目录。
+ * 入参：t（TestContext）负责隔离文件清理；返回值：void，用户内容或首次授权语义变化时断言失败。
+ */
+test("清理 everyline-cli 时保留未确认来源的宿主内容", (t) => {
+  const fixture = createPackageFixture();
+  t.after(() => rmSync(fixture.root, { recursive: true, force: true }));
+  const codex = join(fixture.userHome, ".agents", "skills", "everyline-cli");
+  const workBuddy = join(fixture.userHome, ".workbuddy", "skills", "everyline-cli");
+  const foreign = join(fixture.root, "foreign-package", "skills", "everyline-cli");
+  const nativeRoot = join(fixture.userHome, "workspace", ".user_skills");
+  for (const directory of [codex, foreign, join(nativeRoot, "everyline-cli"), join(workBuddy, "..")]) {
+    mkdirSync(directory, { recursive: true });
+  }
+  writeFileSync(join(codex, "SKILL.md"), "user content");
+  writeFileSync(join(foreign, "SKILL.md"), "foreign content");
+  writeFileSync(join(nativeRoot, "everyline-cli", "SKILL.md"), "unknown content");
+  symlinkSync(foreign, workBuddy, "dir");
+  const result = installPackage({
+    packageRoot: fixture.packageRoot, userHome: fixture.userHome, platform: "linux", architecture: "x64",
+    environment: { npm_config_global: "true", EVERYLINE_DOUBAO_SKILLS_DIR: nativeRoot },
+  });
+  assert.equal(result.authorizationRequired, true);
+  assert.equal(readFileSync(join(codex, "SKILL.md"), "utf8"), "user content");
+  assert.equal(realpathSync(workBuddy), realpathSync(foreign));
+  assert.equal(readFileSync(join(nativeRoot, "everyline-cli", "SKILL.md"), "utf8"), "unknown content");
+});
+
 test("Codex Skill 只在 npm 全局安装时自动登记", () => {
   assert.equal(shouldInstallCodexSkill({ npm_config_global: "true" }), true);
   assert.equal(shouldInstallCodexSkill({ npm_config_global: "false" }), false);
@@ -237,7 +330,7 @@ test("豆包同步中途失败会回滚所有宿主的本轮变更", (t) => {
  * 入参：t（TestContext）为授权状态子场景及临时目录清理上下文。
  * 返回值：Promise<void>，原链接、目录、token 或状态文件未恢复，或重试语义变化时断言失败。
  */
-test("升级最终提交失败恢复三宿主和旧 shared 入口", async (t) => {
+test("升级最终提交失败恢复三宿主和两个旧公共入口", async (t) => {
   for (const stateKind of ["authorized", "pending", "legacy"]) {
     await t.test(stateKind, (t) => {
       const previous = createPackageFixture();
@@ -266,11 +359,13 @@ test("升级最终提交失败恢复三宿主和旧 shared 入口", async (t) =>
       const tokenPath = join(previous.userHome, ".everyline-cli", "tokens.json");
       const token = '{"tokens":{"test::user":{"access_token":"fixture-old-token"}}}';
       writeFileSync(tokenPath, token);
-      const sharedContent = "---\nname: everyline-shared\n---\nold public skill";
-      mkdirSync(join(nativeRoot, "everyline-shared"));
-      writeFileSync(join(nativeRoot, "everyline-shared", "SKILL.md"), sharedContent);
-      for (const host of [".agents", ".workbuddy"]) {
-        symlinkSync(join(previous.packageRoot, "skills", "everyline-shared"), join(previous.userHome, host, "skills", "everyline-shared"), "dir");
+      const obsoleteNames = ["everyline-shared", "everyline-cli"];
+      for (const name of obsoleteNames) {
+        mkdirSync(join(nativeRoot, name));
+        writeFileSync(join(nativeRoot, name, "SKILL.md"), `---\nname: ${name}\n---\nold public skill`);
+        for (const host of [".agents", ".workbuddy"]) {
+          symlinkSync(join(previous.packageRoot, "skills", name), join(previous.userHome, host, "skills", name), "dir");
+        }
       }
 
       options.packageRoot = current.packageRoot;
@@ -278,14 +373,16 @@ test("升级最终提交失败恢复三宿主和旧 shared 入口", async (t) =>
 
       for (const host of [".agents", ".workbuddy"]) {
         const root = join(previous.userHome, host, "skills");
-        assert.deepEqual(readdirSync(root).sort(), [...skillNames, "everyline-shared"].sort());
+        assert.deepEqual(readdirSync(root).sort(), [...skillNames, ...obsoleteNames].sort());
         for (const name of skillNames) assert.equal(realpathSync(join(root, name)), realpathSync(join(previous.packageRoot, "skills", name)));
-        assert.equal(lstatSync(join(root, "everyline-shared")).isSymbolicLink(), true);
+        for (const name of obsoleteNames) assert.equal(lstatSync(join(root, name)).isSymbolicLink(), true);
       }
       for (const name of skillNames) {
         assert.equal(readFileSync(join(nativeRoot, name, "SKILL.md"), "utf8"), readFileSync(join(previous.packageRoot, "skills", name, "SKILL.md"), "utf8"));
       }
-      assert.equal(readFileSync(join(nativeRoot, "everyline-shared", "SKILL.md"), "utf8"), sharedContent);
+      for (const name of obsoleteNames) {
+        assert.equal(readFileSync(join(nativeRoot, name, "SKILL.md"), "utf8"), `---\nname: ${name}\n---\nold public skill`);
+      }
       assert.deepEqual(readdirSync(join(nativeRoot, "..")), [".user_skills"]);
       assert.equal(readFileSync(tokenPath, "utf8"), token);
       assert.equal(stateKind === "legacy" ? existsSync(original.installStatePath) : readFileSync(original.installStatePath, "utf8"), stateKind === "legacy" ? false : originalState);

@@ -325,14 +325,78 @@ func TestVersionCheckFailureIsNonBlockingAndUnknown(t *testing.T) {
 	}
 }
 
-// TestVersionUpdateCommandForNPMIncludesSkillInstaller 验证 npm 更新命令会运行负责同步登记 Skills 的安装脚本。
-// 入参：t *testing.T 为测试上下文。
-// 返回值：无；更新命令遗漏包级脚本许可时通过 t.Fatal 报告。
+/*
+TestVersionUpdateCommandForNPMIncludesSkillInstaller 验证 npm 更新保持 blue 渠道并同步 Skills。
+入参：t *testing.T 为测试上下文。
+返回值：无；更新命令跨环境或遗漏包级脚本许可时通过 t.Fatal 报告。
+*/
 func TestVersionUpdateCommandForNPMIncludesSkillInstaller(t *testing.T) {
 	t.Setenv("EVERYLINE_CLI_WRAPPER", "1")
-	const expected = "npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org"
+	const expected = "npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@blue --registry https://registry.npmjs.org"
 	if actual := versionUpdateCommand("https://updates.example.test/manifest.json", false); actual != expected {
 		t.Fatalf("updateCommand=%q，期望 %q", actual, expected)
+	}
+}
+
+type versionHTTPTransport func(*http.Request) (*http.Response, error)
+
+/*
+RoundTrip 将版本检查交给隔离响应，验证真实命令而不访问 npm。
+入参：request *http.Request 为 CLI 请求；接收者 versionHTTPTransport 为测试回调。
+返回值：*http.Response 为渠道响应；error 为测试注入的网络错误。
+*/
+func (transport versionHTTPTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
+/*
+TestVersionNPMKeepsBlueChannel 验证更新可用、渠道缺失与误配置的完整 version 输出。
+入参：t *testing.T 为测试上下文。
+返回值：无；请求其他环境或把未知状态当成可更新时断言失败。
+*/
+func TestVersionNPMKeepsBlueChannel(t *testing.T) {
+	t.Setenv("EVERYLINE_CLI_WRAPPER", "1")
+	originalVersion := build.Version
+	build.Version = "0.1.10-blue.0"
+	t.Cleanup(func() { build.Version = originalVersion })
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		update bool
+	}{
+		{"new-blue", http.StatusOK, `{"version":"0.1.10-blue.1"}`, true},
+		{"missing-channel", http.StatusNotFound, `{}`, false},
+		{"wrong-environment", http.StatusOK, `{"version":"0.2.0"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime, stdout, _ := testRuntime(t)
+			calls := 0
+			runtime.HTTP = &http.Client{Transport: versionHTTPTransport(func(request *http.Request) (*http.Response, error) {
+				calls++
+				if request.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/blue" {
+					t.Fatalf("跨环境请求: %s", request.URL)
+				}
+				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body)), Header: make(http.Header)}, nil
+			})}
+			if err := Execute(t.Context(), runtime, []string{"version", "--output", "json"}); err != nil {
+				t.Fatal(err)
+			}
+			var output versionOutput
+			if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+				t.Fatal(err)
+			}
+			if calls != 1 || output.UpdateRequired != tc.update || !strings.Contains(output.UpdateCommand, "@qfeius/everyline-cli@blue ") {
+				t.Fatalf("requests=%d, result=%+v", calls, output)
+			}
+			if tc.update {
+				if output.IsLatest == nil || *output.IsLatest || output.CheckError != "" {
+					t.Fatalf("blue 新版判断错误: %+v", output)
+				}
+			} else if output.IsLatest != nil || output.CheckError == "" {
+				t.Fatalf("渠道异常应返回未知状态: %+v", output)
+			}
+		})
 	}
 }
 

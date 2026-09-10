@@ -317,32 +317,43 @@ func TestRunRejectsNPMWrapperWithoutNetwork(t *testing.T) {
 }
 
 /*
-TestCheckNPM 验证 npm 版本比较及失败边界。
+TestCheckNPM 验证 blue 版本比较、错误渠道拒绝及失败时不回退其他渠道。
 入参：t *testing.T 为测试上下文。
 返回值：无，响应解析或版本判断错误时报告失败。
 */
 func TestCheckNPM(t *testing.T) {
 	for _, tc := range []struct {
-		body   string
-		status int
-		latest bool
-		fail   bool
+		current string
+		body    string
+		status  int
+		latest  bool
+		fail    bool
 	}{
-		{`{"version":"1.1.0"}`, 200, false, false},
-		{`{"version":"1.0.0"}`, 200, true, false},
-		{`{"version":"0.9.0"}`, 200, true, false},
-		{`{}`, 200, false, true},
-		{`invalid`, 200, false, true},
-		{`{}`, 404, false, true},
+		{"1.0.0-blue.1", `{"version":"1.1.0-blue.0"}`, 200, false, false},
+		{"1.0.0-blue.1", `{"version":"1.0.0-blue.2"}`, 200, false, false},
+		{"1.0.0-blue.1", `{"version":"1.0.0-blue.1"}`, 200, true, false},
+		{"1.0.0-blue.1", `{"version":"1.0.0-blue.0"}`, 200, true, false},
+		{"0.1.8", `{"version":"0.1.10-blue.0"}`, 200, false, false},
+		{"1.0.0-blue.1", `{"version":"1.1.0"}`, 200, false, true},
+		{"1.0.0-blue.1", `{"version":"1.1.0-beta.0"}`, 200, false, true},
+		{"1.0.0-blue.1", `{"version":"1.1.0-blue.invalid"}`, 200, false, true},
+		{"1.0.0-blue.1", `{}`, 200, false, true},
+		{"1.0.0-blue.1", `invalid`, 200, false, true},
+		{"1.0.0-blue.1", `{}`, 404, false, true},
 	} {
 		t.Run(tc.body+http.StatusText(tc.status), func(t *testing.T) {
+			calls := 0
 			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/latest" {
+				calls++
+				if r.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/blue" {
 					t.Fatalf("unexpected URL: %s", r.URL)
 				}
 				return response(tc.status, tc.body), nil
 			})}
-			got, err := CheckNPM(t.Context(), "1.0.0", client)
+			got, err := CheckNPM(t.Context(), tc.current, client)
+			if calls != 1 {
+				t.Fatalf("requests=%d，blue 渠道失败后不应请求其他渠道", calls)
+			}
 			if (err != nil) != tc.fail {
 				t.Fatalf("err=%v", err)
 			}
