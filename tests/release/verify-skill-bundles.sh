@@ -20,8 +20,13 @@ unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'SESSION_ID
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'firstInstall=true 且 authorizationRequired=true' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'auth init --restart --profile <profile> --as user --output json' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '`auth init` 返回 `reused=true`' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '统一默认 `test` 环境' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '当前 Profile 是 dev、blue 或 prod 时不得继承它' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '统一固定使用 `blue` 环境' >/dev/null
+# 显式环境和配置管理入口同样受 blue 限制，避免发布包恢复旧的环境覆盖规则。
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '非 blue Profile 报告环境不匹配并停止' >/dev/null
+unzip -p "$output_dir/everyline-review-config-skill.zip" SKILL.md | grep -F '显式指定其他环境或实际连接地址不属于 blue 的 Profile 时，报告环境不匹配并停止' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '当前 Profile 是 dev、test 或 prod 时不得继承它' >/dev/null
+# 固定 blue 的 Device client 必须随 Skill 发布，避免授权引导要求额外配置或沿用 test client。
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'blue 使用预设的独立 EveryLine Device client `zscli_bc60fee4de9913ae`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '发起任何授权事务前必须先固定 `user/app` 身份' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'WorkBuddy 固定调用 `AskUserQuestion` 并设置 `multiSelect=false`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '[点击授权](<FULL_AUTHORIZATION_URL>)' >/dev/null

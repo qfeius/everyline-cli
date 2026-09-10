@@ -34,6 +34,8 @@ metadata:
 
 宿主按当前对话平台判断。豆包的“本地电脑”模式仍属于豆包，和 WorkBuddy 一样使用 Device Grant；操作系统、本机 CLI、loopback 可访问或环境变量缺失都不能作为改走 Codex OAuth 的依据。用户身份确定后，先固定[Device 会话](#device-session)，再执行身份相关的配置、状态和业务命令。
 
+本 Skill 及 `everyline-review-config` 固定使用 `blue` 环境。首次使用、继续已有任务、更新后恢复及授权恢复时，都先按[Profile 与身份](#identity)核对实际连接地址；历史任务、缓存凭据和显式环境参数均不豁免此检查。非 blue Profile 不用于授权、上传、审查或配置管理，也不把其他环境的凭据迁移到 blue。
+
 安装、导入、复制或更新 EveryLine Skill 完成文件写入后，以及每个新会话首次使用本 Skill 时，立即检查当前任务执行环境中的 CLI。检查在账号授权之前进行，不等待合同上传，也不依赖 CLI 返回首次安装事件；同一轮已经验证当前环境可用时复用结果。
 
 先只检查命令是否存在：
@@ -161,11 +163,11 @@ EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、
 
 1. 发起任何授权事务前必须先固定 `user/app` 身份。用户在本次请求中或同一次授权交互中已经明确身份时直接使用；尚未明确时必须先让用户单选 `user（个人账号授权）` 或 `app（应用授权）`。收到选择前不创建身份相关 Profile、不索取 app ID 或 app secret，也不执行 `auth status`、`auth login`、`auth init` 或 `auth complete`。
 2. Profile 名称、`default_identity`、唯一候选、历史 token、CLI 默认身份及 `nextAction` 均不代表客户选择；即使帮助或结构化输出带有默认身份，也先完成单选。笼统回复“开始授权”“继续登录”或“好的”只表达登录意愿，不视为选择 user 或 app。
-3. 身份确定后，用户在本次请求中明确指定 Profile 或环境时，以该选择为准；指定 Profile 先执行 `everyline-cli config show <profile> --output json` 校验。用户未指定 Profile 和环境时，Codex、WorkBuddy、豆包 AgentKit/Skills Sandbox 与豆包普通工作任务统一默认 `test` 环境。执行 `config list --output json`，只复用连接地址属于 `test` 预设且身份兼容的 Profile；当前 Profile 是 dev、blue 或 prod 时不得继承它。多个 test Profile 同时匹配时，user 按 `test-user`、app 按 `test-app` 优先；仍不唯一时展示真实候选项让用户选择。
-4. test 环境没有可复用 Profile 时，先读取 `config add --help`：user 身份创建 `test-user`（`config add test-user --env test --default-identity user --default-output json`）；app 身份取得非敏感 app ID 后创建 `test-app`（`config add test-app --env test --default-identity app --app-id <app-id> --default-output json`）。按用户已授权的安装、登录或业务目标使用默认 test，不追加环境确认；同名 Profile 已存在但并非 test 时不覆盖，向用户报告名称冲突并请其显式选择 Profile。
+3. 身份确定后，Codex、WorkBuddy、豆包 AgentKit/Skills Sandbox 与豆包普通工作任务统一固定使用 `blue` 环境。用户显式指定其他环境时，说明“当前 Skill 仅支持 blue 环境”，停止该环境的操作，不切换环境，也不静默把该请求改发到 blue。指定 Profile 先执行 `everyline-cli config show <profile> --output json`，按实际连接地址校验其属于 blue 预设，不以 Profile 名称判断；非 blue Profile 报告环境不匹配并停止。未指定 Profile 时执行 `config list --output json`，只复用连接地址属于 `blue` 预设且身份兼容的 Profile；当前 Profile 是 dev、test 或 prod 时不得继承它。多个 blue Profile 同时匹配时，user 按 `blue-user`、app 按 `blue-app` 优先；仍不唯一时仅展示真实 blue 候选项让用户选择。
+4. blue 环境没有可复用 Profile 时，先读取 `config add --help`：user 身份创建 `blue-user`（`config add blue-user --env blue --default-identity user --default-output json`）；app 身份取得非敏感 app ID 后创建 `blue-app`（`config add blue-app --env blue --default-identity app --app-id <app-id> --default-output json`）。按用户已授权的安装、登录或业务目标使用 blue，不追加环境确认；同名 Profile 已存在但并非 blue 时不覆盖，向用户报告名称冲突并请其选择实际属于 blue 的 Profile。
 5. 身份确定后的授权与业务命令都显式携带 `--profile <profile> --as <identity>`，不依赖当前 Profile 或 Profile 默认身份。版本、帮助及 Profile 管理命令按实时帮助支持的参数调用，不强加未注册的身份选项；适用的 Device 会话变量仍按下文复用。
-6. 宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant；三者默认环境始终是 test。
-7. 不因权限、资源可见性或一种身份授权失败而自动切换另一种身份，也不自动改到 dev、blue 或 prod。
+6. 宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant；三者执行环境始终固定为 blue。
+7. 不因权限、资源可见性或一种身份授权失败而自动切换另一种身份；任何入口均不执行 dev、test、prod 或自定义环境的操作。
 
 ### 宿主结构化选项卡
 
@@ -247,7 +249,7 @@ CODEBUDDY_SESSION_ID=<same-session-id> everyline-cli auth complete --profile <pr
 
 ### 发起与完成 Device 授权
 
-dev/test/prod 固定使用 `business_type=contract-review`、`scope=contract-review:full` 和对应开放平台 resource。Codex `auth login` 按上节规则动态注册浏览器 client，并始终走 OAuth Authorization Code + PKCE。豆包和 WorkBuddy 始终执行 `auth init`/`auth complete` Device Grant；dev/test 使用独立 EveryLine Device client `zscli_c77221e810ce3977`，`auth init` 不动态注册 client，也不复用 Codex 浏览器 client。prod、blue 或自定义环境使用 Device Grant 时，Profile 必须配置平台确认的 `oauth_device_client_id`。两类 client 分开使用，Agent 不在两种授权方式之间复制 client ID。
+blue 固定使用 `business_type=contract-review`、`scope=contract-review:full` 和对应开放平台 resource。Codex `auth login` 按上节规则动态注册浏览器 client，并始终走 OAuth Authorization Code + PKCE。豆包和 WorkBuddy 始终执行 `auth init`/`auth complete` Device Grant；blue 使用预设的独立 EveryLine Device client `zscli_bc60fee4de9913ae`。`auth init` 不动态注册 client，也不复用 Codex 浏览器 client。两类 client 分开使用，Agent 不在两种授权方式之间复制 client ID，也不改用其他环境的 Device client。
 
 读取 `auth init --help` 和 `auth complete --help`。首次安装门禁期间执行：
 

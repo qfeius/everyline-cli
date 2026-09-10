@@ -2,7 +2,7 @@
 
 EveryLine 命令行工具，支持合同审查工作流、审查清单和审查规则管理。
 
-公开版本只提供 prod 环境预设。其他部署环境应通过自定义 Profile 配置，不在公开文档和安装包中暴露内部环境地址。
+本分支的两项 Skill 固定使用 blue 环境；下文配置、授权和审查示例均使用 blue Profile。
 
 ## 安装
 
@@ -43,8 +43,8 @@ user 身份不需要 app-id；app 身份必须配置 app-id。建议为不同身
 ### 创建 Profile
 
 ~~~bash
-everyline-cli config add prod-user \
-  --env prod \
+everyline-cli config add blue-user \
+  --env blue \
   --default-identity user
 ~~~
 
@@ -52,7 +52,7 @@ everyline-cli config add prod-user \
 
 ~~~bash
 everyline-cli auth login \
-  --profile prod-user \
+  --profile blue-user \
   --as user \
   --timeout 3m
 ~~~
@@ -61,16 +61,16 @@ CLI 会先读取 OAuth metadata 的 `registration_endpoint` 并动态注册浏�
 
 user Token 过期且未刷新成功后，通过新的授权链接手动登录：Codex 重新执行 `auth login --profile <profile> --as user --no-open-browser --timeout 3m`；豆包/WorkBuddy 在原会话中执行 `auth init --profile <profile> --as user --output json`，展示本次返回的完整授权链接，用户完成后执行一次 `auth complete`。以 `auth status` 的 `authenticated=true` 确认恢复，再继续原业务操作。
 
-豆包（含本地电脑）和 WorkBuddy 统一使用 Device Grant；dev/test Profile 已内置独立 Device client。执行下面的命令前先按后文准备并固定对应宿主的会话变量：
+豆包（含本地电脑）和 WorkBuddy 统一使用 Device Grant；blue Profile 已内置独立 Device client。执行下面的命令前先按后文准备并固定对应宿主的会话变量：
 
 ~~~bash
-everyline-cli config add test-user --env test --default-identity user
-everyline-cli auth init --profile test-user --as user --output json
+everyline-cli config add blue-user --env blue --default-identity user
+everyline-cli auth init --profile blue-user --as user --output json
 # 用户打开 verification_uri_complete 并完成授权后：
-everyline-cli auth complete --profile test-user --as user --output json
+everyline-cli auth complete --profile blue-user --as user --output json
 ~~~
 
-`auth init` 不监听 `127.0.0.1`，不动态注册 client，也不复用 Codex 浏览器 client。dev/test 预设使用独立 Device client `zscli_c77221e810ce3977`；prod 或自定义环境使用 Device Grant 时，通过 `--oauth-device-client-id` 配置平台确认的 client。dev/test/prod 均不内置浏览器 client ID；Codex 本地每次显式 user 登录会调用 metadata 声明的 `registration_endpoint`，保存返回值后启动 OAuth Authorization Code + PKCE，且不覆盖 Device client。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
+`auth init` 不监听 `127.0.0.1`，不动态注册 client，也不复用 Codex 浏览器 client。blue 预设使用独立 Device client `zscli_bc60fee4de9913ae`，不内置浏览器 client ID；Codex 本地每次显式 user 登录会调用 metadata 声明的 `registration_endpoint`，保存返回值后启动 OAuth Authorization Code + PKCE，且不覆盖 Device client。豆包 AgentKit 的安全凭证存储要求注入 base64 编码的 32 字节 `EVERYLINE_CLI_CREDENTIAL_KEY_V1`，WorkBuddy 使用系统凭证库。
 
 WorkBuddy 必须在第一次 `auth init` 前固定一个 `CODEBUDDY_SESSION_ID`，并在 `auth init`、用户回复“已授权”后的 `auth complete` 以及后续 `auth status` 中复用同一值。`auth complete` 本地提示没有待完成事务时，先用原值重试 `auth complete`；只有服务端状态明确为 `denied`、`expired` 或 `invalid_grant` 后才开始新的授权事务，避免让用户重复打开授权链接。
 
@@ -80,24 +80,24 @@ WorkBuddy 必须在第一次 `auth init` 前固定一个 `CODEBUDDY_SESSION_ID`�
 
 ~~~bash
 everyline-cli auth status \
-  --profile prod-user \
+  --profile blue-user \
   --as user \
   --output json
 ~~~
 
 `auth status` 默认读取当前身份对应的安全缓存。OAuth metadata 声明 refresh grant 时，CLI 会在过期前五分钟尝试刷新；进入该窗口后缺少 refresh token 或刷新失败时提示手动重新授权，不回退使用旧 token；业务请求收到可信 `code=110004` 时只刷新并重放一次。服务端不支持刷新或返回 `invalid_grant` 时清理被拒绝的旧 token；并发写入的新 token 会保留。
 
-prod 预设已包含正式 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env prod` 创建 user Profile 后，每次显式 Codex user 登录都会通过 metadata 声明的注册端点动态获取浏览器 client ID。prod 当前不内置 Device client，豆包/WorkBuddy 使用 prod 时需显式配置 `--oauth-device-client-id`。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
+blue 预设已包含 OAuth metadata、business type、loopback redirect 和 scope；使用 `--env blue` 创建 user Profile 后，每次显式 Codex user 登录都会通过 metadata 声明的注册端点动态获取浏览器 client ID。blue 已内置独立 Device client，豆包/WorkBuddy 使用 blue 时直接采用预设。CLI 不把 AuthURL 直接当作 OAuth authorization endpoint。
 
 ## app 应用授权
 
 ### 创建 Profile
 
 ~~~bash
-export EVERYLINE_APP_ID='cli_prod_xxx'
+export EVERYLINE_APP_ID='cli_blue_xxx'
 
-everyline-cli config add prod-app \
-  --env prod \
+everyline-cli config add blue-app \
+  --env blue \
   --default-identity app \
   --app-id "$EVERYLINE_APP_ID"
 ~~~
@@ -111,7 +111,7 @@ export EVERYLINE_APP_SECRET='从 Secret Manager 注入的值'
 
 printf '%s' "$EVERYLINE_APP_SECRET" | \
   everyline-cli auth login \
-    --profile prod-app \
+    --profile blue-app \
     --as app \
     --app-secret-stdin \
     --output json
@@ -148,12 +148,12 @@ Agent 调用示例：
 
 ~~~bash
 everyline-cli auth status \
-  --profile prod-app \
+  --profile blue-app \
   --as app \
   --output json
 
 everyline-cli review run \
-  --profile prod-app \
+  --profile blue-app \
   --as app \
   --input review-run.json \
   --output json \
@@ -191,7 +191,7 @@ everyline-cli review run \
 
 ~~~bash
 everyline-cli review run \
-  --profile prod-user \
+  --profile blue-user \
   --as user \
   --input review-run.json \
   --dry-run
@@ -201,7 +201,7 @@ everyline-cli review run \
 
 ~~~bash
 everyline-cli review run \
-  --profile prod-user \
+  --profile blue-user \
   --as user \
   --input review-run.json \
   --output json \
@@ -226,7 +226,7 @@ review task result
 
 ~~~bash
 everyline-cli review file upload \
-  --profile prod-user \
+  --profile blue-user \
   --as user \
   --file ./contract.pdf \
   --name 采购合同.pdf \
@@ -236,14 +236,14 @@ everyline-cli review file upload \
 沙箱宿主只提供原始附件字节流时，可保持相同上传契约并改用 stdin：
 
 ~~~bash
-everyline-cli review file upload --profile prod-user --as user --stdin --name 采购合同.pdf --output json < attachment.pdf
+everyline-cli review file upload --profile blue-user --as user --stdin --name 采购合同.pdf --output json < attachment.pdf
 ~~~
 
 使用上传结果中的 businessId、fileId 和 fileHash 发起任务：
 
 ~~~bash
 everyline-cli review task start \
-  --profile prod-user \
+  --profile blue-user \
   --as user \
   --data '{"businessId":"biz-001","fileId":123456,"fileHash":"<upload.fileHash>","config":{"selectedPosition":"xxx公司","selectedAuditRole":"甲方","reviewStrength":"中立","matchContractTypeRulePackage":true}}' \
   --output json
@@ -253,7 +253,7 @@ everyline-cli review task start \
 
 ~~~bash
 everyline-cli review task result \
-  --profile prod-user \
+  --profile blue-user \
   --as user \
   --task-id 123456789 \
   --output json > result.json
@@ -323,9 +323,9 @@ manifest 示例：
 
 ~~~bash
 everyline-cli config list
-everyline-cli config show prod-user --output yaml
-everyline-cli auth status --profile prod-user --as user --output json
-everyline-cli auth logout --profile prod-user --as user
+everyline-cli config show blue-user --output yaml
+everyline-cli auth status --profile blue-user --as user --output json
+everyline-cli auth logout --profile blue-user --as user
 everyline-cli completion zsh
 ~~~
 
@@ -337,11 +337,11 @@ everyline-cli completion zsh
 
 - 不新增内部环境地址、内部域名或未确认的 OAuth 配置。
 - 不提交 app secret、access token、OAuth code、Keychain 内容或本地配置文件。
-- 使用 fake HTTP、临时 Profile 和测试 token 验证功能，不依赖真实 prod 凭证。
+- 使用 fake HTTP、临时 Profile 和测试 token 验证功能，不依赖真实环境凭证。
 - 运行 go test ./...、go vet ./... 和 make build。
 
  npm 安装版通过 `everyline-cli version --output json` 查询 npm 官方源的 `latest` 版本，无需配置 manifest。发现新版后，在当前业务流程结束时执行返回的 `updateCommand`，由 npm 安装器同步 CLI 和本地 Skills；检查失败时最新版本状态保持未知。独立二进制安装仍使用 HTTPS manifest。
 
 两项 Skill 使用 `metadata.version` 标记实际加载版本。`npm pack` / `npm publish` 的 prepack 和 `scripts/build-skill-bundles.sh` 会自动从 `package.json` 同步该版本；发布前仍需以相同版本构建 CLI。每个会话首次使用时展示 Skill、CLI 和 npm 最新安装包版本，发现新版后在当前业务结束时更新；宿主文件已更新而会话仍旧时提示新建任务。
 
-默认环境为 blue：未指定环境或自定义地址的 `config add` 使用 blue 预设，Skill 默认选择 `blue-user` / `blue-app`。显式 Profile 和环境优先；已有配置不会迁移。blue 默认 Device client ID 为 `zscli_bc60fee4de9913ae`；OAuth metadata 默认使用 `https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review`，并内置 `contract-review` 业务、`contract-review:full` scope 和本机回调地址。
+CLI 未指定环境或自定义地址的 `config add` 使用 blue 预设。两项 Skill 固定使用 blue，选择 `blue-user` / `blue-app` 或其他实际连接到 blue 的 Profile；显式指定其他环境或非 blue Profile 时报告不匹配并停止该请求，已有配置和凭据不会迁移。blue 默认 Device client ID 为 `zscli_bc60fee4de9913ae`；OAuth metadata 默认使用 `https://myaccount-b.qfei.cn/.well-known/oauth-authorization-server/contract-review`，并内置 `contract-review` 业务、`contract-review:full` scope 和本机回调地址。

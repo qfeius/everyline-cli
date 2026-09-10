@@ -202,7 +202,7 @@ func newConfigAddCommand(runtime *Runtime, root *rootOptions) *cobra.Command {
 	command.Flags().StringVar(&oauthMetadataURL, "oauth-metadata-url", "", "用户 OAuth authorization server metadata URL")
 	command.Flags().StringVar(&oauthBusinessType, "oauth-business-type", "", "用户 OAuth business type")
 	command.Flags().StringVar(&oauthClientID, "oauth-client-id", "", "可选用户 OAuth 浏览器 public client ID；Codex 显式登录时动态注册并替换")
-	command.Flags().StringVar(&oauthDeviceClientID, "oauth-device-client-id", "", "独立 OAuth Device Grant client ID；dev/test 由预设提供，其他环境使用时显式配置")
+	command.Flags().StringVar(&oauthDeviceClientID, "oauth-device-client-id", "", "独立 OAuth Device Grant client ID；dev/test/blue 由预设提供，其他环境使用时显式配置")
 	command.Flags().StringVar(&oauthRedirectURL, "oauth-redirect-url", "", "用户 OAuth loopback 回调 URL")
 	command.Flags().StringSliceVar(&oauthScopes, "oauth-scope", nil, "用户 OAuth scope，可重复传入")
 	command.Flags().StringVar(&oauthDeviceAuthorizationURL, "oauth-device-authorization-url", "", "可选 Device Authorization endpoint；默认从 metadata 发现")

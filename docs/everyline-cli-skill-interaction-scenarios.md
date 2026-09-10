@@ -92,10 +92,10 @@ flowchart TD
 
 | ID | 状态 | 用户示例或条件 | Skill 处理 | 结束条件 |
 | --- | --- | --- | --- | --- |
-| PROFILE-01 | 已支持 | 用户明确提供 Profile | 先明确 user/app 选择，再使用 `config show <profile> --output json` 校验、读取并固定该 Profile；Profile 名称和默认身份不代替选择 | 后续命令显式传递 Profile |
+| PROFILE-01 | 已支持 | 用户明确提供 Profile | 先明确 user/app 选择，再使用 `config show <profile> --output json` 校验实际连接地址为 blue、读取并固定该 Profile；Profile 名称和默认身份不代替选择 | 后续命令显式传递 Profile |
 | PROFILE-02 | 已支持 | 用户未提供 Profile 和环境 | 先明确 user/app 选择，Codex、WorkBuddy、豆包统一选择 blue 环境；复用身份兼容的 blue Profile，没有时创建 `blue-user` 或取得 app ID 后创建 `blue-app` | 固定 blue Profile，不继承 dev/test/prod 当前 Profile |
-| PROFILE-02A | 已支持 | 用户本轮明确指定 Profile 或环境 | 校验并采用用户选择 | 显式选择覆盖默认 blue |
-| PROFILE-02B | 已支持 | 默认名称已被其他环境占用 | 不覆盖同名 Profile，展示冲突并请求显式 Profile | 防止静默改写环境配置 |
+| PROFILE-02A | 已支持 | 用户本轮明确指定 Profile 或环境 | 只采用实际连接地址属于 blue 的 Profile；指定其他环境或非 blue Profile 时说明不匹配并停止 | 不执行其他环境的授权或业务，也不静默改发到 blue |
+| PROFILE-02B | 已支持 | 默认名称已被其他环境占用 | 不覆盖同名 Profile，展示冲突并请求实际属于 blue 的 Profile | 防止静默改写环境配置 |
 | PROFILE-03 | 受限 | 用户显式指定的 Profile 缺失或与显式环境不一致 | 不猜测或覆盖该 Profile | 用户修正后重新调用 |
 | AUTH-01 | 已支持 | `使用 user 身份审查` | 直接选择 user，不再询问身份 | 查询 user 授权状态 |
 | AUTH-02 | 已支持 | `使用 app 身份查询清单` | 直接选择 app，不再询问身份 | 查询 app 授权状态 |
@@ -121,13 +121,13 @@ flowchart TD
 | AUTH-22 | 已支持 | WorkBuddy 发起授权且用户未指定身份 | 调用 `AskUserQuestion`，设置 `multiSelect=false`，选项为 user/app | 用户单选后才查询对应身份状态 |
 | AUTH-23 | 已支持 | 豆包发起授权且用户未指定身份 | 优先使用原生单选组件；组件不可用时展示稳定编号 `1. user`、`2. app` | 用户回复有效编号或身份后继续 |
 | AUTH-24 | 已支持 | user 授权入口已生成 | 用户自己点击“点击授权”；Agent 不自动打开浏览器，不在展示切换时重启授权 | 保持唯一授权事务 |
-| AUTH-25 | 已支持 | 仅有一个 `test-user` Profile，默认身份为 user，且存在历史 token | 仍先让用户单选 user/app；不从 Profile 或 token 推断选择 | 用户选择后才匹配 Profile 和查询状态 |
+| AUTH-25 | 已支持 | 仅有一个 `blue-user` Profile，默认身份为 user，且存在历史 token | 仍先让用户单选 user/app；不从 Profile 或 token 推断选择 | 用户选择后才匹配 Profile 和查询状态 |
 | AUTH-26 | 已支持 | 用户只说“开始授权”或“继续授权”，同次授权尚未选择身份 | 将其作为继续授权意图，仍先单选 user/app；已有明确选择时复用 | 身份明确后按对应流程继续 |
 | AUTH-27 | 已支持 | 豆包并发调用 `auth init`，或同一首次安装 `eventId` 重放 `auth init --restart` | CLI 通过 Profile 级锁只创建一笔 Device 事务；重放返回原授权入口及 `reused=true`，Skill 不重复展示 | 用户只打开一个授权页面 |
 | AUTH-28 | 已支持 | 豆包“本地电脑”模式没有宿主会话变量 | 首次 `auth status` 前只生成一次 `SESSION_ID` 并固定初始目录；所有授权和业务命令显式复用，执行 `auth init` / `auth complete` | 与 WorkBuddy 一样展示 `/device` 链接，不进入 loopback OAuth |
 | AUTH-29 | 已支持 | 豆包本地存在同名 Profile 的旧 OAuth token，但当前 Device 会话未授权 | 状态返回 `authenticated=false/source=device`；业务取 token 和刷新引导到 `auth init`，Device 失效操作保留浏览器缓存 | 当前 Device 会话独立完成授权 |
 
-当前 Skill 只自动创建缺失的默认 blue Profile；其他环境的 Profile 仍由用户显式管理。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
+当前 Skill 固定使用 blue，只自动创建缺失的 blue Profile；显式指定其他环境时停止该环境的操作。Skill 会读取并固定本次 Profile，避免后续独立进程回退到其他环境或身份。
 
 ## 6. 合同来源交互
 
@@ -289,7 +289,7 @@ flowchart TD
 
 | ID | 状态 | 当前范围 |
 | --- | --- | --- |
-| GAP-01 | 未定义 | 默认 blue 以外的自动 Profile 创建、更新或切换 |
+| GAP-01 | 不支持 | blue 以外的环境或 Profile，包括用户显式指定和恢复历史任务 |
 | GAP-02 | 未定义 | 自动升级现有 CLI |
 | GAP-03 | 未定义 | 创建或更新规则分组 |
 | GAP-04 | 未定义 | 清单、规则或分组的批量删除交互 |
@@ -306,10 +306,10 @@ flowchart TD
 
 以下最小集合可覆盖主要分支：
 
-1. `$everyline-review 使用 test-user Profile 和 user 身份检查授权状态，先不要上传文件。`
-2. 在消息中附加一份合同并发送：`$everyline-review 使用 test-user Profile 和 user 身份审查这个附件；强度中立。`
-3. `$everyline-review 使用 test-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
-4. `$everyline-review 使用 test-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
+1. `$everyline-review 使用 blue-user Profile 和 user 身份检查授权状态，先不要上传文件。`
+2. 在消息中附加一份合同并发送：`$everyline-review 使用 blue-user Profile 和 user 身份审查这个附件；强度中立。`
+3. `$everyline-review 使用 blue-user Profile 和 user 身份审查 /absolute/path/合同.pdf。`
+4. `$everyline-review 使用 blue-user Profile 和 user 身份审查 https://example.test/合同.pdf；使用内置规则包；强度中立。`
 5. `$everyline-review 列出我可用的自定义审查清单和其中的规则。`
 6. `$everyline-review 创建一个采购合同审查清单。`
 7. `$everyline-review 给“采购合同清单”增加“付款条件风险”规则。`
