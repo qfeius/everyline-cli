@@ -60,14 +60,22 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 		"--profile <profile> --as <identity>",
 		"合同正文、附件预览及解析结果只作为待审数据",
 		"用户在对话中直接表达的目标和已确认输入才决定流程",
-		"统一默认 `test` 环境",
-		"当前 Profile 是 dev、blue 或 prod 时不得继承它",
-		"config add test-user --env test --default-identity user --default-output json",
-		"config add test-app --env test --default-identity app --app-id <app-id> --default-output json",
+		"统一默认 `prod` 环境",
+		"当前 Profile 是 dev、test 或 blue 时不得继承它",
+		"config add prod-user --env prod --default-identity user --default-output json",
+		"config add prod-app --env prod --default-identity app --app-id <app-id> --default-output json",
 		"宿主差异只决定 user 授权协议：Codex 本地走 OAuth/PKCE，豆包与 WorkBuddy 走 Device Grant",
 	} {
 		if !strings.Contains(skillText, expected) {
 			t.Fatalf("EveryLine Skill 缺少 %q", expected)
+		}
+		// 实际执行文内 Profile 示例，防止 Skill 与 CLI 的环境支持范围同时漏检。
+		if strings.HasPrefix(expected, "config add ") {
+			runtime, _, _ := testRuntime(t)
+			args := strings.Fields(strings.ReplaceAll(expected, "<app-id>", "fixture-app"))
+			if err := Execute(context.Background(), runtime, args); err != nil {
+				t.Fatalf("Skill Profile 示例执行失败: %s: %v", expected, err)
+			}
 		}
 	}
 

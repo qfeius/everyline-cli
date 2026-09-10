@@ -20,8 +20,8 @@ unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'SESSION_ID
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'firstInstall=true 且 authorizationRequired=true' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'auth init --restart --profile <profile> --as user --output json' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '`auth init` 返回 `reused=true`' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '统一默认 `test` 环境' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '当前 Profile 是 dev、blue 或 prod 时不得继承它' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '统一默认 `prod` 环境' >/dev/null
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '当前 Profile 是 dev、test 或 blue 时不得继承它' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '发起任何授权事务前必须先固定 `user/app` 身份' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F 'WorkBuddy 固定调用 `AskUserQuestion` 并设置 `multiSelect=false`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '[点击授权](<FULL_AUTHORIZATION_URL>)' >/dev/null
