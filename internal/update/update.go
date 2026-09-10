@@ -22,10 +22,12 @@ import (
 const (
 	maxManifestBytes = 1 << 20
 	maxArtifactBytes = 256 << 20
+	// NPMChannel 将此分支的检查和安装固定到 blue，避免跨环境更新。
+	NPMChannel = "blue"
 )
 
 // ErrNPMWrapper 表示当前进程由 npm/npx 薄包装启动，不能直接替换包内二进制。
-var ErrNPMWrapper = errors.New("当前命令由 npm/npx 薄包装启动，请使用 npm install -g --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest 更新 CLI 与 Skills")
+var ErrNPMWrapper = errors.New("当前命令由 npm/npx 薄包装启动，请使用 npm install -g --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@" + NPMChannel + " 更新 CLI 与 Skills")
 
 // Manifest 描述一个版本及各平台的独立二进制制品。
 type Manifest struct {
@@ -104,7 +106,7 @@ func Check(ctx context.Context, currentVersion string, manifestURL string, httpC
 }
 
 /*
-CheckNPM 从 npm latest 标签检查安装包版本。
+CheckNPM 只从 npm blue 标签检查安装包版本，并拒绝其他环境的版本。
 入参：ctx context.Context 控制取消；currentVersion string 为当前版本；httpClient *http.Client 为网络客户端。
 返回值：CheckResult 为版本比较结果；error 为网络、响应或版本格式错误。
 */
@@ -113,8 +115,8 @@ func CheckNPM(ctx context.Context, currentVersion string, httpClient *http.Clien
 	if err != nil {
 		return CheckResult{}, err
 	}
-	// 使用固定包地址，检查来源与建议安装的包保持一致。
-	content, err := getLimited(ctx, httpClient, "https://registry.npmjs.org/@qfeius%2feveryline-cli/latest", maxManifestBytes)
+	// 渠道缺失或请求失败时保留未知状态，不回退 latest/beta。
+	content, err := getLimited(ctx, httpClient, "https://registry.npmjs.org/@qfeius%2feveryline-cli/"+NPMChannel, maxManifestBytes)
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -127,6 +129,13 @@ func CheckNPM(ctx context.Context, currentVersion string, httpClient *http.Clien
 	latest, err := parseVersion(metadata.Version)
 	if err != nil {
 		return CheckResult{}, err
+	}
+	// blue 发布使用独立的 -blue.N 版本，防止 dist-tag 误指向其他分支的正式包。
+	if len(latest.prerelease) != 2 || latest.prerelease[0] != NPMChannel {
+		return CheckResult{}, fmt.Errorf("npm blue 渠道返回非 blue 版本: %s", metadata.Version)
+	}
+	if _, err := strconv.ParseUint(latest.prerelease[1], 10, 64); err != nil {
+		return CheckResult{}, fmt.Errorf("npm blue 渠道版本序号无效: %s", metadata.Version)
 	}
 	return CheckResult{CurrentVersion: strings.TrimSpace(currentVersion), LatestVersion: strings.TrimSpace(metadata.Version), IsLatest: compareVersions(current, latest) >= 0}, nil
 }

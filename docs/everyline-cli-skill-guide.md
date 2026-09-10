@@ -26,7 +26,7 @@ OpenAI 官方文档将 Skill 定义为包含 `SKILL.md` 及可选 references、s
 
 Codex 本地任务直接使用宿主文件路径和 loopback OAuth。WorkBuddy 使用本机 CLI、系统凭证库和 Device Grant。豆包普通工作任务在本地电脑和远端沙箱中都使用 Device Grant，并固定 `SESSION_ID` 与初始工作目录；远端沙箱使用 Linux CLI，以及宿主提供的原始附件字节流或完整下载 URL，用户 macOS 路径不作为沙箱文件路径。
 
-CLI 和 Skill 应来自同一个发布版本。每次 Skill 发布（包括纯文案调整）都提升 `package.json` 统一版本、发布同版本 npm 包并更新远端 manifest，让 `version.updateRequired` 可以触发强制更新门禁。
+CLI 和 Skill 应来自同一个 blue 发布版本（格式为 `<版本>-blue.<序号>`）。每次发布提升 `package.json` 统一版本，并将同版本 npm 包发布到 `blue` 渠道；`version.updateRequired` 触发业务结束后的延迟更新。安装前确认指定包、版本和环境属于 blue；blue 渠道缺失时保留原安装，不回退其他环境。
 
 ## 2. 全局安装包同步 CLI、Codex、WorkBuddy 和豆包本地 Skills
 
@@ -557,10 +557,10 @@ everyline-cli version --output json
 
 也可以将 tgz 作为工作任务附件提供，然后告诉 Agent：“使用 everyline-review 技能，按附件 tgz 更新 CLI 和两项 Skill，不从 npm 查询最新版。”即使包版本相同，也按指定包安装并同步可管理的 Skill 内容；无需该包先发布到 npm。
 
-**从 npm 更新到最新版**：
+**从 npm blue 渠道更新到最新版**：
 
 ```bash
-npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@blue --registry https://registry.npmjs.org
 everyline-cli version --output json
 ```
 

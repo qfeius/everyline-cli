@@ -1,7 +1,7 @@
 "use strict";
 const { execFileSync } = require("node:child_process");
-const { mkdirSync, renameSync } = require("node:fs");
-const { join, resolve } = require("node:path");
+const { existsSync, mkdirSync, renameSync } = require("node:fs");
+const { basename, dirname, join, resolve } = require("node:path");
 
 /**
  * packRelease 生成 npm 安装包并统一交付文件名，不改变包内 scoped 名称。
@@ -12,7 +12,22 @@ function packRelease(destination = "dist") {
   const root = resolve(__dirname, "..");
   const directory = resolve(destination);
   mkdirSync(directory, { recursive: true });
-  const output = execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["pack", "--json", "--pack-destination", directory], {
+  let command = "npm";
+  const args = ["pack", "--json", "--pack-destination", directory];
+  if (process.platform === "win32") {
+    // npm 生命周期优先复用同一 npm；直接运行脚本时按 PATH 定位 npm.cmd 对应的 JS 入口。
+    let npmCLI = process.env.npm_execpath;
+    if (!npmCLI || basename(npmCLI) !== "npm-cli.js" || !existsSync(npmCLI)) {
+      const commands = execFileSync("where.exe", ["npm.cmd"], { encoding: "utf8" }).trim().split(/\r?\n/);
+      npmCLI = commands.map(file => join(dirname(file), "node_modules", "npm", "bin", "npm-cli.js"))
+        .find(file => existsSync(file));
+    }
+    if (!npmCLI) throw new Error("未找到 npm-cli.js，请确认 PATH 中的 npm 安装完整");
+    // 直接由 Node 执行 JS，避免 .cmd 启动失败或 shell 解释制品目录中的空格及特殊字符。
+    command = process.execPath;
+    args.unshift(npmCLI);
+  }
+  const output = execFileSync(command, args, {
     cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
   });
   const [artifact] = JSON.parse(output);

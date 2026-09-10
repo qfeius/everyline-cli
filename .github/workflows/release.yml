@@ -17,7 +17,18 @@ env:
   NPM_REGISTRY_URL: https://registry.npmjs.org/
 
 jobs:
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify Windows npm packaging
+        run: node --test tests/release/pack-release.test.js
+
   release:
+    needs: windows-package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,13 +49,15 @@ jobs:
           node <<'NODE'
           const { appendFileSync } = require('node:fs');
           const pkg = require('./package.json');
-          const { normalizePackageVersion } = require('./scripts/package-version');
+          const { validateBlueRelease } = require('./scripts/package-version');
           const version = process.env.GITHUB_REF_NAME.slice(1);
-          if (normalizePackageVersion(version) !== version || version.includes('+') || pkg.version !== version) {
-            throw new Error('发布标签必须为 v<package.json.version>，且版本不含构建元数据');
+          validateBlueRelease(version, pkg.publishConfig?.tag);
+          if (pkg.version !== version) {
+            throw new Error('发布标签必须为 v<package.json.version>');
           }
           if (pkg.name !== '@qfeius/everyline-cli') throw new Error('npm 包名不匹配');
-          const channel = version.includes('-') ? 'beta' : 'latest';
+          // blue 制品只更新 blue 渠道，不修改 latest 或 beta。
+          const channel = pkg.publishConfig.tag;
           appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nchannel=${channel}\n`);
           NODE
 

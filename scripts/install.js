@@ -20,7 +20,8 @@ const { buildDoubaoSkillPlans, inspectDoubaoSkillRegistration, installDoubaoSkil
 
 // skillNames 是同一份 npm 包向 Codex、WorkBuddy 和豆包发布的两项职责分离 Skill。
 const skillNames = ["everyline-review", "everyline-review-config"];
-const deprecatedSkillNames = ["everyline-shared"];
+// 两个历史公共入口都由 everyline-review 接管，升级时按原有来源校验迁出。
+const deprecatedSkillNames = ["everyline-shared", "everyline-cli"];
 const installStateSchema = "everyline.install-state.v1";
 // 安装提示与 Agent 事件共用文案；先说明可协助授权，用户要求登录后再选择 user/app。
 const firstInstallMessage = "EveryLine CLI 已安装完成。目前支持合同审查，以及审查清单、规则和规则分组配置。使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。";
