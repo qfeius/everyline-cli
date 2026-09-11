@@ -27,10 +27,10 @@ skill-assets:
 release-assets: skill-assets
 	VERSION="$(PACKAGE_VERSION)" COMMIT="$(COMMIT)" BUILD_DATE="$(BUILD_DATE)" sh scripts/build-release-assets.sh
 
-# 本地交付统一递增 blue 预发布序号，再让子 make 读取新版本构建全部制品。
+# 本地交付递增正式版本的 patch 号，再让子 make 读取新版本构建全部制品。
 # CI 发布已有标签时仍使用 release-check/npm pack，不再次递增标签版本。
 package:
-	npm version prerelease --preid=blue --no-git-tag-version
+	npm version patch --no-git-tag-version
 	$(MAKE) release-assets VERSION="$$(node -p 'require("./package.json").version')" PACKAGE_VERSION="$$(node -p 'require("./package.json").version')"
 	node scripts/pack-release.js dist
 

@@ -11,22 +11,25 @@ const versions = require("../../scripts/package-version");
 const pkg = require("../../package.json");
 
 /**
- * 验证 GitHub 制品和 npm 发布的实际前置脚本只接受与包一致的 blue 标签及渠道。
+ * 验证 GitHub 制品和 npm 发布的实际前置脚本只接受与包一致的正式版本标签及 blue 渠道。
  * 入参：无；读取真实工作流并隔离文件写入与进程环境。
  * 返回值：void，错误渠道或版本通过发布检查、输出渠道错误时断言失败。
  */
 for (const workflowName of ["release.yml", "npm-publish.yml"]) {
-test(`${workflowName} 发布前置检查只接受 blue 版本与渠道`, () => {
+test(`${workflowName} 发布前置检查只接受正式版本与 blue 渠道`, () => {
   const workflow = readFileSync(join(__dirname, "../../.github/workflows", workflowName), "utf8");
   const source = workflow.match(/node <<'NODE'\r?\n([\s\S]*?)\r?\n\s+NODE/)[1];
   const cases = [
-    { tag: `v${pkg.version}`, version: pkg.version, channel: "blue", valid: true },
-    { tag: "v0.1.10", version: "0.1.10", channel: "blue" },
+    { tag: "v0.1.11", version: "0.1.11", channel: "blue", valid: true },
+    { tag: "v0.1.10", version: "0.1.10", channel: "blue", valid: true },
+    { tag: "v0.1.10-blue.1", version: "0.1.10-blue.1", channel: "blue" },
     { tag: "v0.1.10-beta.0", version: "0.1.10-beta.0", channel: "blue" },
-    { tag: `v${pkg.version}`, version: pkg.version, channel: "latest" },
-    { tag: `v${pkg.version}`, version: pkg.version, channel: "beta" },
-    { tag: `v${pkg.version}`, version: "0.1.11-blue.0", channel: "blue" },
-    { tag: "v0.1.10-blue.0+build", version: "0.1.10-blue.0+build", channel: "blue" },
+    { tag: "v0.1.11", version: "0.1.11", channel: "latest" },
+    { tag: "v0.1.11", version: "0.1.11", channel: "beta" },
+    { tag: "v0.1.11", version: "0.1.12", channel: "blue" },
+    { tag: "v0.1.11+build", version: "0.1.11+build", channel: "blue" },
+    { tag: "v01.1.11", version: "01.1.11", channel: "blue" },
+    { tag: "v1.2", version: "1.2", channel: "blue" },
   ];
   for (const scenario of cases) {
     let output = "";
@@ -41,7 +44,7 @@ test(`${workflowName} 发布前置检查只接受 blue 版本与渠道`, () => {
     });
     if (scenario.valid) {
       run();
-      assert.equal(output, `version=${pkg.version}\nchannel=blue\n`);
+      assert.equal(output, `version=${scenario.version}\nchannel=blue\n`);
     } else {
       assert.throws(run, /blue 发布|发布标签必须/);
       assert.equal(output, "");
@@ -110,11 +113,11 @@ ${source}`], {
 }
 
 /**
- * 验证 npm 源码发布生命周期拒绝其他环境，普通 CI 构建包仍可本地打包。
+ * 验证 npm 源码发布生命周期只接受正式版本与 blue 渠道，普通 CI 构建包仍可本地打包。
  * 入参：t（TestContext）负责隔离包根清理。
  * 返回值：void，发布绕过校验或 CI 制品被误拒绝时断言失败。
  */
-test("npm 发布入口校验渠道且保留 CI 本地打包", (t) => {
+test("npm 发布入口校验正式版本与渠道且保留 CI 本地打包", (t) => {
   const root = mkdtempSync(join(tmpdir(), "everyline-channel-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "scripts"));
@@ -123,7 +126,7 @@ test("npm 发布入口校验渠道且保留 CI 本地打包", (t) => {
   }
   assert.equal(pkg.publishConfig.tag, "blue");
   assert.equal(pkg.scripts.prepublishOnly, "node scripts/verify-package-version.js --publish");
-  for (const [version, tag, valid] of [[pkg.version, "blue", true], [pkg.version, "latest", false], ["0.1.10", "blue", false], ["0.0.0-build-abcdef", "blue", false]]) {
+  for (const [version, tag, valid] of [["0.1.11", "blue", true], ["0.1.11", "latest", false], ["0.1.10-blue.1", "blue", false], ["0.1.11+build", "blue", false], ["0.0.0-build-abcdef", "blue", false]]) {
     writeFileSync(join(root, "package.json"), JSON.stringify({ version, publishConfig: { tag } }));
     const result = spawnSync(process.execPath, [join(root, "scripts/verify-package-version.js"), "--publish"], { encoding: "utf8" });
     assert.equal(result.status === 0, valid, result.stderr);

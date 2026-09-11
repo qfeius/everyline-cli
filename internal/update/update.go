@@ -106,7 +106,7 @@ func Check(ctx context.Context, currentVersion string, manifestURL string, httpC
 }
 
 /*
-CheckNPM 只从 npm blue 标签检查安装包版本，并拒绝其他环境的版本。
+CheckNPM 只从 npm blue 标签检查安装包版本，接受正式版及历史 blue 预发布版。
 入参：ctx context.Context 控制取消；currentVersion string 为当前版本；httpClient *http.Client 为网络客户端。
 返回值：CheckResult 为版本比较结果；error 为网络、响应或版本格式错误。
 */
@@ -130,12 +130,14 @@ func CheckNPM(ctx context.Context, currentVersion string, httpClient *http.Clien
 	if err != nil {
 		return CheckResult{}, err
 	}
-	// blue 发布使用独立的 -blue.N 版本，防止 dist-tag 误指向其他分支的正式包。
-	if len(latest.prerelease) != 2 || latest.prerelease[0] != NPMChannel {
-		return CheckResult{}, fmt.Errorf("npm blue 渠道返回非 blue 版本: %s", metadata.Version)
-	}
-	if _, err := strconv.ParseUint(latest.prerelease[1], 10, 64); err != nil {
-		return CheckResult{}, fmt.Errorf("npm blue 渠道版本序号无效: %s", metadata.Version)
+	// 环境由 blue 标签固定；兼容旧 -blue.N 版本，但其他预发布渠道仍视为错误响应。
+	if len(latest.prerelease) > 0 {
+		if len(latest.prerelease) != 2 || latest.prerelease[0] != NPMChannel {
+			return CheckResult{}, fmt.Errorf("npm blue 渠道返回非 blue 版本: %s", metadata.Version)
+		}
+		if _, err := strconv.ParseUint(latest.prerelease[1], 10, 64); err != nil {
+			return CheckResult{}, fmt.Errorf("npm blue 渠道版本序号无效: %s", metadata.Version)
+		}
 	}
 	return CheckResult{CurrentVersion: strings.TrimSpace(currentVersion), LatestVersion: strings.TrimSpace(metadata.Version), IsLatest: compareVersions(current, latest) >= 0}, nil
 }

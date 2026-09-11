@@ -317,7 +317,7 @@ func TestRunRejectsNPMWrapperWithoutNetwork(t *testing.T) {
 }
 
 /*
-TestCheckNPM 验证 blue 版本比较、错误渠道拒绝及失败时不回退其他渠道。
+TestCheckNPM 验证 blue 渠道兼容正式版和历史预发布版、禁止降级，并在错误响应时保留未知状态。
 入参：t *testing.T 为测试上下文。
 返回值：无，响应解析或版本判断错误时报告失败。
 */
@@ -334,14 +334,26 @@ func TestCheckNPM(t *testing.T) {
 		{"1.0.0-blue.1", `{"version":"1.0.0-blue.1"}`, 200, true, false},
 		{"1.0.0-blue.1", `{"version":"1.0.0-blue.0"}`, 200, true, false},
 		{"0.1.8", `{"version":"0.1.10-blue.0"}`, 200, false, false},
-		{"1.0.0-blue.1", `{"version":"1.1.0"}`, 200, false, true},
+		// blue 渠道改用正式版本号后，旧预发布安装仍应获得升级提示。
+		{"0.1.10-blue.1", `{"version":"0.1.11"}`, 200, false, false},
+		{"0.1.11-blue.1", `{"version":"0.1.11"}`, 200, false, false},
+		{"0.1.10", `{"version":"0.1.11"}`, 200, false, false},
+		{"0.1.11", `{"version":"0.1.11"}`, 200, true, false},
+		{"0.1.12", `{"version":"0.1.11"}`, 200, true, false},
+		{"0.1.11", `{"version":"0.1.11-blue.2"}`, 200, true, false},
 		{"1.0.0-blue.1", `{"version":"1.1.0-beta.0"}`, 200, false, true},
+		{"0.1.11", `{"version":"0.1.12-test.0"}`, 200, false, true},
+		{"0.1.11", `{"version":"0.1.12-blue"}`, 200, false, true},
+		{"0.1.11", `{"version":"0.1.12-blue.0.1"}`, 200, false, true},
+		{"0.1.11", `{"version":"0.1.12-blue.01"}`, 200, false, true},
+		{"0.1.11", `{"version":"0.1.12-blue.-1"}`, 200, false, true},
+		{"0.1.11", `{"version":"0.1.12-blue.18446744073709551616"}`, 200, false, true},
 		{"1.0.0-blue.1", `{"version":"1.1.0-blue.invalid"}`, 200, false, true},
 		{"1.0.0-blue.1", `{}`, 200, false, true},
 		{"1.0.0-blue.1", `invalid`, 200, false, true},
 		{"1.0.0-blue.1", `{}`, 404, false, true},
 	} {
-		t.Run(tc.body+http.StatusText(tc.status), func(t *testing.T) {
+		t.Run(tc.current+" to "+tc.body+http.StatusText(tc.status), func(t *testing.T) {
 			calls := 0
 			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				calls++

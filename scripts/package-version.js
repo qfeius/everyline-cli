@@ -24,13 +24,13 @@ if (require.main === module) {
 }
 
 /**
- * validateBlueRelease 校验 blue 发布的版本后缀与 npm 渠道，避免覆盖其他环境。
+ * validateBlueRelease 校验 blue 渠道发布使用纯正式 SemVer，版本号不携带环境后缀。
  * 入参：version string 为标签中的版本；channel string 为包声明的发布渠道。
- * 返回值：void；非 blue 版本、构建元数据或其他渠道时抛出错误。
+ * 返回值：void；预发布版本、构建元数据、非法版本或其他渠道时抛出错误。
  */
 function validateBlueRelease(version, channel) {
-  if (channel !== "blue" || normalizePackageVersion(version) !== version || !/^\d+\.\d+\.\d+-blue\.\d+$/.test(version)) {
-    throw new Error("blue 发布必须使用 <版本>-blue.<序号> 和 blue 渠道");
+  if (channel !== "blue" || normalizePackageVersion(version) !== version || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error("blue 发布必须使用 x.y.z 正式版本和 blue 渠道，不含预发布后缀或构建元数据");
   }
 }
 

@@ -6,7 +6,7 @@ EveryLine 命令行工具，支持合同审查工作流、审查清单和审查�
 
 ## 安装
 
-npm 包名为 `@qfeius/everyline-cli`，终端命令仍为 `everyline-cli`。本分支通过 `@blue` 安装和更新。本地交付统一使用 `make package`，每次自动递增 blue 预发布序号，并同步 CLI 与两项 Skill 后生成安装包。发布到 npm 前使用 `.tgz` 安装；发布配置与操作见 [npm 发布指南](docs/npm-release.md)。
+npm 包名为 `@qfeius/everyline-cli`，终端命令仍为 `everyline-cli`。本分支通过 `@blue` 安装和更新，版本使用不带环境后缀的正式版本号（例如 `0.1.11`）。本地交付统一使用 `make package`，每次自动递增 patch 号，并同步 CLI 与两项 Skill 后生成安装包。发布到 npm 前使用 `.tgz` 安装；发布配置与操作见 [npm 发布指南](docs/npm-release.md)。
 
 npm 全局安装会同步登记 Codex 和 WorkBuddy 的两项 Skill。切换 Node/npm 安装目录时，安装器会校验旧链接所属的 EveryLine 包并更新链接，保留已有授权状态；迁移中途失败会尝试恢复原链接。用户自建目录或其他来源的同名 Skill 会保留并提示冲突。需要手动备份时，请放在 Skill 扫描目录之外，避免仅添加 `.bak` 后缀后仍被作为同名 Skill 加载。
 

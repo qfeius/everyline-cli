@@ -350,7 +350,7 @@ func (transport versionHTTPTransport) RoundTrip(request *http.Request) (*http.Re
 }
 
 /*
-TestVersionNPMKeepsBlueChannel 验证更新可用、渠道缺失与误配置的完整 version 输出。
+TestVersionNPMKeepsBlueChannel 验证历史 blue 版本可升级到正式版，并保持渠道缺失与误配置的 version 输出。
 入参：t *testing.T 为测试上下文。
 返回值：无；请求其他环境或把未知状态当成可更新时断言失败。
 */
@@ -366,8 +366,9 @@ func TestVersionNPMKeepsBlueChannel(t *testing.T) {
 		update bool
 	}{
 		{"new-blue", http.StatusOK, `{"version":"0.1.10-blue.1"}`, true},
+		{"new-stable", http.StatusOK, `{"version":"0.1.11"}`, true},
 		{"missing-channel", http.StatusNotFound, `{}`, false},
-		{"wrong-environment", http.StatusOK, `{"version":"0.2.0"}`, false},
+		{"wrong-environment", http.StatusOK, `{"version":"0.2.0-beta.0"}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runtime, stdout, _ := testRuntime(t)
