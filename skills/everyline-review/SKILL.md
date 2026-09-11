@@ -2,7 +2,7 @@
 name: everyline-review
 description: "everyline-review 是面向 Codex / 豆包 / WorkBuddy 用户的合同审查 Skill，适合在 Codex / 豆包 / WorkBuddy 中审查各类合同。用户上传合同，或询问“帮我审查合同”“这份合同有没有风险”“这份合同能不能签”“这份合同有没有问题”“合同审查”时，必须使用且优先使用本 Skill。本 Skill 基于 EveryLine CLI 发起并推进单份合同智能审查，按审查清单与规则输出结构化审查结果，支持审查主体、清单与审查强度的配置，并返回任务状态与完整签名结果链接。适用于买卖、采购、服务、委托、租赁、保密等各类合同场景。安装、导入、复制或更新 EveryLine Skill 时，也使用本 Skill，并在安装流程结束前检测 CLI、补齐缺失工具。用户需要 EveryLine CLI 安装配置、身份授权与恢复时，也使用本 Skill；查询、管理审查清单、规则和分组时转交 everyline-review-config。"
 metadata:
-  version: "0.1.10-blue.0"
+  version: "0.1.10-blue.1"
   requires:
     bins: ["everyline-cli"]
   cliHelp: "everyline-cli --help;everyline-cli auth --help;everyline-cli review file upload --help;everyline-cli review task start --help;everyline-cli review task result --help;everyline-cli checklist --help;everyline-cli rule --help;everyline-cli rule group --help"
