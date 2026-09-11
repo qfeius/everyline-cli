@@ -1,4 +1,4 @@
-# package.json 是当前正式版本的唯一来源；CI 仍可通过 VERSION 注入 tag 或提交构建版本。
+# package.json 是当前版本的唯一来源；CI 仍可通过 VERSION 注入 tag 或提交构建版本。
 VERSION ?= $(shell node -p 'require("./package.json").version')
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf 'uncommitted')
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -27,10 +27,10 @@ skill-assets:
 release-assets: skill-assets
 	VERSION="$(PACKAGE_VERSION)" COMMIT="$(COMMIT)" BUILD_DATE="$(BUILD_DATE)" sh scripts/build-release-assets.sh
 
-# 本地交付统一从这里打包：先升补丁版本，再让子 make 读取新版本构建全部制品。
+# 本地交付读取 npm 全部已发布版本，与本地版本取最高基础版本后递增 patch；各环境共享版本序列。
 # CI 发布已有标签时仍使用 release-check/npm pack，不再次递增标签版本。
 package:
-	npm version patch --no-git-tag-version
+	node scripts/package-version.js --bump
 	$(MAKE) release-assets VERSION="$$(node -p 'require("./package.json").version')" PACKAGE_VERSION="$$(node -p 'require("./package.json").version')"
 	node scripts/pack-release.js dist
 

@@ -38,14 +38,12 @@ jobs:
           node <<'NODE'
           const { appendFileSync } = require('node:fs');
           const pkg = require('./package.json');
-          const { normalizePackageVersion } = require('./scripts/package-version');
+          const { validateRelease } = require('./scripts/package-version');
           const version = process.env.GITHUB_REF_NAME.slice(1);
-          if (normalizePackageVersion(version) !== version || version.includes('+') || pkg.version !== version) {
-            throw new Error('发布标签必须为 v<package.json.version>，且版本不含构建元数据');
-          }
+          validateRelease(version, pkg.publishConfig?.tag, 'latest');
+          if (pkg.version !== version) throw new Error('发布标签必须为 v<package.json.version>');
           if (pkg.name !== '@qfeius/everyline-cli') throw new Error('npm 包名不匹配');
-          const channel = version.includes('-') ? 'beta' : 'latest';
-          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nchannel=${channel}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nchannel=${pkg.publishConfig.tag}\n`);
           NODE
 
       - name: Check npm publishing credential
@@ -90,5 +88,20 @@ jobs:
           RELEASE_VERSION: ${{ steps.package.outputs.version }}
           NPM_TAG: ${{ steps.package.outputs.channel }}
         run: |
-          published_version=$(npm view "@qfeius/everyline-cli@$NPM_TAG" version --registry "$NPM_REGISTRY_URL")
-          test "$published_version" = "$RELEASE_VERSION"
+          # 查询独立 dist-tags 接口，避免整包元数据缓存；重试间隔累计最多 300 秒。
+          for attempt in {1..21}; do
+            if published_tags=$(npm dist-tag ls "@qfeius/everyline-cli" --registry "$NPM_REGISTRY_URL" --prefer-online); then
+              published_version=$(printf '%s\n' "$published_tags" | awk -v tag="$NPM_TAG" '$1 == tag ":" { print $2 }')
+              echo "npm channel $NPM_TAG attempt $attempt/21: ${published_version:-<empty>}"
+              if [ "$published_version" = "$RELEASE_VERSION" ]; then
+                exit 0
+              fi
+            else
+              echo "npm channel $NPM_TAG attempt $attempt/21: lookup failed" >&2
+            fi
+            if [ "$attempt" -lt 21 ]; then
+              sleep 15
+            fi
+          done
+          echo "::error::npm channel $NPM_TAG did not reach $RELEASE_VERSION" >&2
+          exit 1
