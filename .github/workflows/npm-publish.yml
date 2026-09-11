@@ -52,9 +52,9 @@ jobs:
           node <<'NODE'
           const { appendFileSync } = require('node:fs');
           const pkg = require('./package.json');
-          const { validateBlueRelease } = require('./scripts/package-version');
+          const { validateRelease } = require('./scripts/package-version');
           const version = process.env.GITHUB_REF_NAME.slice(1);
-          validateBlueRelease(version, pkg.publishConfig?.tag);
+          validateRelease(version, pkg.publishConfig?.tag, 'latest');
           if (pkg.version !== version) throw new Error('发布标签必须为 v<package.json.version>');
           if (pkg.name !== '@qfeius/everyline-cli') throw new Error('npm 包名不匹配');
           // 发布已提交的版本，保持 npm、CLI 和两项 Skill 的内容一致。
@@ -76,17 +76,18 @@ jobs:
           RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
           NPM_DIST_TAG: ${{ steps.metadata.outputs.channel }}
         run: |
-          # 注册表可能晚于 publish 成功更新；仅重试只读校验，重试间隔累计最多 180 秒。
-          for attempt in {1..13}; do
-            if published_version=$(npm view "@qfeius/everyline-cli@$NPM_DIST_TAG" version --registry https://registry.npmjs.org --prefer-online); then
-              echo "npm channel $NPM_DIST_TAG attempt $attempt/13: ${published_version:-<empty>}"
+          # 查询独立 dist-tags 接口，避免整包元数据缓存；重试间隔累计最多 300 秒。
+          for attempt in {1..21}; do
+            if published_tags=$(npm dist-tag ls "@qfeius/everyline-cli" --registry https://registry.npmjs.org --prefer-online); then
+              published_version=$(printf '%s\n' "$published_tags" | awk -v tag="$NPM_DIST_TAG" '$1 == tag ":" { print $2 }')
+              echo "npm channel $NPM_DIST_TAG attempt $attempt/21: ${published_version:-<empty>}"
               if [ "$published_version" = "$RELEASE_VERSION" ]; then
                 exit 0
               fi
             else
-              echo "npm channel $NPM_DIST_TAG attempt $attempt/13: lookup failed" >&2
+              echo "npm channel $NPM_DIST_TAG attempt $attempt/21: lookup failed" >&2
             fi
-            if [ "$attempt" -lt 13 ]; then
+            if [ "$attempt" -lt 21 ]; then
               sleep 15
             fi
           done

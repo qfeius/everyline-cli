@@ -300,6 +300,11 @@ func TestRunChecksumFailurePreservesBinary(t *testing.T) {
 	}
 }
 
+/*
+TestRunRejectsNPMWrapperWithoutNetwork 验证 npm 包阻止二进制直接更新，并提示使用 latest 同步安装 CLI 和 Skills。
+入参：t *testing.T 为测试上下文。
+返回值：无；提示渠道错误或访问 manifest 时通过 t.Fatal 报告。
+*/
 func TestRunRejectsNPMWrapperWithoutNetwork(t *testing.T) {
 	called := false
 	client := testHTTPClient(func(*http.Request) (*http.Response, error) {
@@ -308,7 +313,7 @@ func TestRunRejectsNPMWrapperWithoutNetwork(t *testing.T) {
 	})
 
 	_, err := Run(t.Context(), "1.0.0", "https://updates.example.test/manifest.json", Options{HTTPClient: client, Wrapper: true})
-	if err == nil || !strings.Contains(err.Error(), "npm") {
+	if err == nil || !strings.Contains(err.Error(), "@qfeius/everyline-cli@latest ") {
 		t.Fatalf("err=%v", err)
 	}
 	if called {
@@ -317,7 +322,7 @@ func TestRunRejectsNPMWrapperWithoutNetwork(t *testing.T) {
 }
 
 /*
-TestCheckNPM 验证 blue 渠道兼容正式版和历史预发布版、禁止降级，并在错误响应时保留未知状态。
+TestCheckNPM 验证 latest 只返回正式版，历史安装版本可升级，且禁止降级并拒绝异常响应。
 入参：t *testing.T 为测试上下文。
 返回值：无，响应解析或版本判断错误时报告失败。
 */
@@ -329,18 +334,16 @@ func TestCheckNPM(t *testing.T) {
 		latest  bool
 		fail    bool
 	}{
-		{"1.0.0-blue.1", `{"version":"1.1.0-blue.0"}`, 200, false, false},
-		{"1.0.0-blue.1", `{"version":"1.0.0-blue.2"}`, 200, false, false},
-		{"1.0.0-blue.1", `{"version":"1.0.0-blue.1"}`, 200, true, false},
-		{"1.0.0-blue.1", `{"version":"1.0.0-blue.0"}`, 200, true, false},
-		{"0.1.8", `{"version":"0.1.10-blue.0"}`, 200, false, false},
-		// blue 渠道改用正式版本号后，旧预发布安装仍应获得升级提示。
+		// 旧 blue 预发布安装可升级到 latest 正式版，但 latest 指向预发布版本时拒绝更新。
+		{"1.0.0-blue.1", `{"version":"1.1.0-blue.0"}`, 200, false, true},
 		{"0.1.10-blue.1", `{"version":"0.1.11"}`, 200, false, false},
 		{"0.1.11-blue.1", `{"version":"0.1.11"}`, 200, false, false},
 		{"0.1.10", `{"version":"0.1.11"}`, 200, false, false},
 		{"0.1.11", `{"version":"0.1.11"}`, 200, true, false},
 		{"0.1.12", `{"version":"0.1.11"}`, 200, true, false},
-		{"0.1.11", `{"version":"0.1.11-blue.2"}`, 200, true, false},
+		{"0.1.11", `{"version":"0.1.11-blue.2"}`, 200, false, true},
+		{"0.1.11", `{"version":"0.1.12+build.1"}`, 200, false, true},
+		{"0.1.11", `{"version":"v0.1.12"}`, 200, false, true},
 		{"1.0.0-blue.1", `{"version":"1.1.0-beta.0"}`, 200, false, true},
 		{"0.1.11", `{"version":"0.1.12-test.0"}`, 200, false, true},
 		{"0.1.11", `{"version":"0.1.12-blue"}`, 200, false, true},
@@ -357,14 +360,14 @@ func TestCheckNPM(t *testing.T) {
 			calls := 0
 			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				calls++
-				if r.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/blue" {
+				if r.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/latest" {
 					t.Fatalf("unexpected URL: %s", r.URL)
 				}
 				return response(tc.status, tc.body), nil
 			})}
 			got, err := CheckNPM(t.Context(), tc.current, client)
 			if calls != 1 {
-				t.Fatalf("requests=%d，blue 渠道失败后不应请求其他渠道", calls)
+				t.Fatalf("requests=%d，latest 渠道失败后不应请求其他渠道", calls)
 			}
 			if (err != nil) != tc.fail {
 				t.Fatalf("err=%v", err)

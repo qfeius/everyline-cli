@@ -22,8 +22,8 @@ import (
 const (
 	maxManifestBytes = 1 << 20
 	maxArtifactBytes = 256 << 20
-	// NPMChannel 将此分支的检查和安装固定到 blue，避免跨环境更新。
-	NPMChannel = "blue"
+	// NPMChannel 统一 npm 安装与更新检查的发布标签，各分支共享 latest 正式版本序列。
+	NPMChannel = "latest"
 )
 
 // ErrNPMWrapper 表示当前进程由 npm/npx 薄包装启动，不能直接替换包内二进制。
@@ -106,7 +106,7 @@ func Check(ctx context.Context, currentVersion string, manifestURL string, httpC
 }
 
 /*
-CheckNPM 只从 npm blue 标签检查安装包版本，接受正式版及历史 blue 预发布版。
+CheckNPM 从 npm latest 标签检查正式安装包版本，兼容历史预发布版作为当前安装版本。
 入参：ctx context.Context 控制取消；currentVersion string 为当前版本；httpClient *http.Client 为网络客户端。
 返回值：CheckResult 为版本比较结果；error 为网络、响应或版本格式错误。
 */
@@ -115,7 +115,7 @@ func CheckNPM(ctx context.Context, currentVersion string, httpClient *http.Clien
 	if err != nil {
 		return CheckResult{}, err
 	}
-	// 渠道缺失或请求失败时保留未知状态，不回退 latest/beta。
+	// latest 缺失或请求失败时保留未知状态，不回退历史环境标签。
 	content, err := getLimited(ctx, httpClient, "https://registry.npmjs.org/@qfeius%2feveryline-cli/"+NPMChannel, maxManifestBytes)
 	if err != nil {
 		return CheckResult{}, err
@@ -130,14 +130,9 @@ func CheckNPM(ctx context.Context, currentVersion string, httpClient *http.Clien
 	if err != nil {
 		return CheckResult{}, err
 	}
-	// 环境由 blue 标签固定；兼容旧 -blue.N 版本，但其他预发布渠道仍视为错误响应。
-	if len(latest.prerelease) > 0 {
-		if len(latest.prerelease) != 2 || latest.prerelease[0] != NPMChannel {
-			return CheckResult{}, fmt.Errorf("npm blue 渠道返回非 blue 版本: %s", metadata.Version)
-		}
-		if _, err := strconv.ParseUint(latest.prerelease[1], 10, 64); err != nil {
-			return CheckResult{}, fmt.Errorf("npm blue 渠道版本序号无效: %s", metadata.Version)
-		}
+	// latest 只接受纯 x.y.z；旧环境后缀仅用于解析当前安装版本，不作为新安装目标。
+	if metadata.Version != fmt.Sprintf("%d.%d.%d", latest.major, latest.minor, latest.patch) {
+		return CheckResult{}, fmt.Errorf("npm latest 渠道返回非 x.y.z 正式版本: %s", metadata.Version)
 	}
 	return CheckResult{CurrentVersion: strings.TrimSpace(currentVersion), LatestVersion: strings.TrimSpace(metadata.Version), IsLatest: compareVersions(current, latest) >= 0}, nil
 }

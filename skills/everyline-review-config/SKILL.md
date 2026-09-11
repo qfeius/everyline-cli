@@ -2,7 +2,7 @@
 name: everyline-review-config
 description: "使用 EveryLine CLI 查询或管理审查清单、审查规则和规则分组，包括新增、修改、调整归属和删除；仅在审查中选择已有清单时不使用本 Skill。"
 metadata:
-  version: "0.1.11"
+  version: "0.1.12"
   requires:
     bins: ["everyline-cli"]
     skills: ["everyline-review"]
@@ -48,7 +48,7 @@ everyline-cli rule group --help
 
 先复用 `everyline-review` 的首次使用提示、Profile、身份与授权门禁检查；将本 Skill 实际加载的 `metadata.version` 用于版本提示，同一会话不重复提示。固定 `<profile>` 与 `<identity>`，授权与业务命令显式携带 `--profile <profile> --as <identity>`。每条 user 命令复用同一 Device 会话：豆包普通工作任务（含本地电脑）注入同一 `SESSION_ID` 并使用同一初始工作目录，WorkBuddy 注入同一 `CODEBUDDY_SESSION_ID`，AgentKit 保留平台工作区与注入密钥。
 
-记录 `version` 返回的 `updateRequired`，独立配置任务在查询或单次已确认写入及回读完成后更新；组合任务还需等后续审查取得终态、结果已获取且整条业务流程结束，避免两个阶段之间替换 CLI。
+记录 `version` 返回的 `updateRequired`，独立配置任务在查询或单次已确认写入及回读完成后更新；组合任务还需等后续审查取得终态、结果已获取且整条业务流程结束，避免两个阶段之间替换 CLI。安装与更新遵守 `everyline-review` 的规则，默认使用 `@qfeius/everyline-cli@latest`；旧 CLI 的 `@blue` 更新目标也按该规则迁移至 `@latest`。npm 渠道和版本号不表示业务环境，更新后仍按实际连接地址校验 blue Profile。
 
 在每次写入前，再读取将要执行的具体子命令 `--help` 和 CLI 提供的请求结构说明。只使用实时帮助中已注册的命令、参数和请求字段，不凭本文猜测请求体。
 

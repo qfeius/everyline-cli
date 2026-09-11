@@ -11,25 +11,25 @@ const versions = require("../../scripts/package-version");
 const pkg = require("../../package.json");
 
 /**
- * 验证 GitHub 制品和 npm 发布的实际前置脚本只接受与包一致的正式版本标签及 blue 渠道。
+ * 验证 GitHub 制品和 npm 发布的实际前置脚本只接受与包一致的正式版本标签及 latest 渠道。
  * 入参：无；读取真实工作流并隔离文件写入与进程环境。
  * 返回值：void，错误渠道或版本通过发布检查、输出渠道错误时断言失败。
  */
 for (const workflowName of ["release.yml", "npm-publish.yml"]) {
-test(`${workflowName} 发布前置检查只接受正式版本与 blue 渠道`, () => {
+test(`${workflowName} 发布前置检查只接受正式版本与 latest 渠道`, () => {
   const workflow = readFileSync(join(__dirname, "../../.github/workflows", workflowName), "utf8");
   const source = workflow.match(/node <<'NODE'\r?\n([\s\S]*?)\r?\n\s+NODE/)[1];
   const cases = [
-    { tag: "v0.1.11", version: "0.1.11", channel: "blue", valid: true },
-    { tag: "v0.1.10", version: "0.1.10", channel: "blue", valid: true },
-    { tag: "v0.1.10-blue.1", version: "0.1.10-blue.1", channel: "blue" },
-    { tag: "v0.1.10-beta.0", version: "0.1.10-beta.0", channel: "blue" },
-    { tag: "v0.1.11", version: "0.1.11", channel: "latest" },
+    { tag: "v0.1.11", version: "0.1.11", channel: "latest", valid: true },
+    { tag: "v0.1.10", version: "0.1.10", channel: "latest", valid: true },
+    { tag: "v0.1.10-blue.1", version: "0.1.10-blue.1", channel: "latest" },
+    { tag: "v0.1.10-beta.0", version: "0.1.10-beta.0", channel: "latest" },
+    { tag: "v0.1.11", version: "0.1.11", channel: "blue" },
     { tag: "v0.1.11", version: "0.1.11", channel: "beta" },
-    { tag: "v0.1.11", version: "0.1.12", channel: "blue" },
-    { tag: "v0.1.11+build", version: "0.1.11+build", channel: "blue" },
-    { tag: "v01.1.11", version: "01.1.11", channel: "blue" },
-    { tag: "v1.2", version: "1.2", channel: "blue" },
+    { tag: "v0.1.11", version: "0.1.12", channel: "latest" },
+    { tag: "v0.1.11+build", version: "0.1.11+build", channel: "latest" },
+    { tag: "v01.1.11", version: "01.1.11", channel: "latest" },
+    { tag: "v1.2", version: "1.2", channel: "latest" },
   ];
   for (const scenario of cases) {
     let output = "";
@@ -44,9 +44,9 @@ test(`${workflowName} 发布前置检查只接受正式版本与 blue 渠道`, (
     });
     if (scenario.valid) {
       run();
-      assert.equal(output, `version=${scenario.version}\nchannel=blue\n`);
+      assert.equal(output, `version=${scenario.version}\nchannel=latest\n`);
     } else {
-      assert.throws(run, /blue 发布|发布标签必须/);
+      assert.throws(run, /latest 发布|发布标签必须/);
       assert.equal(output, "");
     }
   }
@@ -54,14 +54,15 @@ test(`${workflowName} 发布前置检查只接受正式版本与 blue 渠道`, (
 }
 
 /**
- * 验证发布后校验执行真实工作流 shell，允许注册表短暂返回旧版或查询失败，并在重试耗尽后严格失败。
+ * 验证发布后校验执行真实工作流 shell，仅匹配完整 dist-tag，允许短暂旧版或查询失败并在重试耗尽后严格失败。
  * 入参：t（TestContext）负责清理临时桩脚本和调用记录；scenario 描述 npm 返回序列与预期重试次数。
  * 返回值：void，提前失败、无限重试、重复发布或等待次数错误时断言失败。
  */
 for (const scenario of [
   { name: "先旧后新", responses: [{ version: "0.0.0-blue.0" }, { version: "0.0.0-blue.0" }, { version: pkg.version }], calls: 3, status: 0 },
   { name: "暂时查询失败后成功", responses: [{ status: 1 }, { version: pkg.version }], calls: 2, status: 0 },
-  { name: "持续旧版最终失败", responses: [{ version: "0.0.0-blue.0" }], calls: 13, status: 1 },
+  { name: "持续旧版最终失败", responses: [{ version: "0.0.0-blue.0" }], calls: 21, status: 1 },
+  { name: "只匹配完整标签", responses: [{ tags: `latest-next: ${pkg.version}\nlatest: 0.0.0-blue.0\nblue: ${pkg.version}` }, { version: pkg.version }], calls: 2, status: 0 },
 ]) {
 test(`npm 发布后频道校验：${scenario.name}`, (t) => {
   const root = mkdtempSync(join(tmpdir(), "everyline-channel-retry-"));
@@ -83,7 +84,7 @@ if (command === "npm") {
   const index = calls.filter((call) => call.command === "npm").length;
   const response = responses[Math.min(index, responses.length - 1)];
   if (response.status) { process.stderr.write("fixture registry temporarily unavailable\\n"); process.exit(response.status); }
-  process.stdout.write(response.version + "\\n");
+  process.stdout.write((response.tags ?? "latest: " + response.version) + "\\n");
 } else if (command !== "sleep") { process.exit(99); }
 `);
   const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", `
@@ -92,7 +93,7 @@ sleep() { "$STUB_NODE" "$STUB_SCRIPT" sleep "$@"; }
 ${source}`], {
     encoding: "utf8",
     timeout: 15000,
-    env: { ...process.env, RELEASE_VERSION: pkg.version, NPM_DIST_TAG: "blue", STUB_NODE: process.execPath, STUB_SCRIPT: stubPath, STUB_LOG: logPath, STUB_RESPONSES: JSON.stringify(scenario.responses) },
+    env: { ...process.env, RELEASE_VERSION: pkg.version, NPM_DIST_TAG: "latest", STUB_NODE: process.execPath, STUB_SCRIPT: stubPath, STUB_LOG: logPath, STUB_RESPONSES: JSON.stringify(scenario.responses) },
   });
   assert.ifError(result.error);
   assert.equal(result.status, scenario.status, result.stdout + result.stderr);
@@ -103,7 +104,7 @@ ${source}`], {
   assert.equal(waits.length, scenario.calls - 1, "首次查询和最终退出不应额外等待");
   assert.deepEqual(calls.map((call) => call.command), Array.from({ length: scenario.calls * 2 - 1 }, (_, index) => index % 2 ? "sleep" : "npm"));
   for (const query of queries) {
-    assert.deepEqual(query.args, ["view", "@qfeius/everyline-cli@blue", "version", "--registry", "https://registry.npmjs.org", "--prefer-online"]);
+    assert.deepEqual(query.args, ["dist-tag", "ls", "@qfeius/everyline-cli", "--registry", "https://registry.npmjs.org", "--prefer-online"]);
   }
   for (const wait of waits) assert.deepEqual(wait.args, ["15"]);
   for (const response of scenario.responses) {
@@ -113,7 +114,7 @@ ${source}`], {
 }
 
 /**
- * 验证 npm 源码发布生命周期只接受正式版本与 blue 渠道，普通 CI 构建包仍可本地打包。
+ * 验证 npm 源码发布生命周期只接受正式版本与 latest 渠道，普通 CI 构建包仍可本地打包。
  * 入参：t（TestContext）负责隔离包根清理。
  * 返回值：void，发布绕过校验或 CI 制品被误拒绝时断言失败。
  */
@@ -124,9 +125,9 @@ test("npm 发布入口校验正式版本与渠道且保留 CI 本地打包", (t)
   for (const name of ["package-version.js", "verify-package-version.js"]) {
     copyFileSync(join(__dirname, "../../scripts", name), join(root, "scripts", name));
   }
-  assert.equal(pkg.publishConfig.tag, "blue");
+  assert.equal(pkg.publishConfig.tag, "latest");
   assert.equal(pkg.scripts.prepublishOnly, "node scripts/verify-package-version.js --publish");
-  for (const [version, tag, valid] of [["0.1.11", "blue", true], ["0.1.11", "latest", false], ["0.1.10-blue.1", "blue", false], ["0.1.11+build", "blue", false], ["0.0.0-build-abcdef", "blue", false]]) {
+  for (const [version, tag, valid] of [["0.1.11", "latest", true], ["0.1.11", "blue", false], ["0.1.10-blue.1", "latest", false], ["0.1.11+build", "latest", false], ["0.0.0-build-abcdef", "latest", false]]) {
     writeFileSync(join(root, "package.json"), JSON.stringify({ version, publishConfig: { tag } }));
     const result = spawnSync(process.execPath, [join(root, "scripts/verify-package-version.js"), "--publish"], { encoding: "utf8" });
     assert.equal(result.status === 0, valid, result.stderr);

@@ -5,6 +5,29 @@ const { readFileSync, readdirSync, existsSync } = require("node:fs");
 const { join, dirname, resolve } = require("node:path");
 
 /**
+ * 验证安装入口统一使用 latest，同时保留 blue 业务环境校验，避免渠道迁移改变请求目标。
+ * 入参：无；读取发布文档和两个 Skill。返回值：void，出现旧安装渠道或环境校验缺失时断言失败。
+ */
+test("skill installation uses latest while business profiles remain blue", () => {
+  const root = resolve(__dirname, "../..");
+  const review = readFileSync(join(root, "skills/everyline-review/SKILL.md"), "utf8");
+  const config = readFileSync(join(root, "skills/everyline-review-config/SKILL.md"), "utf8");
+  // 渠道只负责安装和更新；两项技能仍必须验证实际 blue 连接地址。
+  for (const content of [review, config]) {
+    assert.ok(content.includes("@qfeius/everyline-cli@latest"));
+    assert.ok(content.includes("固定使用 `blue` 环境"));
+    assert.ok(content.includes("实际连接地址"));
+    assert.ok(content.includes("npm 渠道和版本号不表示业务环境"));
+  }
+  for (const path of ["README.md", "docs/npm-release.md", "docs/everyline-cli-skill-guide.md", "docs/everyline-cli-skill-interaction-scenarios.md", "skills/everyline-review/SKILL.md", "skills/everyline-review-config/SKILL.md"]) {
+    const content = readFileSync(join(root, path), "utf8");
+    assert.ok(!content.includes("@qfeius/everyline-cli@blue"), `${path} 残留 blue 安装命令`);
+    assert.ok(!content.includes("<版本>-blue.<序号>"), `${path} 残留 blue 发布版本格式`);
+    assert.ok(!content.includes("--tag blue"), `${path} 残留 blue 发布渠道`);
+  }
+});
+
+/**
  * 验证发布 Skill 的完整描述、依赖与本地链接，防止替换正文后残留失效引用。
  * 入参：无；读取仓库 Skill 源文件。返回值：void，结构或引用不完整时断言失败。
  */

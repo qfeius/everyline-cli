@@ -6,7 +6,7 @@ EveryLine 命令行工具，支持合同审查工作流、审查清单和审查�
 
 ## 安装
 
-npm 包名为 `@qfeius/everyline-cli`，终端命令仍为 `everyline-cli`。本分支通过 `@blue` 安装和更新，版本使用不带环境后缀的正式版本号（例如 `0.1.11`）。本地交付统一使用 `make package`，每次自动递增 patch 号，并同步 CLI 与两项 Skill 后生成安装包。发布到 npm 前使用 `.tgz` 安装；发布配置与操作见 [npm 发布指南](docs/npm-release.md)。
+npm 包名为 `@qfeius/everyline-cli`，终端命令仍为 `everyline-cli`。blue 与 release 统一通过 `@latest` 安装和更新，共用不带环境后缀的正式版本号（例如 `0.1.11`）。npm 渠道和版本号不表示业务环境，本分支仍按实际连接地址核对 blue Profile。本地交付统一使用 `make package`，每次查询 npm 全部已发布版本，取其与本地版本的最高基础版本后递增 patch 号，并同步 CLI 与两项 Skill 后生成安装包。发布到 npm 前使用 `.tgz` 安装；发布配置与操作见 [npm 发布指南](docs/npm-release.md)。
 
 npm 全局安装会同步登记 Codex 和 WorkBuddy 的两项 Skill。切换 Node/npm 安装目录时，安装器会校验旧链接所属的 EveryLine 包并更新链接，保留已有授权状态；迁移中途失败会尝试恢复原链接。用户自建目录或其他来源的同名 Skill 会保留并提示冲突。需要手动备份时，请放在 Skill 扫描目录之外，避免仅添加 `.bak` 后缀后仍被作为同名 Skill 加载。
 
@@ -127,7 +127,7 @@ app-id 的来源优先级为：--app-id > Profile 专用环境变量 > EVERYLINE
 
 全局安装 npm 包时，`postinstall` 会把两项 Skill 同步登记到 Codex 的 `$HOME/.agents/skills`、WorkBuddy 的 `$HOME/.workbuddy/skills`，并同步已发现或显式指定的豆包本地技能目录。首次安装建立授权门禁：旧 token 保留，但必须完成一次新的 user/app 授权后才能调用审查、清单或规则业务命令。项目局部安装和 `npx` 临时执行不登记用户级 Skill；豆包云端导入路径仍使用 `make skill-assets` 生成的两个独立 ZIP。Skill 不修改或替代 CLI 接口。
 
-首次安装使用 `npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@blue`，让安装器提示可见。Codex、WorkBuddy 和豆包均需在确认 CLI 与 Skill 就绪后，由 Agent 在回复正文展示统一安装完成文案；豆包静态 ZIP 导入在导入后首次运行时完成这一检查和提示。
+首次安装使用 `npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest`，让安装器提示可见。Codex、WorkBuddy 和豆包均需在确认 CLI 与 Skill 就绪后，由 Agent 在回复正文展示统一安装完成文案；豆包静态 ZIP 导入在导入后首次运行时完成这一检查和提示。
 
 在 Codex、WorkBuddy 或豆包电脑版安装并验证完整交互流程，请参阅 [EveryLine CLI 交互 Skill 安装与验证](docs/everyline-cli-skill-guide.md)；评审全部对话分支，请参阅 [EveryLine CLI Skill 全量交互场景](docs/everyline-cli-skill-interaction-scenarios.md)。
 
@@ -265,20 +265,20 @@ CLI 已移除 --app-type 参数；文件上传也不再接受 --business-id。�
 
 ## 自更新
 
-CLI 与两项本地 Skill 支持两种更新来源：经核验属于 blue 的 `.tgz`，或官方 npm 的 blue 渠道最新版。两者都由 npm 安装器完成同步，保留原安装 prefix 和账号配置。blue 渠道缺失或版本不属于 blue 时保留现有安装，不回退其他环境。
+CLI 与两项本地 Skill 支持两种更新来源：经核验包名、版本和内容的 `.tgz`，或官方 npm 的 `latest` 渠道最新版。两者都由 npm 安装器完成同步，保留原安装 prefix 和账号配置。`latest` 渠道缺失或查询失败时保留现有安装；安装后仍核对实际连接地址为 blue，不从 npm 渠道或版本号推断业务环境。
 
 ```bash
 # 使用指定包，无需先发布到 npm；将路径替换为实际文件。
 npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli ./everyline-cli-<版本>.tgz
 
-# 使用已经发布到 npm blue 渠道的最新版。
-npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@blue --registry https://registry.npmjs.org
+# 使用已经发布到 npm latest 渠道的最新版。
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org
 ```
 
 指定 tgz 时不因版本相同或 npm 查询失败跳过安装。更新后核对 CLI 与两项 Skill，重新读取或新建任务加载；豆包云端手动导入的 Skill 仍需在平台重新导入。详见 [更新与卸载](docs/everyline-cli-skill-guide.md#10-更新与卸载)。`everyline-cli update` 本身仍用于下述独立二进制 manifest 更新。
 
 
-`everyline-cli version` 输出 `latestVersion/isLatest/updateRequired/updateCommand`；检查失败时 `isLatest=null`，且不会把未知状态当成需要更新。普通 review/checklist/rule 命令确认存在新版本时，在 stderr 输出 `UPDATE_PENDING` 单行 JSON，但继续完成当前业务 API。Agent 在当前完整业务流程结束后执行其中的 `updateCommand`，下一条新业务再使用新版 CLI 与 Skill。
+`everyline-cli version` 输出 `latestVersion/isLatest/updateRequired/updateCommand`；检查失败时 `isLatest=null`，且不会把未知状态当成需要更新。普通 review/checklist/rule 命令确认存在新版本时，在 stderr 输出 `UPDATE_PENDING` 单行 JSON，但继续完成当前业务 API。Agent 在当前完整业务流程结束后执行其中的 `updateCommand`；旧 CLI 若仍返回 `@blue` 更新目标，改用上面的 `@latest` 安装命令并保留原 prefix。下一条新业务再使用新版 CLI 与 Skill。
 
 独立二进制可以通过 HTTPS manifest 检查和更新当前平台制品。地址按 `--manifest-url`、`EVERYLINE_CLI_UPDATE_MANIFEST_URL`、发布构建内置值的顺序选择：
 
@@ -340,7 +340,7 @@ everyline-cli completion zsh
 - 使用 fake HTTP、临时 Profile 和测试 token 验证功能，不依赖真实环境凭证。
 - 运行 go test ./...、go vet ./... 和 make build。
 
- npm 安装版通过 `everyline-cli version --output json` 查询 npm 官方源的 `blue` 渠道版本，无需配置 manifest。发现新版后，在当前业务流程结束时执行返回的 `updateCommand`，由 npm 安装器同步 CLI 和本地 Skills；检查失败时最新版本状态保持未知。独立二进制安装仍使用 HTTPS manifest。
+ npm 安装版通过 `everyline-cli version --output json` 查询 npm 官方源的 `latest` 渠道版本，无需配置 manifest。发现新版后，在当前业务流程结束时执行返回的 `updateCommand`（旧 `@blue` 更新目标按前文迁移至 `@latest`），由 npm 安装器同步 CLI 和本地 Skills；检查失败时最新版本状态保持未知。独立二进制安装仍使用 HTTPS manifest。
 
 两项 Skill 使用 `metadata.version` 标记实际加载版本。`npm pack` / `npm publish` 的 prepack 和 `scripts/build-skill-bundles.sh` 会自动从 `package.json` 同步该版本；发布前仍需以相同版本构建 CLI。每个会话首次使用时展示 Skill、CLI 和 npm 最新安装包版本，发现新版后在当前业务结束时更新；宿主文件已更新而会话仍旧时提示新建任务。
 

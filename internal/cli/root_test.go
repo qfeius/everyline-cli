@@ -326,13 +326,13 @@ func TestVersionCheckFailureIsNonBlockingAndUnknown(t *testing.T) {
 }
 
 /*
-TestVersionUpdateCommandForNPMIncludesSkillInstaller 验证 npm 更新保持 blue 渠道并同步 Skills。
+TestVersionUpdateCommandForNPMIncludesSkillInstaller 验证 npm 更新使用 latest 渠道并同步 Skills。
 入参：t *testing.T 为测试上下文。
-返回值：无；更新命令跨环境或遗漏包级脚本许可时通过 t.Fatal 报告。
+返回值：无；更新命令渠道错误或遗漏包级脚本许可时通过 t.Fatal 报告。
 */
 func TestVersionUpdateCommandForNPMIncludesSkillInstaller(t *testing.T) {
 	t.Setenv("EVERYLINE_CLI_WRAPPER", "1")
-	const expected = "npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@blue --registry https://registry.npmjs.org"
+	const expected = "npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org"
 	if actual := versionUpdateCommand("https://updates.example.test/manifest.json", false); actual != expected {
 		t.Fatalf("updateCommand=%q，期望 %q", actual, expected)
 	}
@@ -350,11 +350,11 @@ func (transport versionHTTPTransport) RoundTrip(request *http.Request) (*http.Re
 }
 
 /*
-TestVersionNPMKeepsBlueChannel 验证历史 blue 版本可升级到正式版，并保持渠道缺失与误配置的 version 输出。
+TestVersionNPMUsesLatestChannel 验证历史 blue 版本通过 latest 升级到正式版，缺失或误配置时返回未知状态。
 入参：t *testing.T 为测试上下文。
-返回值：无；请求其他环境或把未知状态当成可更新时断言失败。
+返回值：无；请求错误渠道或把未知状态当成可更新时断言失败。
 */
-func TestVersionNPMKeepsBlueChannel(t *testing.T) {
+func TestVersionNPMUsesLatestChannel(t *testing.T) {
 	t.Setenv("EVERYLINE_CLI_WRAPPER", "1")
 	originalVersion := build.Version
 	build.Version = "0.1.10-blue.0"
@@ -365,7 +365,7 @@ func TestVersionNPMKeepsBlueChannel(t *testing.T) {
 		body   string
 		update bool
 	}{
-		{"new-blue", http.StatusOK, `{"version":"0.1.10-blue.1"}`, true},
+		{"historical-blue", http.StatusOK, `{"version":"0.1.10-blue.1"}`, false},
 		{"new-stable", http.StatusOK, `{"version":"0.1.11"}`, true},
 		{"missing-channel", http.StatusNotFound, `{}`, false},
 		{"wrong-environment", http.StatusOK, `{"version":"0.2.0-beta.0"}`, false},
@@ -375,8 +375,8 @@ func TestVersionNPMKeepsBlueChannel(t *testing.T) {
 			calls := 0
 			runtime.HTTP = &http.Client{Transport: versionHTTPTransport(func(request *http.Request) (*http.Response, error) {
 				calls++
-				if request.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/blue" {
-					t.Fatalf("跨环境请求: %s", request.URL)
+				if request.URL.String() != "https://registry.npmjs.org/@qfeius%2feveryline-cli/latest" {
+					t.Fatalf("请求渠道错误: %s", request.URL)
 				}
 				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body)), Header: make(http.Header)}, nil
 			})}
@@ -387,12 +387,12 @@ func TestVersionNPMKeepsBlueChannel(t *testing.T) {
 			if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 				t.Fatal(err)
 			}
-			if calls != 1 || output.UpdateRequired != tc.update || !strings.Contains(output.UpdateCommand, "@qfeius/everyline-cli@blue ") {
+			if calls != 1 || output.UpdateRequired != tc.update || !strings.Contains(output.UpdateCommand, "@qfeius/everyline-cli@latest ") {
 				t.Fatalf("requests=%d, result=%+v", calls, output)
 			}
 			if tc.update {
 				if output.IsLatest == nil || *output.IsLatest || output.CheckError != "" {
-					t.Fatalf("blue 新版判断错误: %+v", output)
+					t.Fatalf("latest 新版判断错误: %+v", output)
 				}
 			} else if output.IsLatest != nil || output.CheckError == "" {
 				t.Fatalf("渠道异常应返回未知状态: %+v", output)

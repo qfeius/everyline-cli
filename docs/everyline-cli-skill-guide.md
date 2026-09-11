@@ -26,7 +26,7 @@ OpenAI 官方文档将 Skill 定义为包含 `SKILL.md` 及可选 references、s
 
 Codex 本地任务直接使用宿主文件路径和 loopback OAuth。WorkBuddy 使用本机 CLI、系统凭证库和 Device Grant。豆包普通工作任务在本地电脑和远端沙箱中都使用 Device Grant，并固定 `SESSION_ID` 与初始工作目录；远端沙箱使用 Linux CLI，以及宿主提供的原始附件字节流或完整下载 URL，用户 macOS 路径不作为沙箱文件路径。
 
-CLI 和 Skill 应来自同一个 blue 发布版本（格式为 `<版本>-blue.<序号>`）。每次发布提升 `package.json` 统一版本，并将同版本 npm 包发布到 `blue` 渠道；`version.updateRequired` 触发业务结束后的延迟更新。安装前确认指定包、版本和环境属于 blue；blue 渠道缺失时保留原安装，不回退其他环境。
+CLI 和 Skill 应来自同一个发布版本，格式为 `主版本.次版本.补丁版本`。blue 与 release 共用全局递增版本号，并统一发布到 npm `latest` 渠道；`version.updateRequired` 触发业务结束后的延迟更新。安装前核验指定包的包名、版本和实际内容，`latest` 查询失败时保留原安装。npm 渠道和版本号不表示业务环境，本分支两项 Skill 仍按实际连接地址校验 blue Profile。
 
 ## 2. 全局安装包同步 CLI、Codex、WorkBuddy 和豆包本地 Skills
 
@@ -515,7 +515,7 @@ $everyline-review 使用 prod-user Profile 和 user 身份审查 /absolute/path/
 
 ### Skill 在上传前提示 CLI 版本不满足要求
 
-解析 `version --output json`。`updateRequired=true` 时先记住 `updateCommand`，继续完成当前完整业务流程；CLI 同时会在 stderr 输出 `code=UPDATE_PENDING`、当前版本、最新版本、更新命令和 `updateAfter=current_business_workflow`。全部业务 API 结束并保留结果后原样执行一次更新命令，再次检查版本；下一条新业务重新加载新版 Skill。
+解析 `version --output json`。`updateRequired=true` 时先记住 `updateCommand`，继续完成当前完整业务流程；CLI 同时会在 stderr 输出 `code=UPDATE_PENDING`、当前版本、最新版本、更新命令和 `updateAfter=current_business_workflow`。全部业务 API 结束并保留结果后执行一次更新命令；旧 CLI 若返回 `@blue` 更新目标，使用下文 `@latest` 安装命令并保留原 npm prefix。再次检查版本，下一条新业务重新加载新版 Skill，并按实际连接地址校验 blue Profile。
 
 CLI 与两项 Skill 更新并校验成功后展示“EveryLine CLI 已更新完成。目前支持合同审查，以及审查清单、规则和规则分组配置。”，复用同次授权中用户已选的身份；尚未选择时先单选 user/app，再对匹配的 Profile 和身份执行一次 `auth status`。只有 `authenticated=true` 时追加“当前已存在生效授权，可直接调用cli能力；”；`authenticated=false` 时追加“使用前需要先完成账号授权，我现在可以为你打开授权页面或生成授权链接。”，已有继续授权请求时直接按已选身份继续，否则等待用户确认。状态查询报错时保留未知状态并报告原始错误，不从 token 文件或安装成功推断授权有效。
 
@@ -557,10 +557,10 @@ everyline-cli version --output json
 
 也可以将 tgz 作为工作任务附件提供，然后告诉 Agent：“使用 everyline-review 技能，按附件 tgz 更新 CLI 和两项 Skill，不从 npm 查询最新版。”即使包版本相同，也按指定包安装并同步可管理的 Skill 内容；无需该包先发布到 npm。
 
-**从 npm blue 渠道更新到最新版**：
+**从 npm latest 渠道更新到最新版**：
 
 ```bash
-npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@blue --registry https://registry.npmjs.org
+npm install -g --foreground-scripts --allow-scripts=@qfeius/everyline-cli @qfeius/everyline-cli@latest --registry https://registry.npmjs.org
 everyline-cli version --output json
 ```
 

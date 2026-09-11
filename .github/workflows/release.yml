@@ -49,14 +49,14 @@ jobs:
           node <<'NODE'
           const { appendFileSync } = require('node:fs');
           const pkg = require('./package.json');
-          const { validateBlueRelease } = require('./scripts/package-version');
+          const { validateRelease } = require('./scripts/package-version');
           const version = process.env.GITHUB_REF_NAME.slice(1);
-          validateBlueRelease(version, pkg.publishConfig?.tag);
+          validateRelease(version, pkg.publishConfig?.tag, 'latest');
           if (pkg.version !== version) {
             throw new Error('发布标签必须为 v<package.json.version>');
           }
           if (pkg.name !== '@qfeius/everyline-cli') throw new Error('npm 包名不匹配');
-          // blue 制品只更新 blue 渠道，不修改 latest 或 beta。
+          // blue 与 release 都发布到 latest，环境由各分支的包内容决定。
           const channel = pkg.publishConfig.tag;
           appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nchannel=${channel}\n`);
           NODE
