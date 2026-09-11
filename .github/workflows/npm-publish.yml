@@ -76,5 +76,19 @@ jobs:
           RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
           NPM_DIST_TAG: ${{ steps.metadata.outputs.channel }}
         run: |
-          published_version=$(npm view "@qfeius/everyline-cli@$NPM_DIST_TAG" version --registry https://registry.npmjs.org)
-          test "$published_version" = "$RELEASE_VERSION"
+          # 注册表可能晚于 publish 成功更新；仅重试只读校验，重试间隔累计最多 180 秒。
+          for attempt in {1..13}; do
+            if published_version=$(npm view "@qfeius/everyline-cli@$NPM_DIST_TAG" version --registry https://registry.npmjs.org --prefer-online); then
+              echo "npm channel $NPM_DIST_TAG attempt $attempt/13: ${published_version:-<empty>}"
+              if [ "$published_version" = "$RELEASE_VERSION" ]; then
+                exit 0
+              fi
+            else
+              echo "npm channel $NPM_DIST_TAG attempt $attempt/13: lookup failed" >&2
+            fi
+            if [ "$attempt" -lt 13 ]; then
+              sleep 15
+            fi
+          done
+          echo "::error::npm channel $NPM_DIST_TAG did not reach $RELEASE_VERSION" >&2
+          exit 1

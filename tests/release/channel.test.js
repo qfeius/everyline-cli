@@ -51,6 +51,65 @@ test(`${workflowName} 发布前置检查只接受 blue 版本与渠道`, () => {
 }
 
 /**
+ * 验证发布后校验执行真实工作流 shell，允许注册表短暂返回旧版或查询失败，并在重试耗尽后严格失败。
+ * 入参：t（TestContext）负责清理临时桩脚本和调用记录；scenario 描述 npm 返回序列与预期重试次数。
+ * 返回值：void，提前失败、无限重试、重复发布或等待次数错误时断言失败。
+ */
+for (const scenario of [
+  { name: "先旧后新", responses: [{ version: "0.0.0-blue.0" }, { version: "0.0.0-blue.0" }, { version: pkg.version }], calls: 3, status: 0 },
+  { name: "暂时查询失败后成功", responses: [{ status: 1 }, { version: pkg.version }], calls: 2, status: 0 },
+  { name: "持续旧版最终失败", responses: [{ version: "0.0.0-blue.0" }], calls: 13, status: 1 },
+]) {
+test(`npm 发布后频道校验：${scenario.name}`, (t) => {
+  const root = mkdtempSync(join(tmpdir(), "everyline-channel-retry-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const workflow = readFileSync(join(__dirname, "../../.github/workflows/npm-publish.yml"), "utf8");
+  const block = workflow.match(/- name: Verify npm channel\r?\n[\s\S]*?\n        run: \|\r?\n((?:          [^\n]*(?:\n|$))*)/);
+  assert.ok(block, "未找到真实频道校验脚本");
+  const source = block[1].replace(/^          /gm, "");
+  const stubPath = join(root, "commands.cjs");
+  const logPath = join(root, "calls.ndjson");
+  // shell 函数仅替换外部 npm/sleep，工作流循环、条件和退出码仍由真实 bash 执行。
+  writeFileSync(stubPath, `
+const { appendFileSync, existsSync, readFileSync } = require("node:fs");
+const command = process.argv[2];
+const calls = existsSync(process.env.STUB_LOG) ? readFileSync(process.env.STUB_LOG, "utf8").trim().split("\\n").filter(Boolean).map(JSON.parse) : [];
+appendFileSync(process.env.STUB_LOG, JSON.stringify({ command, args: process.argv.slice(3) }) + "\\n");
+if (command === "npm") {
+  const responses = JSON.parse(process.env.STUB_RESPONSES);
+  const index = calls.filter((call) => call.command === "npm").length;
+  const response = responses[Math.min(index, responses.length - 1)];
+  if (response.status) { process.stderr.write("fixture registry temporarily unavailable\\n"); process.exit(response.status); }
+  process.stdout.write(response.version + "\\n");
+} else if (command !== "sleep") { process.exit(99); }
+`);
+  const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", `
+npm() { "$STUB_NODE" "$STUB_SCRIPT" npm "$@"; }
+sleep() { "$STUB_NODE" "$STUB_SCRIPT" sleep "$@"; }
+${source}`], {
+    encoding: "utf8",
+    timeout: 15000,
+    env: { ...process.env, RELEASE_VERSION: pkg.version, NPM_DIST_TAG: "blue", STUB_NODE: process.execPath, STUB_SCRIPT: stubPath, STUB_LOG: logPath, STUB_RESPONSES: JSON.stringify(scenario.responses) },
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, scenario.status, result.stdout + result.stderr);
+  const calls = readFileSync(logPath, "utf8").trim().split("\n").map(JSON.parse);
+  const queries = calls.filter((call) => call.command === "npm");
+  const waits = calls.filter((call) => call.command === "sleep");
+  assert.equal(queries.length, scenario.calls, "频道校验重试次数错误");
+  assert.equal(waits.length, scenario.calls - 1, "首次查询和最终退出不应额外等待");
+  assert.deepEqual(calls.map((call) => call.command), Array.from({ length: scenario.calls * 2 - 1 }, (_, index) => index % 2 ? "sleep" : "npm"));
+  for (const query of queries) {
+    assert.deepEqual(query.args, ["view", "@qfeius/everyline-cli@blue", "version", "--registry", "https://registry.npmjs.org", "--prefer-online"]);
+  }
+  for (const wait of waits) assert.deepEqual(wait.args, ["15"]);
+  for (const response of scenario.responses) {
+    if (response.version) assert.ok(result.stdout.includes(response.version), "应输出注册表实际返回的版本");
+  }
+});
+}
+
+/**
  * 验证 npm 源码发布生命周期拒绝其他环境，普通 CI 构建包仍可本地打包。
  * 入参：t（TestContext）负责隔离包根清理。
  * 返回值：void，发布绕过校验或 CI 制品被误拒绝时断言失败。
