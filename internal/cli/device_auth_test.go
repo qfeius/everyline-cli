@@ -277,6 +277,128 @@ func TestAuthDeviceInitAndComplete(t *testing.T) {
 }
 
 /*
+TestAuthDeviceInitPreservesConfigurationUntilAuthorization 验证 user 初始化跳过配置重写，app 仅在远端授权事务创建成功后切换身份。
+入参：t *testing.T 为测试上下文。
+返回值：无；冗余替换配置、提前切换身份或远端失败后旧凭据发生变化时通过测试失败报告。
+*/
+func TestAuthDeviceInitPreservesConfigurationUntilAuthorization(t *testing.T) {
+	for _, scenario := range []struct {
+		name          string
+		identity      config.IdentityKind
+		remoteFailure bool
+	}{
+		{name: "user preserves config file", identity: config.IdentityUser},
+		{name: "app remote failure preserves identity and credentials", identity: config.IdentityApp, remoteFailure: true},
+		{name: "app switches identity after remote success", identity: config.IdentityApp},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			runtime, _, _ := testRuntime(t)
+			// 使用真实临时配置文件，通过文件身份和字节检查是否发生过原子替换。
+			configPath := filepath.Join(t.TempDir(), "config.json")
+			runtime.Profiles = config.NewFileStore(configPath)
+			now := time.Date(2026, 9, 11, 11, 0, 0, 0, time.UTC)
+			runtime.Now = func() time.Time { return now }
+			var deviceCalls atomic.Int32
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/metadata":
+					_ = json.NewEncoder(writer).Encode(map[string]string{
+						"device_authorization_endpoint": server.URL + "/device", "token_endpoint": server.URL + "/token",
+					})
+				case "/device":
+					deviceCalls.Add(1)
+					// 远端尚未返回结果时保持原身份，失败的授权申请不应改变业务默认身份。
+					stored, err := runtime.Profiles.Get("test-user")
+					if err != nil || stored.DefaultIdentity != scenario.identity {
+						t.Errorf("远端返回成功前默认身份发生变化: identity=%s err=%v", stored.DefaultIdentity, err)
+					}
+					if scenario.remoteFailure {
+						http.Error(writer, "device service unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					_, _ = writer.Write([]byte(`{"device_code":"new-device-code","verification_uri_complete":"https://auth.example.com/device?user_code=NEW","expires_in":600}`))
+				default:
+					http.NotFound(writer, request)
+				}
+			}))
+			defer server.Close()
+			runtime.HTTP = server.Client()
+			profile := config.Profile{
+				Name: "test-user", BaseURL: server.URL, TokenURL: server.URL + "/token", AppID: "app-id",
+				OAuthMetadataURL: server.URL + "/metadata", OAuthDeviceClientID: "device-client",
+				OAuthBusinessType: "contract-review", OAuthScopes: []string{"contract-review:full"},
+				DefaultIdentity: scenario.identity, DefaultOutput: "json",
+			}
+			if err := runtime.Profiles.Add(profile); err != nil {
+				t.Fatal(err)
+			}
+			configBefore, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fileBefore, err := os.Stat(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// 在执行前序列化旧凭据，避免内存 Store 的共享指针掩盖原地修改。
+			previous := auth.DeviceCredential{
+				Pending: &auth.DevicePendingTransaction{Status: auth.DevicePending, DeviceCode: "old-device-code", ExpiresAt: now.Add(time.Minute)},
+				Token:   &auth.Token{AccessToken: "old-token", ExpiresAt: now.Add(-time.Hour)},
+			}
+			previousJSON, err := json.Marshal(previous)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deviceStore := &memoryDeviceCredentialStore{credentials: map[string]auth.DeviceCredential{profile.Name: previous}}
+			runtime.DeviceCredentials = deviceStore
+			err = Execute(context.Background(), runtime, []string{"auth", "init", "--profile", profile.Name, "--restart"})
+			if deviceCalls.Load() != 1 {
+				t.Fatalf("新建授权请求次数错误: calls=%d err=%v", deviceCalls.Load(), err)
+			}
+			configAfter, readErr := os.ReadFile(configPath)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			fileAfter, statErr := os.Stat(configPath)
+			if statErr != nil {
+				t.Fatal(statErr)
+			}
+			if scenario.identity == config.IdentityUser || scenario.remoteFailure {
+				if !os.SameFile(fileBefore, fileAfter) || !bytes.Equal(configBefore, configAfter) {
+					t.Error("user 初始化或远端授权失败不应替换配置文件或改变内容")
+				}
+			}
+			persisted, getErr := runtime.Profiles.Get(profile.Name)
+			if getErr != nil {
+				t.Fatal(getErr)
+			}
+			if scenario.remoteFailure {
+				if err == nil || persisted.DefaultIdentity != config.IdentityApp {
+					t.Errorf("远端失败后应保留 app 默认身份: identity=%s err=%v", persisted.DefaultIdentity, err)
+				}
+				stored, loadErr := deviceStore.Load(profile.Name)
+				storedJSON, marshalErr := json.Marshal(stored)
+				if loadErr != nil || marshalErr != nil || !bytes.Equal(storedJSON, previousJSON) {
+					t.Fatalf("失败后旧凭据发生变化: load=%v marshal=%v", loadErr, marshalErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.DefaultIdentity != config.IdentityUser || persisted.AppID != profile.AppID {
+				t.Fatalf("远端成功后应切换 user 身份并保留其他配置: identity=%s appID=%s", persisted.DefaultIdentity, persisted.AppID)
+			}
+			stored, err := deviceStore.Load(profile.Name)
+			if err != nil || stored.Pending == nil || stored.Pending.DeviceCode != "new-device-code" || stored.Profile == nil || stored.Profile.DefaultIdentity != config.IdentityUser || stored.Profile.AppID != "" || stored.Token != nil {
+				t.Fatalf("新授权事务或 user 配置快照未保存: %v", err)
+			}
+		})
+	}
+}
+
+/*
 TestAuthDeviceInitRenewsExpiredUserToken 验证过期凭证会生成一笔新授权，手动完成后恢复登录，有效凭证继续复用。
 入参：t *testing.T 为测试上下文。
 返回值：无；过期状态误报成功、重复创建事务、提前兑换或未恢复登录时通过测试失败报告。

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -65,9 +66,11 @@ func DefaultDir() (string, error) {
 	return filepath.Join(homeDir, ".everyline-cli"), nil
 }
 
-// Add 新增或覆盖同名 Profile，并保持现有默认选择不变。
-// 入参：profile Profile 为要持久化的非敏感连接配置。
-// 返回值：error，校验或落盘失败时非 nil。
+/*
+Add 新增或覆盖同名 Profile，保持现有默认选择，并跳过配置内容未变化的写入。
+入参：profile Profile 为要持久化的非敏感连接配置。
+返回值：error，校验或落盘失败时非 nil。
+*/
 func (store *FileStore) Add(profile Profile) error {
 	if profile.DefaultOutput == "" {
 		profile.DefaultOutput = "json"
@@ -85,6 +88,18 @@ func (store *FileStore) Add(profile Profile) error {
 		data, err := store.loadUnlocked()
 		if err != nil {
 			return err
+		}
+		if existing, exists := data.Profiles[profile.Name]; exists && data.Current != "" {
+			// 空 scopes 经 omitempty 落盘后等同于 nil，统一后比较完整配置。
+			if len(existing.OAuthScopes) == 0 {
+				existing.OAuthScopes = nil
+			}
+			if len(profile.OAuthScopes) == 0 {
+				profile.OAuthScopes = nil
+			}
+			if reflect.DeepEqual(existing, profile) {
+				return nil
+			}
 		}
 		data.Profiles[profile.Name] = profile
 		if data.Current == "" {
@@ -113,9 +128,11 @@ func (store *FileStore) List() ([]Profile, error) {
 	return profiles, nil
 }
 
-// Use 将已存在的 Profile 设为默认环境。
-// 入参：name string 为 Profile 名称。
-// 返回值：error，Profile 不存在或落盘失败时非 nil。
+/*
+Use 将已存在的 Profile 设为默认环境，重复选择当前环境时不写盘。
+入参：name string 为 Profile 名称。
+返回值：error，Profile 不存在或落盘失败时非 nil。
+*/
 func (store *FileStore) Use(name string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -128,14 +145,19 @@ func (store *FileStore) Use(name string) error {
 		if _, exists := data.Profiles[name]; !exists {
 			return fmt.Errorf("%w: %s", ErrProfileNotFound, name)
 		}
+		if data.Current == name {
+			return nil
+		}
 		data.Current = name
 		return store.saveUnlocked(data)
 	})
 }
 
-// SetDefaultIdentity 更新 Profile 的默认业务身份，不触碰其他连接字段或 token 缓存。
-// 入参：name string 为 Profile 名称；identity IdentityKind 为 app 或 user。
-// 返回值：error，Profile 不存在、身份非法或落盘失败时非 nil。
+/*
+SetDefaultIdentity 更新 Profile 的默认业务身份，相同身份时跳过写入，保留其他连接字段和 token 缓存。
+入参：name string 为 Profile 名称；identity IdentityKind 为 app 或 user。
+返回值：error，Profile 不存在、身份非法或落盘失败时非 nil。
+*/
 func (store *FileStore) SetDefaultIdentity(name string, identity IdentityKind) error {
 	parsed, err := ParseIdentityKind(string(identity))
 	if err != nil {
@@ -152,6 +174,9 @@ func (store *FileStore) SetDefaultIdentity(name string, identity IdentityKind) e
 		profile, exists := data.Profiles[name]
 		if !exists {
 			return fmt.Errorf("%w: %s", ErrProfileNotFound, name)
+		}
+		if profile.DefaultIdentity == parsed {
+			return nil
 		}
 		profile.DefaultIdentity = parsed
 		data.Profiles[name] = profile
