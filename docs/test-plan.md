@@ -22,6 +22,12 @@ go build ./cmd/everyline-cli
 - 本地上传业务文件名扩展名、无扩展名路径、2 MiB 边界与 multipart 字段。
 - 普通 V3 工作流的统一 deadline、上传、发起、多次轮询、详情顺序和失败阶段结果输出。
 - CLI 严格 JSON 输入、dry-run、stdout/stderr 与退出码。
+- 来源 hook：app/user 身份、三个业务模块、文件上传、JSON、GET 重试及多次轮询均重新探测；token 请求与纯本地命令不探测。
+- 来源字段未知/非法降级、原业务取消、5 秒超时回收辅助进程及 Unix 签名子进程。
+- 真实构建二进制到本机 HTTP 接收端的 Header 验证；不访问真实审查/计费接口。
+- Trace：`traceparent` 格式、非零随机 ID、与 `X-Log-Id` 同值、覆盖旧值且不修改调用方 Header；GET 重试同 Trace/新 Span，独立请求及工作流轮询各用新 Trace。
+- Trace 错误保留 `errors.Is/As`、API request ID 和原退出码；网络失败、退避取消可定位，写请求不因 Trace 自动重试；token 和本地校验不产生业务 Trace，verbose 不污染 stdout 或泄露凭据。
+
 - 帮助输出中各命令业务 flags 的连续顺序、help flag 位置及 Global Flags 分区。
 
 ## 真实环境冒烟

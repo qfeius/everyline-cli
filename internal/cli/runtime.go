@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
+	"git.qtech.cn/ai/everyline-cli/internal/invocation"
 	"git.qtech.cn/ai/everyline-cli/internal/output"
 )
 
@@ -27,6 +29,7 @@ type Runtime struct {
 	Error                 io.Writer
 	Renderer              output.Renderer
 	Now                   func() time.Time
+	InspectEnvironment    func(context.Context, int) invocation.Result
 }
 
 // NewRuntime 使用指定配置目录创建生产运行时。
@@ -50,6 +53,7 @@ func NewRuntime(configDir string, input io.Reader, stdout io.Writer, stderr io.W
 		Error:                 stderr,
 		Renderer:              output.DefaultRenderer{},
 		Now:                   time.Now,
+		InspectEnvironment:    invocation.Inspect,
 	}
 }
 

@@ -343,3 +343,17 @@ everyline-cli completion zsh
  npm 安装版通过 `everyline-cli version --output json` 查询 npm 官方源的 `latest` 版本，无需配置 manifest。发现新版后，在当前业务流程结束时执行返回的 `updateCommand`，由 npm 安装器同步 CLI 和本地 Skills；检查失败时最新版本状态保持未知。独立二进制安装仍使用 HTTPS manifest。
 
 两项 Skill 使用 `metadata.version` 标记实际加载版本。`npm pack` / `npm publish` 的 prepack 和 `scripts/build-skill-bundles.sh` 会自动从 `package.json` 同步该版本；发布前仍需以相同版本构建 CLI。每个会话首次使用时展示 Skill、CLI 和 npm 最新安装包版本，发现新版后在当前业务结束时更新；宿主文件已更新而会话仍旧时提示新建任务。
+
+## 请求来源识别
+
+业务请求默认在每次发送前探测调用客户端，包含 GET 重试及审查状态轮询。支持识别 doubao、doubaoWork、doubaoWorkmates、workbuddy、codex，无法识别时为 unknown；不会在安装、登录或 Profile 中固定客户端来源。
+
+请求携带 `X-Qfei-Channel-Type: cli`、`X-Qfei-Product-Code: contract-review`、`X-Qfei-Agent-Source-Type` 及四个诊断 Header。探测使用独立辅助进程，预算 5 秒，失败降级不阻断业务；探测耗时计入原有 `--timeout` / 工作流 deadline，原请求取消仍生效。token 请求和纯本地命令不运行业务探测。
+
+在原业务命令追加 `--verbose` 可在 stderr 查看实际附加的来源字段，stdout 仍只输出业务结果。字段定义和验收方式见 [来源 Header 接入说明](docs/invocation-source.md)。本功能不修改认证、业务参数或后端计费规则，不包含更新检测。
+
+## 请求 Trace
+
+业务请求与 contract-cli 使用相同的请求级协议：每个逻辑 HTTP 请求生成独立 Trace ID，并发送 `traceparent` 和同值的 `X-Log-Id`。GET 重试保持 Trace ID，每次尝试使用新 Span ID；上传、发起审查、每次轮询分别拥有独立 Trace。
+
+在业务命令追加 `--verbose`，stderr 的 `request_trace` 会展示实际发送的 Trace 信息。业务请求失败时，错误末尾包含 `trace_id=...`，可用于服务端日志查询；stdout 保持原业务结果。token 请求和本地命令不附加业务 Trace。协议、验证及服务端边界见 [请求 Trace 说明](docs/request-trace.md)。

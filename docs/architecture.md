@@ -22,6 +22,7 @@ Shell / Agent / CI
 - 业务 HTTP Adapter 只接受 `/open-apis/` 相对路径，防止 Bearer token 被转发到任意主机；自更新模块仅接受显式 HTTPS manifest 和制品地址。
 - GET 可对网络错误、429 和 5xx 做至多三次退避重试；POST 不自动重试；token、请求和退避共享一次 `--timeout` 总预算。
 - stdout 只承载业务结果，轮询 status 和 `--verbose` 进度只写 stderr。
+- `internal/tracecontext` 复用 contract-cli 的请求级 Trace 协议；统一 HTTP Adapter 在 token 获取后生成 Trace，在每次尝试发送前附加 `traceparent` 和 `X-Log-Id`。`Response.TraceID` 与远端 `RequestID` 独立，`TraceError.Unwrap` 保留错误分类与退出码；详情见 [请求 Trace](request-trace.md)。
 
 ## 兼容策略
 

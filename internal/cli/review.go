@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"git.qtech.cn/ai/everyline-cli/internal/config"
-	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 	"git.qtech.cn/ai/everyline-cli/internal/review"
 
 	"github.com/spf13/cobra"
@@ -551,8 +550,7 @@ func buildReviewService(runtime *Runtime, root *rootOptions) (*review.Service, c
 	if err := validateDeviceCredentialRuntime(runtime, identity); err != nil {
 		return nil, config.Profile{}, err
 	}
-	provider := newTokenProvider(runtime)
-	client := openplatform.NewClientForIdentity(profile, provider, runtime.HTTP, identity)
+	client := runtime.newOpenPlatformClient(profile, identity, root.Verbose)
 	return review.NewService(client, root.Timeout), profile, nil
 }
 

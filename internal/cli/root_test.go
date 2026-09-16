@@ -22,6 +22,7 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/build"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
+	"git.qtech.cn/ai/everyline-cli/internal/invocation"
 	"git.qtech.cn/ai/everyline-cli/internal/review"
 )
 
@@ -34,6 +35,7 @@ func testRuntime(t *testing.T) (*Runtime, *bytes.Buffer, *bytes.Buffer) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	runtime := NewRuntime(directory, strings.NewReader(""), stdout, stderr)
+	runtime.InspectEnvironment = func(context.Context, int) invocation.Result { return invocation.Analyze(nil, nil) }
 	runtime.Profiles = config.NewFileStore(filepath.Join(directory, "config.json"))
 	runtime.Tokens = auth.NewFileTokenStore(filepath.Join(directory, "tokens.json"))
 	runtime.Secrets = auth.NewFileSecretStore(filepath.Join(directory, "secrets.json"))

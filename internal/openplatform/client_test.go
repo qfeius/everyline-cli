@@ -318,8 +318,15 @@ func TestClientPreservesReauthenticatedUserSession(t *testing.T) {
 func TestClientRefreshesAndReplaysTrustedExpiredUserSession(t *testing.T) {
 	var businessAttempts atomic.Int32
 	var refreshAttempts atomic.Int32
+	var hookCalls atomic.Int32
+	headers := make(chan http.Header, 2)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/metadata" || request.URL.Path == "/token" {
+			if request.Header.Get("traceparent") != "" || request.Header.Get("X-Log-Id") != "" || request.Header.Get("X-Qfei-Channel-Type") != "" {
+				t.Error("OAuth request carried business headers")
+			}
+		}
 		switch request.URL.Path {
 		case "/metadata":
 			_, _ = writer.Write([]byte(`{"token_endpoint":"` + server.URL + `/token"}`))
@@ -334,6 +341,7 @@ func TestClientRefreshesAndReplaysTrustedExpiredUserSession(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"access_token":"new-user-token","token_type":"Bearer","refresh_token":"new-refresh","expires_in":3600}`))
 		case "/open-apis/review-rules/review-checklists":
 			businessAttempts.Add(1)
+			headers <- request.Header.Clone()
 			if request.Header.Get("Authorization") == "Bearer old-user-token" {
 				writer.WriteHeader(http.StatusBadRequest)
 				_, _ = writer.Write([]byte(`{"code":110004,"msg":"token验证失败","data":null}`))
@@ -360,7 +368,11 @@ func TestClientRefreshesAndReplaysTrustedExpiredUserSession(t *testing.T) {
 		OAuthMetadataURL: server.URL + "/metadata", OAuthClientID: "oauth-client",
 	}
 	provider := auth.NewProvider(store, server.Client(), time.Now)
-	client := NewClientForIdentity(profile, provider, server.Client(), config.IdentityUser)
+	client := NewClientForIdentity(profile, provider, server.Client(), config.IdentityUser, WithBeforeRequestHooks(func(_ context.Context, request *http.Request) error {
+		hookCalls.Add(1)
+		request.Header.Set("X-Qfei-Channel-Type", "cli")
+		return nil
+	}))
 	if _, err := client.Do(context.Background(), Request{
 		OperationID: "listReviewChecklists", Method: http.MethodGet,
 		Path: "/open-apis/review-rules/review-checklists", ContractInput: map[string]any{},
@@ -369,6 +381,14 @@ func TestClientRefreshesAndReplaysTrustedExpiredUserSession(t *testing.T) {
 	}
 	if businessAttempts.Load() != 2 || refreshAttempts.Load() != 1 {
 		t.Fatalf("businessAttempts=%d refreshAttempts=%d", businessAttempts.Load(), refreshAttempts.Load())
+	}
+	first, second := <-headers, <-headers
+	firstTrace, secondTrace := tracePattern.FindStringSubmatch(first.Get("traceparent")), tracePattern.FindStringSubmatch(second.Get("traceparent"))
+	if firstTrace == nil || secondTrace == nil {
+		t.Fatal("invalid replay Trace headers")
+	}
+	if firstTrace[1] != secondTrace[1] || firstTrace[2] == secondTrace[2] || first.Get("X-Log-Id") != firstTrace[1] || second.Get("X-Log-Id") != secondTrace[1] || hookCalls.Load() != 2 || first.Get("X-Qfei-Channel-Type") != "cli" || second.Get("X-Qfei-Channel-Type") != "cli" {
+		t.Fatal("refresh replay lost Trace or source hook")
 	}
 	stored, err := store.LoadForIdentity("test-user", config.IdentityUser)
 	if err != nil || stored.AccessToken != "new-user-token" || stored.RefreshToken != "new-refresh" {

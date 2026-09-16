@@ -18,6 +18,7 @@ import (
 	"git.qtech.cn/ai/everyline-cli/internal/auth"
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
+	"git.qtech.cn/ai/everyline-cli/internal/tracecontext"
 )
 
 const maxResponseBytes = 32 << 20
@@ -44,6 +45,7 @@ type Request struct {
 type Response struct {
 	Data      json.RawMessage
 	RequestID string
+	TraceID   string
 }
 
 // TokenProvider 是 OpenPlatformClient 获取 Bearer token 的依赖边界。
@@ -51,39 +53,65 @@ type TokenProvider interface {
 	Token(context.Context, config.Profile) (auth.Token, error)
 }
 
+// BeforeRequestHook 在每次 HTTP 尝试发送前执行，不参与 token 获取和刷新。
+type BeforeRequestHook func(context.Context, *http.Request) error
+
+type ClientOption func(*Client)
+
+// WithTraceOutput 将每次实际发送的 Trace 信息写入诊断输出，不输出凭据或请求体。
+func WithTraceOutput(output io.Writer) ClientOption {
+	return func(client *Client) { client.traceOutput = output }
+}
+
+// WithBeforeRequestHooks 注册有序请求钩子；复制切片，避免调用方后续修改注册内容。
+func WithBeforeRequestHooks(hooks ...BeforeRequestHook) ClientOption {
+	snapshot := append([]BeforeRequestHook(nil), hooks...)
+	return func(client *Client) {
+		client.beforeRequestHooks = append(client.beforeRequestHooks, snapshot...)
+	}
+}
+
 // Client 隐藏基础地址、鉴权、错误信封、超时和安全重试。
 type Client struct {
-	profile    config.Profile
-	tokens     TokenProvider
-	httpClient *http.Client
-	sleep      func(context.Context, time.Duration) error
-	identity   config.IdentityKind
+	profile            config.Profile
+	tokens             TokenProvider
+	httpClient         *http.Client
+	sleep              func(context.Context, time.Duration) error
+	identity           config.IdentityKind
+	beforeRequestHooks []BeforeRequestHook
+	traceOutput        io.Writer
 }
 
 // NewClient 创建生产 HTTP Adapter。
 // 入参：profile config.Profile 为环境配置；tokens TokenProvider 为鉴权来源；httpClient *http.Client 为可注入传输层。
 // 返回值：*Client，可执行受控的 /open-apis/ 请求。
-func NewClient(profile config.Profile, tokens TokenProvider, httpClient *http.Client) *Client {
-	return NewClientForIdentity(profile, tokens, httpClient, config.IdentityApp)
+func NewClient(profile config.Profile, tokens TokenProvider, httpClient *http.Client, options ...ClientOption) *Client {
+	return NewClientForIdentity(profile, tokens, httpClient, config.IdentityApp, options...)
 }
 
 // NewClientForIdentity 创建绑定业务身份的 HTTP Adapter。
 // 入参：profile config.Profile 为环境配置；tokens TokenProvider 为鉴权来源；httpClient *http.Client 为传输层；identity config.IdentityKind 为请求身份。
 // 返回值：*Client，可执行受控的 /open-apis/ 请求。
-func NewClientForIdentity(profile config.Profile, tokens TokenProvider, httpClient *http.Client, identity config.IdentityKind) *Client {
+func NewClientForIdentity(profile config.Profile, tokens TokenProvider, httpClient *http.Client, identity config.IdentityKind, options ...ClientOption) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{}
 	}
 	if identity == "" {
 		identity = config.IdentityApp
 	}
-	return &Client{profile: profile, tokens: tokens, httpClient: httpClient, sleep: sleepContext, identity: identity}
+	client := &Client{profile: profile, tokens: tokens, httpClient: httpClient, sleep: sleepContext, identity: identity}
+	for _, option := range options {
+		if option != nil {
+			option(client)
+		}
+	}
+	return client
 }
 
 // Do 执行远端请求，先校验路由与 Schema，再验证 HTTP 状态和接口专属业务成功码。
 // 入参：ctx context.Context 控制取消；operation Request 描述方法、路径、逻辑契约输入、body 和成功码。
 // 返回值：Response 为成功业务数据；error 为鉴权、网络或 API 错误。
-func (client *Client) Do(ctx context.Context, operation Request) (Response, error) {
+func (client *Client) Do(ctx context.Context, operation Request) (response Response, err error) {
 	identity := operation.Identity
 	if identity == "" {
 		identity = client.identity
@@ -120,6 +148,18 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 	if err != nil {
 		return Response{}, err
 	}
+	// 与 contract-cli 一致：业务请求拥有独立 Trace，安全重试共享它。
+	// token 获取及本地校验不生成业务 Trace，也不挂业务 Header。
+	requestTrace, err := tracecontext.NewRequestTrace()
+	if err != nil {
+		return Response{}, fmt.Errorf("创建请求 Trace: %w", err)
+	}
+	defer func() {
+		response.TraceID = requestTrace.TraceID
+		if err != nil {
+			err = &TraceError{TraceID: requestTrace.TraceID, Cause: err}
+		}
+	}()
 
 	maxAttempts := 1
 	if operation.Method == http.MethodGet {
@@ -127,7 +167,7 @@ func (client *Client) Do(ctx context.Context, operation Request) (Response, erro
 	}
 	userRefreshAttempted := false
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		response, retry, err := client.doOnce(operationContext, operation, token.AccessToken)
+		response, retry, err := client.doOnce(operationContext, operation, token.AccessToken, requestTrace)
 		if client.isExpiredUserSession(identity, err) && !userRefreshAttempted {
 			userRefreshAttempted = true
 			refreshed, refreshErr := client.refreshUserSession(operationContext, identity, token.AccessToken)
@@ -249,7 +289,7 @@ func requestContractInput(operation Request) (any, error) {
 // doOnce 执行单次请求并判断是否允许 GET 安全重试。
 // 入参：ctx context.Context 控制取消；operation Request 为远端操作；accessToken string 为 Bearer token。
 // 返回值：Response 为业务数据；bool 表示错误是否可重试；error 为本次失败原因。
-func (client *Client) doOnce(ctx context.Context, operation Request, accessToken string) (Response, bool, error) {
+func (client *Client) doOnce(ctx context.Context, operation Request, accessToken string, requestTrace tracecontext.RequestTrace) (Response, bool, error) {
 	requestURL := strings.TrimRight(client.profile.BaseURLFor(operation.Identity), "/") + operation.Path
 	if len(operation.Query) > 0 {
 		requestURL += "?" + operation.Query.Encode()
@@ -267,6 +307,27 @@ func (client *Client) doOnce(ctx context.Context, operation Request, accessToken
 		}
 	}
 
+	for _, hook := range client.beforeRequestHooks {
+		if err := ctx.Err(); err != nil {
+			return Response{}, false, err
+		}
+		if hook != nil {
+			if err := hook(ctx, request); err != nil {
+				return Response{}, false, err
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return Response{}, false, err
+	}
+	// 最后统一附加，覆盖调用方/钩子中的旧值，保证两个 Header 使用同一 Trace ID。
+	if err := requestTrace.Apply(request.Header); err != nil {
+		return Response{}, false, fmt.Errorf("附加请求 Trace: %w", err)
+	}
+	if client.traceOutput != nil {
+		_, _ = fmt.Fprintf(client.traceOutput, "request_trace operation=%q method=%q trace_id=%q traceparent=%q\n",
+			operation.OperationID, operation.Method, requestTrace.TraceID, request.Header.Get(tracecontext.HeaderTraceparent))
+	}
 	httpResponse, err := client.httpClient.Do(request)
 	if err != nil {
 		var networkError net.Error

@@ -12,6 +12,8 @@
 --no-color
 ```
 
+业务命令的 `--verbose` 会在 stderr 输出 `invocation_source` 和 `request_trace`；失败错误包含 `trace_id`，stdout 仍保留原有业务格式。Trace 按逻辑 HTTP 请求生成，重试复用 Trace ID，每次轮询使用新 Trace。详见 [请求 Trace](request-trace.md)。
+
 参数优先级：`--profile` 覆盖当前 Profile，仅对本次命令生效；身份选择优先级为 `--as` > Profile 默认身份 > `app`；输出格式优先级为 `--output` > Profile 默认输出 > `json`。用户显式配置的 `table/yaml/raw` 不会被覆盖。
 
 ## Profile 与鉴权

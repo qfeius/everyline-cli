@@ -5,7 +5,6 @@ import (
 
 	"git.qtech.cn/ai/everyline-cli/internal/config"
 	"git.qtech.cn/ai/everyline-cli/internal/contracts"
-	"git.qtech.cn/ai/everyline-cli/internal/openplatform"
 	"git.qtech.cn/ai/everyline-cli/internal/rule"
 
 	"github.com/spf13/cobra"
@@ -499,8 +498,7 @@ func buildRuleService(runtime *Runtime, root *rootOptions) (*rule.Service, confi
 	if err := validateDeviceCredentialRuntime(runtime, identity); err != nil {
 		return nil, config.Profile{}, err
 	}
-	provider := newTokenProvider(runtime)
-	client := openplatform.NewClientForIdentity(profile, provider, runtime.HTTP, identity)
+	client := runtime.newOpenPlatformClient(profile, identity, root.Verbose)
 	return rule.NewService(client, root.Timeout), profile, nil
 }
 
