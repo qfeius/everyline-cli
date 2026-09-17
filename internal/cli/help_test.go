@@ -198,7 +198,7 @@ func TestEverylineSkillReadinessMatchesLiveHelp(t *testing.T) {
 }
 
 /*
-TestSplitEverylineSkillsMatchCurrentCLI 验证两项职责分离 Skill 覆盖三宿主授权、沙箱附件和签名结果链接。
+TestSplitEverylineSkillsMatchCurrentCLI 验证两项职责分离 Skill 覆盖三宿主授权、沙箱附件、静态风险图表和签名结果链接。
 入参：t *testing.T 为 Go 测试上下文。
 返回值：无；任一 Skill 缺少当前 CLI 的关键命令、字段映射或宿主约束时通过测试失败报告差异。
 */
@@ -303,10 +303,10 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		t.Fatal("两个 Skill 的依赖方向错误")
 	}
 
-	// 审查 Skill 的输出协议必须把签名 URL 当作原子值，文件准备则覆盖路径、stdin 与 URL 三种来源。
+	// 审查 Skill 保留静态风险图表及签名 URL 原子值约束，文件准备覆盖路径、stdin 与 URL 三种来源。
 	for _, expected := range []string{
 		"不可拆分的字符串",
-		"不展示图表",
+		"使用纯静态 HTML/SVG 渲染两个图表",
 		"Markdown 文字链接“查看详情”",
 		"**基础信息**",
 		"**审查概览**",
@@ -355,7 +355,7 @@ func TestSplitEverylineSkillsMatchCurrentCLI(t *testing.T) {
 		"不展开原始终态对象",
 		"链接文字固定为“查看详情”",
 		"其他服务端字段",
-		"最终回复使用以下模板",
+		"最终回复按以下模板自上而下输出",
 	} {
 		if !strings.Contains(contents["reviewFlow"], expected) {
 			t.Fatalf("everyline-review 流程缺少 %q", expected)
@@ -1094,17 +1094,23 @@ func helpCommandNames(help string) []string {
 }
 
 /*
-TestReviewOutputDocsExcludeCharts 验证随包指南与 Skill 均采用无图表输出。
+TestReviewOutputDocsMatchStaticCharts 验证随包指南与 Skill 均采用新版静态风险图表输出。
 入参：t *testing.T 为测试上下文。
-返回值：无，旧图表要求残留时报告失败。
+返回值：无；缺少静态图表要求或残留旧布局时报告失败。
 */
-func TestReviewOutputDocsExcludeCharts(t *testing.T) {
+func TestReviewOutputDocsMatchStaticCharts(t *testing.T) {
 	for _, path := range []string{"../../docs/everyline-cli-skill-guide.md", "../../docs/everyline-cli-skill-interaction-scenarios.md", "../../skills/everyline-review/SKILL.md"} {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, obsolete := range []string{"饼图", "条形图", "横排双图", "环形图"} {
+		// 三份对外文档均明确静态渲染与上下布局，避免指南和实际 Skill 各自采用不同协议。
+		for _, expected := range []string{"静态 HTML/SVG", "上下竖排", "环形图", "条形图"} {
+			if !strings.Contains(string(body), expected) {
+				t.Errorf("%s 缺少静态图表规则 %s", path, expected)
+			}
+		}
+		for _, obsolete := range []string{"不展示图表", "横排双图"} {
 			if strings.Contains(string(body), obsolete) {
 				t.Errorf("%s 残留图表规则 %s", path, obsolete)
 			}

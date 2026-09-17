@@ -33,7 +33,8 @@ unzip -p "$output_dir/everyline-review-skill.zip" references/setup.md | grep -F 
 unzip -p "$output_dir/everyline-review-skill.zip" references/setup.md | grep -F 'nextAction=reload_skills' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F -- '--stdin --name <filename>' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '0. 通用审查清单（系统内置）' >/dev/null
-unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不展示图表' >/dev/null
+# 发布制品必须包含新版静态风险图表要求，避免继续发布旧的禁止图表模板。
+unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '使用纯静态 HTML/SVG 渲染两个图表' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不得单独展示 `taskId`' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '不追加“已完成”' >/dev/null
 unzip -p "$output_dir/everyline-review-skill.zip" SKILL.md | grep -F '[查看详情](<REVIEW_DETAIL_URL>)' >/dev/null
